@@ -21,6 +21,17 @@ pub fn workspace(ui: &mut egui::Ui, ws: &mut Workspace, theme: Appearance) -> Op
     if ui.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::R))) {
         ws.refresh();
     }
+    // Pictures dropped on the window go with the next message (in the thread if one is open).
+    let dropped = ui.input(|i| i.raw.dropped_files.clone());
+    if ws.open.is_some() {
+        for file in dropped {
+            let name = file.path().file_name().map_or_else(|| "picture".into(), |n| n.to_string_lossy().into_owned());
+            match file.bytes() {
+                Ok(bytes) => ws.attach(ws.thread.is_some(), &name, bytes),
+                Err(e) => ws.error = Some(format!("{name}: {e}")),
+            }
+        }
+    }
     egui::CentralPanel::default().frame(Frame::new().fill(p.canvas)).show(ui, |ui| {
         let full = ui.max_rect();
         let bar = Rect::from_min_size(full.min, vec2(full.width(), metrics::TOP_BAR));

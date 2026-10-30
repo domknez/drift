@@ -59,8 +59,11 @@ pub enum Picture {
     },
     /// Members' ids and names, a few of them.
     Group(Vec<(String, String)>),
-    /// An emoji by the service's key for it (`like`, `1f440_eyes`).
+    /// An emoji by the service's key for it (`like`, `1f440_eyes`, or a tenant's own
+    /// `<tenant>;<object id>`).
     Emoji(String),
+    /// An image in a message, by its address.
+    Image(String),
 }
 
 impl Picture {
@@ -71,6 +74,7 @@ impl Picture {
             Picture::Team { group, etag, .. } => format!("team:{group}:{etag}"),
             Picture::Group(members) => format!("group:{}", members.iter().map(|(id, _)| id.as_str()).collect::<Vec<_>>().join(",")),
             Picture::Emoji(key) => format!("emoji:{key}"),
+            Picture::Image(url) => format!("image:{url}"),
         }
     }
 }
@@ -164,6 +168,10 @@ impl Reaction {
     /// The emoji drawn for a reaction key. Keys are names (`like`), or start with
     /// the emoji's code points (`1f440_eyes`); a `-tone<n>` suffix picks a skin tone.
     pub fn emoji(&self) -> String {
+        // A tenant's own emoji has only a picture.
+        if self.key.contains(';') {
+            return "✦".into();
+        }
         let (name, tone) = match self.key.rsplit_once("-tone") {
             Some((name, t)) => (name, t.parse::<u32>().ok().filter(|t| (1..=5).contains(t))),
             None => (self.key.as_str(), None),

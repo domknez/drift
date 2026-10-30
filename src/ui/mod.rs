@@ -27,7 +27,8 @@ pub fn run() -> eframe::Result {
     let viewport = egui::ViewportBuilder::default()
         .with_title("drift")
         .with_inner_size(metrics::WINDOW_SIZE)
-        .with_min_inner_size(metrics::MIN_WINDOW_SIZE);
+        .with_min_inner_size(metrics::MIN_WINDOW_SIZE)
+        .with_drag_and_drop(true);
     // The sidebar runs up under a transparent title bar, the traffic lights over it.
     #[cfg(target_os = "macos")]
     let viewport = viewport.with_fullsize_content_view(true).with_title_shown(false).with_titlebar_shown(false);

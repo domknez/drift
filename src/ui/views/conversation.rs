@@ -68,7 +68,8 @@ fn focus_composer(ui: &Ui, reply: bool) {
 /// The composer's height: taller with a "replying to" or "editing" line on top.
 pub fn composer_height(ws: &Workspace, reply: bool) -> f32 {
     let banner = ws.quoting.as_ref().is_some_and(|(r, _)| *r == reply) || ws.editing.as_ref().is_some_and(|(r, _)| *r == reply);
-    if banner { COMPOSER_HEIGHT + BANNER } else { COMPOSER_HEIGHT }
+    let pictures = ws.attachments.iter().any(|(r, _)| *r == reply);
+    COMPOSER_HEIGHT + if banner { BANNER } else { 0.0 } + if pictures { BANNER } else { 0.0 }
 }
 
 pub fn show(ui: &mut Ui, ws: &mut Workspace) {
@@ -671,6 +672,41 @@ pub fn composer(ui: &mut Ui, ws: &mut Workspace, rect: Rect, hint: &str, reply: 
         rect.min.y += BANNER - 4.0;
     }
 
+    // Pictures waiting to go, as chips with their name, size and ×.
+    if ws.attachments.iter().any(|(r, _)| *r == reply) {
+        let line = Rect::from_min_max(
+            pos2(rect.left() + metrics::PAGE_PAD, rect.top() + 6.0),
+            pos2(rect.right() - metrics::PAGE_PAD, rect.top() + BANNER),
+        );
+        let mut row = ui.new_child(egui::UiBuilder::new().max_rect(line).layout(Layout::left_to_right(Align::Center)));
+        row.spacing_mut().item_spacing.x = 6.0;
+        let mut remove = None;
+        for (i, (r, a)) in ws.attachments.iter().enumerate() {
+            if *r != reply {
+                continue;
+            }
+            Frame::new()
+                .fill(p.surface)
+                .corner_radius(CornerRadius::same(10))
+                .inner_margin(Margin { left: 10, right: 4, top: 4, bottom: 4 })
+                .show(&mut row, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 6.0;
+                        widgets::icon(ui, Icon::Image, 15.0, p.accent);
+                        ui.label(RichText::new(&a.name).font(ty::small_strong()).color(p.text));
+                        ui.label(RichText::new(format!("{}×{}", a.size.0, a.size.1)).font(ty::meta()).color(p.faint));
+                        if widgets::icon_button(ui, Icon::Close, "Remove").clicked() {
+                            remove = Some(i);
+                        }
+                    });
+                });
+        }
+        if let Some(i) = remove {
+            ws.attachments.remove(i);
+        }
+        rect.min.y += BANNER - 4.0;
+    }
+
     let inner = Rect::from_min_max(
         pos2(rect.left() + metrics::PAGE_PAD, rect.top() + 8.0),
         pos2(rect.right() - metrics::PAGE_PAD, rect.bottom() - 16.0),
@@ -678,7 +714,7 @@ pub fn composer(ui: &mut Ui, ws: &mut Workspace, rect: Rect, hint: &str, reply: 
     ui.painter().rect_filled(inner, CornerRadius::same(16), p.surface);
     let sending = ws.sending();
     let send_rect = Rect::from_min_size(pos2(inner.right() - 8.0 - 40.0, inner.center().y - 20.0), vec2(40.0, 40.0));
-    let tools_w = 2.0 * 32.0;
+    let tools_w = 3.0 * 32.0;
     let text_rect =
         Rect::from_min_max(pos2(inner.left() + 16.0, inner.top() + 6.0), pos2(send_rect.left() - tools_w - 10.0, inner.bottom() - 6.0));
 
@@ -719,7 +755,7 @@ pub fn composer(ui: &mut Ui, ws: &mut Workspace, rect: Rect, hint: &str, reply: 
         .return_key(Some(egui::KeyboardShortcut::new(egui::Modifiers::SHIFT, egui::Key::Enter)));
     let response = t.add_enabled(!sending, edit);
     let enter = response.has_focus() && t.input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.shift);
-    let has_text = !ws.draft(reply).trim().is_empty();
+    let has_text = !ws.draft(reply).trim().is_empty() || ws.attachments.iter().any(|(r, _)| *r == reply);
 
     // People to mention, above the box, while an @word is being typed.
     if let Some(people) = people.filter(|p| !p.is_empty())
@@ -769,6 +805,19 @@ pub fn composer(ui: &mut Ui, ws: &mut Workspace, rect: Rect, hint: &str, reply: 
     let tools = Rect::from_min_max(pos2(send_rect.left() - tools_w - 6.0, inner.top()), pos2(send_rect.left() - 6.0, inner.bottom()));
     let mut row = ui.new_child(egui::UiBuilder::new().max_rect(tools).layout(Layout::left_to_right(Align::Center)));
     row.spacing_mut().item_spacing.x = 2.0;
+    if widgets::icon_button(&mut row, Icon::Clip, "Attach pictures (or drop them on the window)").clicked()
+        && let Some(files) =
+            rfd::FileDialog::new().set_title("Attach pictures").add_filter("Pictures", &["png", "jpg", "jpeg"]).pick_files()
+    {
+        for file in files {
+            let name = file.file_name().map_or_else(|| "picture".into(), |n| n.to_string_lossy().into_owned());
+            match std::fs::read(&file) {
+                Ok(bytes) => ws.attach(reply, &name, bytes),
+                Err(e) => ws.error = Some(format!("{name}: {e}")),
+            }
+        }
+        response.request_focus();
+    }
     let smile = widgets::icon_button(&mut row, Icon::Smile, "Emoji");
     let mut emoji = None;
     egui::Popup::menu(&smile)

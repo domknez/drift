@@ -55,6 +55,8 @@ pub struct Skype {
     pub aggregator: String,
     /// `https://teams.microsoft.com/api/mt/part/<partition>`
     pub middle_tier: String,
+    /// Where pictures and files live: `https://<region>-prod.asyncgw.teams.microsoft.com`
+    pub ams: String,
     expires: i64,
 }
 
@@ -201,8 +203,16 @@ fn parse_authz(v: &Value) -> Option<Skype> {
     let chat_service = gtms["chatService"].as_str().map_or_else(|| format!("https://{region}.ng.msg.teams.microsoft.com"), str::to_string);
     let aggregator = gtms["chatSvcAggAfd"].as_str().map_or_else(|| "https://teams.microsoft.com/api/csa".to_string(), str::to_string);
     let middle_tier = gtms["middleTier"].as_str().map_or_else(|| format!("https://teams.microsoft.com/api/mt/{region}"), str::to_string);
+    let ams = gtms["ams"].as_str().or(gtms["amsV2"].as_str()).unwrap_or("https://teams.microsoft.com/api/amsMTProd").to_string();
     let trim = |s: String| s.trim_end_matches('/').to_string();
-    Some(Skype { token, chat_service: trim(chat_service), aggregator: trim(aggregator), middle_tier: trim(middle_tier), expires })
+    Some(Skype {
+        token,
+        chat_service: trim(chat_service),
+        aggregator: trim(aggregator),
+        middle_tier: trim(middle_tier),
+        ams: trim(ams),
+        expires,
+    })
 }
 
 #[cfg(test)]

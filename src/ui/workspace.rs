@@ -37,6 +37,8 @@ pub struct Workspace {
     pub quoting: Option<(bool, Message)>,
     /// One of the user's messages being edited (true: in the thread's composer).
     pub editing: Option<(bool, String)>,
+    /// Pictures to send with the next message (true: in the thread's composer).
+    pub attachments: Vec<(bool, Attachment)>,
     pub me: String,
     /// The signed-in user's id (for their picture).
     pub me_id: String,
@@ -71,6 +73,15 @@ pub struct Workspace {
     chores: Vec<Load<bool, Error>>,
     /// The conversation and message last marked read, so it's marked once.
     marked: Option<(String, String)>,
+}
+
+/// A picture waiting in a composer to go with the next message.
+#[derive(Clone)]
+pub struct Attachment {
+    pub name: String,
+    pub bytes: Arc<Vec<u8>>,
+    pub mime: &'static str,
+    pub size: (u32, u32),
 }
 
 /// The tab picked in the top bar: what the list shows.
@@ -115,6 +126,7 @@ impl Workspace {
             reply_draft: String::new(),
             quoting: None,
             editing: None,
+            attachments: Vec::new(),
             directory: None,
             directory_load: Load::Idle,
             directory_at: None,
@@ -154,21 +166,47 @@ impl Workspace {
             open.clone()
         };
         let text = self.draft(reply).trim().to_string();
-        if text.is_empty() || self.sending.is_running() {
+        let pictures: Vec<Attachment> = self.attachments.iter().filter(|(r, _)| *r == reply).map(|(_, a)| a.clone()).collect();
+        if (text.is_empty() && pictures.is_empty()) || self.sending.is_running() {
             return;
         }
-        let mut message = markdown::to_html(&text, &self.people());
+        self.attachments.retain(|(r, _)| *r != reply);
+        let mut message = if text.is_empty() { markdown::Outgoing::default() } else { markdown::to_html(&text, &self.people()) };
         if let Some(quoted) = self.quoting.take_if(|(r, _)| *r == reply).map(|(_, m)| m) {
             message.html = quote_html(&quoted) + &message.html;
         }
         let editing = self.editing.take_if(|(r, _)| *r == reply).map(|(_, id)| id);
         self.draft_mut(reply).clear();
         let backend = self.backend.clone();
-        self.sending = Load::start(ctx, move || match editing {
-            // An edit of a reply in a thread still lives in the channel's conversation.
-            Some(id) => backend.edit(&open, &id, &message),
-            None => backend.send(&to, &message),
+        self.sending = Load::start(ctx, move || {
+            // Pictures go up first; the message then shows them under its text.
+            for picture in &pictures {
+                let url = backend.upload_image(&to, &picture.name, &picture.bytes, picture.mime)?;
+                let (w, h) = picture.size;
+                let scale = (300.0 / w.max(1) as f32).min(1.0);
+                message.html.push_str(&format!(
+                    "<p><img itemscope=\"\" itemtype=\"http://schema.skype.com/AMSImage\" src=\"{url}\" width=\"{}\" height=\"{}\"></p>",
+                    (w as f32 * scale).round(),
+                    (h as f32 * scale).round()
+                ));
+            }
+            match editing {
+                // An edit of a reply in a thread still lives in the channel's conversation.
+                Some(id) => backend.edit(&open, &id, &message),
+                None => backend.send(&to, &message),
+            }
         });
+    }
+
+    /// Add a picture to the composer (the thread's when `reply`); only pictures can go
+    /// for now, so anything else is refused, with the reason.
+    pub fn attach(&mut self, reply: bool, name: &str, bytes: Vec<u8>) {
+        match super::pictures::image_info(&bytes) {
+            Some((w, h, mime)) => {
+                self.attachments.push((reply, Attachment { name: name.to_string(), bytes: Arc::new(bytes), mime, size: (w, h) }))
+            }
+            None => self.error = Some(format!("{name}: only pictures (PNG or JPEG) can be sent for now")),
+        }
     }
 
     pub fn draft(&self, reply: bool) -> &String {
@@ -454,6 +492,7 @@ impl Workspace {
         self.reply_draft.clear();
         self.quoting = None;
         self.editing = None;
+        self.attachments.clear();
         // Read here; Teams itself still counts it until it's read there.
         if let Some(c) = self.directory.as_mut().and_then(|d| d.conversations.iter_mut().find(|c| c.id == id)) {
             c.unread = false;

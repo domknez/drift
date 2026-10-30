@@ -20,6 +20,8 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Mutex;
 
+/// AMS only takes requests from a client calling itself this.
+const AMS_AGENT: &str = "SkypeOfficialClient/0/0.0.0.0";
 /// Messages fetched when a conversation opens.
 const PAGE: usize = 200;
 /// The kinds of conversation the chat service lists.
@@ -79,6 +81,26 @@ impl Teams {
             }
         }
         Err(Error::SignedOut)
+    }
+
+    /// A file from AMS (an image in a message, a tenant's emoji), with the skype
+    /// token where AMS takes it.
+    fn ams_get(&self, url: &str) -> Result<Vec<u8>> {
+        let host = url.split('/').nth(2).unwrap_or("");
+        let ams = host.ends_with(".asyncgw.teams.microsoft.com") || host.ends_with(".asm.skype.com") || url.contains("/api/amsMTProd");
+        if !ams {
+            return http::fetch(url, &[]);
+        }
+        let token = format!("skype_token {}", self.session().skype()?.token);
+        http::fetch(
+            url,
+            &[
+                ("Authorization", &token),
+                ("User-Agent", AMS_AGENT),
+                ("X-Ms-Client-Type", "SkypeSpacesWeb"),
+                ("X-Ms-Client-Version", "1.0.0.0"),
+            ],
+        )
     }
 
     /// The body of a send or an edit: the HTML, and who it mentions.
@@ -320,6 +342,32 @@ impl Teams {
                 ));
             }
         }
+        {
+            let chats: Vec<String> =
+                parse::conversations(&list).into_iter().filter(|c| c.kind == Kind::Chat).take(15).map(|c| c.id).collect();
+            let mut custom = None;
+            for id in chats {
+                let path = format!(
+                    "/v1/users/ME/conversations/{}/messages?view=msnp24Equivalent|supportsMessageProperties&pageSize={PAGE}&startTime=1",
+                    http::encode(&id)
+                );
+                if let Ok(answer) = self.chat_service(&path) {
+                    custom = parse::messages(&answer, "").into_iter().flat_map(|m| m.reactions).map(|r| r.key).find(|k| k.contains(';'));
+                }
+                if custom.is_some() {
+                    break;
+                }
+            }
+            match custom {
+                Some(key) => match self.picture(&Picture::Emoji(key)) {
+                    Ok(bytes) => {
+                        out.push_str(&format!("== a custom emoji: {} bytes, starts {:02x?}\n", bytes.len(), &bytes[..bytes.len().min(4)]))
+                    }
+                    Err(e) => out.push_str(&format!("== a custom emoji: {e}\n")),
+                },
+                None => out.push_str("== no custom emoji found\n"),
+            }
+        }
         let me = Picture::Person { id: self.my_id(), name: Backend::me(self) };
         match self.picture(&me) {
             Ok(bytes) => out.push_str(&format!("== own picture: {} bytes, starts {:02x?}\n", bytes.len(), &bytes[..bytes.len().min(4)])),
@@ -449,6 +497,25 @@ impl Backend for Teams {
         self.chat_write(Method::Post, &path, &self.message_body(message))
     }
 
+    fn upload_image(&self, conversation: &str, name: &str, bytes: &[u8], mime: &str) -> Result<String> {
+        // Two steps: register the object (readable by the conversation), then its bytes.
+        let skype = self.session().skype()?;
+        let token = format!("skype_token {}", skype.token);
+        let headers = [
+            ("Authorization", token.as_str()),
+            ("User-Agent", AMS_AGENT),
+            ("X-Ms-Client-Type", "SkypeSpacesWeb"),
+            ("X-Ms-Client-Version", "1.0.0.0"),
+        ];
+        let base = conversation.split(";messageid=").next().unwrap_or(conversation);
+        let register =
+            serde_json::json!({"type": "pish/image", "filename": name, "permissions": {base: ["read"]}, "sharingMode": "Inline"});
+        let answer = http::request(Method::Post, &format!("{}/v1/objects", skype.ams), &headers, Body::Json(&register))?;
+        let id = answer["id"].as_str().ok_or_else(|| Error::Service("no id for the upload".into()))?;
+        http::request(Method::Put, &format!("{}/v1/objects/{id}/content/imgpsh", skype.ams), &headers, Body::Bytes(bytes, mime))?;
+        Ok(format!("{}/v1/objects/{id}/views/imgo", skype.ams))
+    }
+
     fn edit(&self, conversation: &str, message: &str, with: &Outgoing) -> Result<()> {
         let path = format!("/v1/users/ME/conversations/{}/messages/{message}", http::encode(conversation));
         self.chat_write(Method::Put, &path, &self.message_body(with))
@@ -494,8 +561,16 @@ impl Backend for Teams {
     }
 
     fn picture(&self, picture: &Picture) -> Result<Vec<u8>> {
-        if let Picture::Emoji(key) = picture {
-            return emoji(key);
+        match picture {
+            // A tenant's own emoji is an object in AMS, by the id after the `;`.
+            Picture::Emoji(key) if key.contains(';') => {
+                let id = key.rsplit(';').next().unwrap_or("");
+                let ams = self.session().skype()?.ams;
+                return self.ams_get(&format!("{ams}/v1/objects/{id}/views/imgo"));
+            }
+            Picture::Emoji(key) => return emoji(key),
+            Picture::Image(url) => return self.ams_get(url),
+            _ => {}
         }
         let (skype, token) = {
             let mut session = self.session();
@@ -513,7 +588,7 @@ impl Backend for Teams {
                 http::encode(etag),
                 http::encode(name)
             ),
-            Picture::Emoji(_) => unreachable!("emoji are fetched above"),
+            Picture::Emoji(_) | Picture::Image(_) => unreachable!("fetched above"),
             Picture::Group(members) => {
                 let users: Value = members.iter().map(|(id, name)| serde_json::json!({"userId": id, "displayName": name})).collect();
                 format!("{base}/beta/users/{object_id}/mergedProfilePicturev2?usersInfo={}&size=HR64x64", http::encode(&users.to_string()))

@@ -36,6 +36,11 @@ pub enum Block {
     Quote(Vec<Inline>, Option<String>),
     /// Preformatted text, spaces kept.
     Code(String),
+    /// A picture in the message: where it is, and its size if the message says.
+    Image {
+        url: String,
+        size: Option<(u32, u32)>,
+    },
 }
 
 /// Plain text, as it is.
@@ -55,6 +60,7 @@ pub fn flatten(body: &[Block]) -> String {
             Block::Text(runs) | Block::Quote(runs, _) => words.extend(runs.iter().map(|r| r.text.as_str())),
             Block::Table { rows, .. } => words.extend(rows.iter().flatten().flatten().map(|r| r.text.as_str())),
             Block::Code(text) => words.push(text),
+            Block::Image { .. } => words.push("[image]"),
         }
     }
     words.join(" ").split_whitespace().collect::<Vec<_>>().join(" ")
@@ -96,6 +102,7 @@ pub fn to_markdown(body: &[Block]) -> String {
             Block::Text(r) => runs(r),
             Block::Quote(r, _) => runs(r).lines().map(|l| format!("> {l}")).collect::<Vec<_>>().join("\n"),
             Block::Code(code) => format!("```\n{code}\n```"),
+            Block::Image { .. } => String::new(),
             Block::Table { rows, .. } => {
                 rows.iter().map(|row| row.iter().map(|c| runs(c)).collect::<Vec<_>>().join(" | ")).collect::<Vec<_>>().join("\n")
             }
@@ -208,6 +215,19 @@ impl Builder {
                     pre.push('\n');
                 } else {
                     self.runs.text("\n", Span::default());
+                }
+                return;
+            }
+            "img"
+                if attr(attrs, "itemtype").is_some_and(|t| t.ends_with("/AMSImage"))
+                    || attr(attrs, "src").is_some_and(|s| s.contains("/v1/objects/")) =>
+            {
+                // A picture someone pasted or attached.
+                if let Some(url) = attr(attrs, "src") {
+                    let number = |k: &str| attr(attrs, k).and_then(|v| v.trim_end_matches("px").parse::<u32>().ok()).filter(|n| *n > 0);
+                    let size = number("width").zip(number("height"));
+                    self.end_paragraph();
+                    self.blocks.push(Block::Image { url: decode(&url), size });
                 }
                 return;
             }
@@ -539,6 +559,7 @@ mod tests {
                 Block::Text(r) | Block::Quote(r, _) => r.iter().map(|r| r.text.as_str()).collect(),
                 Block::Code(c) => vec![c.as_str()],
                 Block::Table { .. } => vec!["<table>"],
+                Block::Image { .. } => vec!["<image>"],
             })
             .collect()
     }
@@ -589,6 +610,16 @@ mod tests {
     fn reply_quotes_know_their_message() {
         let html = r#"<blockquote itemscope="" itemtype="http://schema.skype.com/Reply" itemid="1698"><strong itemprop="mri">Maya</strong><p itemprop="preview">old</p></blockquote><p>new</p>"#;
         assert!(matches!(&from_html(html)[0], Block::Quote(_, Some(id)) if id == "1698"));
+    }
+
+    #[test]
+    fn pictures_become_image_blocks() {
+        let html = r#"<p>look</p><p><img itemscope="" itemtype="http://schema.skype.com/AMSImage" src="https://us-api.asm.skype.com/v1/objects/0-wus-d1-abc/views/imgo" width="640" height="480"></p>"#;
+        let blocks = from_html(html);
+        assert_eq!(
+            blocks[1],
+            Block::Image { url: "https://us-api.asm.skype.com/v1/objects/0-wus-d1-abc/views/imgo".into(), size: Some((640, 480)) }
+        );
     }
 
     #[test]

@@ -82,6 +82,11 @@ impl App {
                 let (message, root) = (parts.next(), parts.next());
                 workspace.open_message(&open, message, root);
             }
+            if let Ok(path) = std::env::var("DRIFT_DEMO_ATTACH")
+                && let Ok(bytes) = std::fs::read(&path)
+            {
+                workspace.attach(false, path.rsplit('/').next().unwrap_or("picture.png"), bytes);
+            }
             if let Ok(find) = std::env::var("DRIFT_DEMO_FIND") {
                 workspace.find = Some(find);
             }

@@ -48,6 +48,9 @@ pub trait Backend: Send + Sync {
     /// `<channel id>;messageid=<post id>`; for a new post, the channel id.
     fn send(&self, conversation: &str, message: &Outgoing) -> Result<()>;
 
+    /// Upload a picture for a message in `conversation`: the address to put in it.
+    fn upload_image(&self, conversation: &str, name: &str, bytes: &[u8], mime: &str) -> Result<String>;
+
     /// Replace the text of one of the user's messages.
     fn edit(&self, conversation: &str, message: &str, with: &Outgoing) -> Result<()>;
 

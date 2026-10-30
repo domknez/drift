@@ -120,6 +120,13 @@ fn worker(queue: &Queue, tx: &Sender<(String, Option<ColorImage>)>, backend: &dy
     }
 }
 
+/// A picture's width and height, and its MIME type (PNG or JPEG), if it's one.
+pub fn image_info(bytes: &[u8]) -> Option<(u32, u32, &'static str)> {
+    let image = decode(bytes)?;
+    let mime = if bytes.starts_with(b"\x89PNG") { "image/png" } else { "image/jpeg" };
+    Some((image.size[0] as u32, image.size[1] as u32, mime))
+}
+
 /// JPEG or PNG, by their signature.
 fn decode(bytes: &[u8]) -> Option<ColorImage> {
     if bytes.starts_with(b"\x89PNG") { decode_png(bytes) } else { decode_jpeg(bytes) }

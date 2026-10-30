@@ -232,6 +232,15 @@ impl Backend for Demo {
                     vec![],
                 ),
                 message(
+                    "3008",
+                    None,
+                    "maya",
+                    today(10, 28),
+                    "<p>This is how it looks now:</p><p><img itemtype=\"http://schema.skype.com/AMSImage\" src=\"demo:timeline\" width=\"480\" height=\"300\"></p>",
+                    None,
+                    vec![],
+                ),
+                message(
                     "3007",
                     None,
                     "maya",
@@ -324,12 +333,17 @@ impl Backend for Demo {
         match picture {
             // Emoji are public; people in the demo have no photos.
             Picture::Emoji(key) => crate::teams::emoji(key),
+            Picture::Image(url) if url.starts_with("demo:") => Ok(gradient(480, 300)),
             _ => Err(Error::Service("no pictures in the demo".into())),
         }
     }
 
     fn send(&self, _conversation: &str, _message: &Outgoing) -> Result<()> {
         Ok(())
+    }
+
+    fn upload_image(&self, _conversation: &str, _name: &str, _bytes: &[u8], _mime: &str) -> Result<String> {
+        Err(Error::Service("no uploads in the demo".into()))
     }
 
     fn edit(&self, _conversation: &str, _message: &str, _with: &Outgoing) -> Result<()> {
@@ -423,4 +437,23 @@ fn pr(n: u32, title: &str, from: &str, to: &str) -> Card {
 fn message(id: &str, root: Option<&str>, who: &str, at: i64, html: &str, card: Option<Card>, reactions: Vec<Reaction>) -> Message {
     let body: Vec<Block> = text::from_html(html);
     Message { id: id.into(), root: root.map(str::to_string), author: author(who), at, body, card, edited: false, reactions, source: None }
+}
+
+/// A soft violet-to-teal picture, made up for the demo's image message.
+fn gradient(w: u32, h: u32) -> Vec<u8> {
+    let mut pixels = Vec::with_capacity((w * h * 3) as usize);
+    for y in 0..h {
+        for x in 0..w {
+            let (fx, fy) = (x as f32 / w as f32, y as f32 / h as f32);
+            pixels.extend([(120.0 + 60.0 * fx) as u8, (100.0 + 100.0 * fy) as u8, (230.0 - 60.0 * fx * fy) as u8]);
+        }
+    }
+    let mut out = Vec::new();
+    let mut encoder = png::Encoder::new(&mut out, w, h);
+    encoder.set_color(png::ColorType::Rgb);
+    encoder.set_depth(png::BitDepth::Eight);
+    if let Ok(mut writer) = encoder.write_header() {
+        let _ = writer.write_image_data(&pixels);
+    }
+    out
 }

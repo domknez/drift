@@ -24,6 +24,8 @@ pub enum Body<'a> {
     None,
     Json(&'a Value),
     Form(&'a [(&'a str, &'a str)]),
+    /// A file's bytes, with their MIME type.
+    Bytes(&'a [u8], &'a str),
 }
 
 #[derive(Clone, Copy)]
@@ -63,6 +65,7 @@ pub fn request(method: Method, url: &str, headers: &[(&str, &str)], body: Body) 
             Body::None => req.send_empty(),
             Body::Json(v) => req.send_json(v),
             Body::Form(f) => req.send_form(f.iter().copied()),
+            Body::Bytes(bytes, mime) => req.header("Content-Type", mime).send(bytes),
         }
     };
     let response = response.map_err(|e| Error::Network(e.to_string()))?;
