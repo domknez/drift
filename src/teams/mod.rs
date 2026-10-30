@@ -384,6 +384,8 @@ fn chat_picture(members: &[String], me: &str, names: &HashMap<String, String>) -
 /// suffix like `-tone2` falls back to the plain one). No sign-in needed.
 pub fn emoji(key: &str) -> Result<Vec<u8>> {
     let base = key.split("-tone").next().unwrap_or(key);
+    // Teams' own "like" picture is a face giving a thumbs-up; the plain thumb reads better.
+    let base = if base == "like" { "yes" } else { base };
     if base.is_empty() || !base.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-') {
         return Err(Error::Service("not an emoji key".into()));
     }

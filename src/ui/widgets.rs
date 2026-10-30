@@ -263,29 +263,25 @@ pub fn reactions(ui: &mut Ui, pictures: &mut Pictures, reactions: &[Reaction], r
         ui.spacing_mut().item_spacing.x = 6.0;
         for r in reactions {
             let (fill, text) = if r.mine { (p.selected, p.accent) } else { (p.surface, p.dim) };
-            let response = Frame::new()
-                .fill(fill)
-                .stroke(if r.mine { Stroke::new(1.0, p.accent.gamma_multiply(0.6)) } else { Stroke::NONE })
-                .corner_radius(CornerRadius::same(255))
-                .inner_margin(Margin::symmetric(9, 3))
-                .show(ui, |ui| {
-                    ui.spacing_mut().item_spacing.x = 4.0;
-                    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                        match pictures.get(&Picture::Emoji(r.key.clone())) {
-                            Some(texture) => {
-                                ui.add(egui::Image::new((texture, vec2(17.0, 17.0))));
-                            }
-                            None => {
-                                ui.label(RichText::new(r.emoji()).font(ty::small_strong()).color(text));
-                            }
-                        }
-                        ui.label(RichText::new(r.count.to_string()).font(ty::small_strong()).color(text));
-                    });
-                })
-                .response
-                .interact(Sense::click())
-                .on_hover_cursor(egui::CursorIcon::PointingHand);
-            if response.clicked() {
+            // Painted at its own size: an emoji (picture, or the character) and the count.
+            let count = ui.painter().layout_no_wrap(r.count.to_string(), ty::small_strong(), text);
+            let picture = pictures.get(&Picture::Emoji(r.key.clone()));
+            let glyph = picture.is_none().then(|| ui.painter().layout_no_wrap(r.emoji(), ty::small_strong(), text));
+            let emoji_w = glyph.as_ref().map_or(17.0, |g| g.size().x);
+            let size = vec2(9.0 + emoji_w + 4.0 + count.size().x + 9.0, 24.0);
+            let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+            let stroke = if r.mine { Stroke::new(1.0, p.accent.gamma_multiply(0.6)) } else { Stroke::NONE };
+            ui.painter().rect(rect, CornerRadius::same(12), fill, stroke, egui::StrokeKind::Inside);
+            let emoji = Rect::from_min_size(egui::pos2(rect.left() + 9.0, rect.center().y - 8.5), vec2(emoji_w, 17.0));
+            match (picture, glyph) {
+                (Some(texture), _) => {
+                    egui::Image::new((texture, emoji.size())).paint_at(ui, emoji);
+                }
+                (None, Some(g)) => ui.painter().galley(egui::pos2(emoji.left(), rect.center().y - g.size().y / 2.0), g, text),
+                (None, None) => {}
+            }
+            ui.painter().galley(egui::pos2(emoji.right() + 4.0, rect.center().y - count.size().y / 2.0), count, text);
+            if response.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                 clicked = Some(r.key.clone());
             }
         }

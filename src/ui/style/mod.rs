@@ -27,6 +27,20 @@ pub fn install_fonts(ctx: &egui::Context) {
     ] {
         fonts.font_data.insert(name.into(), Arc::new(FontData::from_static(bytes)));
     }
+    // Trying other faces: DRIFT_FONT_DIR with Regular/Medium/SemiBold/Bold/ExtraBold.ttf.
+    if let Some(dir) = std::env::var_os("DRIFT_FONT_DIR").map(std::path::PathBuf::from) {
+        for (name, file) in [
+            ("Jakarta", "Regular"),
+            ("Jakarta-Medium", "Medium"),
+            ("Jakarta-SemiBold", "SemiBold"),
+            ("Jakarta-Bold", "Bold"),
+            ("Jakarta-ExtraBold", "ExtraBold"),
+        ] {
+            if let Ok(bytes) = std::fs::read(dir.join(format!("{file}.ttf"))) {
+                fonts.font_data.insert(name.into(), Arc::new(FontData::from_owned(bytes)));
+            }
+        }
+    }
     // egui's own fonts stay last in every chain as a final fallback.
     let fallbacks = fonts.families.get(&FontFamily::Proportional).cloned().unwrap_or_default();
     let chain = |first: &str| [vec![first.to_string(), "Inter".to_string(), "Emoji".to_string()], fallbacks.clone()].concat();
