@@ -66,6 +66,7 @@ pub enum Request {
 impl App {
     pub fn new(cc: &eframe::CreationContext) -> App {
         style::install_fonts(&cc.egui_ctx);
+        crate::notify::init();
         let capture = std::env::var_os("DRIFT_SCREENSHOT").map(|path| Capture { path: path.into(), frames: 0, requested: false });
         // `DRIFT_DEMO=1`: the made-up workspace, with settings that are never saved.
         if std::env::var_os("DRIFT_DEMO").is_some() {

@@ -28,7 +28,20 @@ apple-native-keyring-store = { version = "1", features = ["keychain"] }
 # The unread count on the Dock icon.
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSDockTile", "NSResponder"] }
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSError", "NSObject"] }
+# Notifications from the app bundle, through the system's notification center.
+block2 = "0.6"
+objc2-user-notifications = { version = "0.3", default-features = false, features = [
+    "std",
+    "block2",
+    "UNNotification",
+    "UNNotificationContent",
+    "UNNotificationRequest",
+    "UNNotificationResponse",
+    "UNNotificationSound",
+    "UNNotificationTrigger",
+    "UNUserNotificationCenter",
+] }
 
 [target.'cfg(unix)'.dependencies]
 # The local time zone for message times.
