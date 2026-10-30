@@ -14,8 +14,8 @@ a fraction of the memory the official app keeps busy doing nothing.
 Sibling of [dust](https://github.com/domknez/dust) (music) and
 [haze](https://github.com/domknez/haze) (IPTV).
 
-> **Early days.** drift reads and sends messages in your teams, channels and chats.
-> Live updates and notifications come next; calls open in Teams itself.
+> **Early days.** Messages, live updates and notifications all work across your chats,
+> channels and teams. Calls still open in Teams itself.
 
 ## Features
 
