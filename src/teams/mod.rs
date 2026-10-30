@@ -10,15 +10,16 @@ pub mod auth;
 mod http;
 mod parse;
 pub mod shape;
+mod trouter;
 
-use crate::backend::{Backend, Error, Result};
+use crate::backend::{Backend, Error, Push, Result};
 use crate::model::markdown::Outgoing;
 use crate::model::{Conversation, Directory, Kind, Meeting, Message, Picture, SearchHit};
 use auth::{CHAT_AGGREGATOR, SEARCH, SPACES, Session};
 use http::{Body, Method};
 use serde_json::Value;
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 /// AMS only takes requests from a client calling itself this.
 const AMS_AGENT: &str = "SkypeOfficialClient/0/0.0.0.0";
@@ -577,6 +578,14 @@ impl Backend for Teams {
         // The same property the conversation list reports as `favorite`.
         let path = format!("/v1/users/ME/conversations/{}/properties?name=favorite", http::encode(conversation));
         self.chat_write(Method::Put, &path, &serde_json::json!({"favorite": if pinned { "true" } else { "false" }}))
+    }
+
+    fn listen(self: Arc<Self>, to: Box<dyn Fn(Push) + Send>) {
+        let teams = Arc::downgrade(&self);
+        let spawned = std::thread::Builder::new().name("trouter".into()).spawn(move || trouter::run(teams, to));
+        if let Err(e) = spawned {
+            log_warn!("could not start listening for changes: {e}");
+        }
     }
 
     fn messages(&self, conversation: &str) -> Result<Vec<Message>> {

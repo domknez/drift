@@ -3,7 +3,7 @@
 
 use super::load::Load;
 use super::pictures::Pictures;
-use crate::backend::{Backend, Error};
+use crate::backend::{Backend, Error, Push};
 use crate::model::markdown::{self, Mention};
 use crate::model::{Conversation, ConversationId, Directory, Kind, Meeting, Message, Picture, SearchHit, text};
 use eframe::egui;
@@ -12,8 +12,11 @@ use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::{Duration, Instant};
 
-/// How often the sidebar is fetched again (until the service pushes changes).
+/// How often the sidebar is fetched again.
 const DIRECTORY_EVERY: Duration = Duration::from_secs(10);
+/// How often the sidebar and the open conversation are fetched again while the
+/// service pushes changes (in case a push goes missing).
+const PUSHED_EVERY: Duration = Duration::from_secs(60);
 /// How often the open conversation is fetched again.
 const MESSAGES_EVERY: Duration = Duration::from_secs(20);
 /// How often the open conversation is fetched again while drift is in front.
@@ -96,6 +99,10 @@ pub struct Workspace {
     seen_once: bool,
     /// Conversations whose notification was clicked.
     clicked: (Sender<String>, Receiver<String>),
+    /// Changes the service pushes.
+    pushes: Receiver<Push>,
+    /// Whether the service is pushing changes (then polling slows down).
+    live: bool,
     /// The unread count last put on the Dock icon.
     badge: Option<usize>,
     /// New messages shown in the corner while drift is in front.
@@ -146,6 +153,13 @@ pub enum Outcome {
 
 impl Workspace {
     pub fn new(ctx: &egui::Context, backend: Arc<dyn Backend>, open: Option<ConversationId>) -> Workspace {
+        let (push, pushes) = std::sync::mpsc::channel();
+        let repaint = ctx.clone();
+        backend.clone().listen(Box::new(move |change| {
+            if push.send(change).is_ok() {
+                repaint.request_repaint();
+            }
+        }));
         Workspace {
             me: backend.me(),
             me_id: backend.me_id(),
@@ -194,6 +208,8 @@ impl Workspace {
             seen: HashMap::new(),
             seen_once: false,
             clicked: std::sync::mpsc::channel(),
+            pushes,
+            live: false,
             badge: None,
             toasts: Default::default(),
         }
@@ -536,6 +552,27 @@ impl Workspace {
                 Err(e) => self.failed(e),
             }
         }
+        // The service pushed changes: fetch what they touch now.
+        while let Ok(push) = self.pushes.try_recv() {
+            match push {
+                Push::Live(live) => self.live = live,
+                Push::Everything => {
+                    self.directory_at = None;
+                    self.messages_at = None;
+                    self.activity_at = None;
+                }
+                Push::Conversation(id) => {
+                    self.directory_at = None;
+                    if self.open.as_deref() == Some(id.as_str()) {
+                        self.messages_at = None;
+                        self.read_at = None;
+                    }
+                    if self.directory.as_ref().and_then(|d| d.activity()).is_some_and(|c| c.id == id) {
+                        self.activity_at = None;
+                    }
+                }
+            }
+        }
         // A notification was clicked: open its conversation (or Activity), in front.
         while let Ok(id) = self.clicked.1.try_recv() {
             let feed = self.directory.as_ref().and_then(|d| d.conversation(&id)).is_some_and(|c| c.kind == Kind::Feed);
@@ -661,14 +698,20 @@ impl Workspace {
         }
 
         let due = |at: Option<Instant>, every| at.is_none_or(|at: Instant| at.elapsed() >= every);
-        if !self.directory_load.is_running() && due(self.directory_at, DIRECTORY_EVERY) {
+        let focused = ctx.input(|i| i.viewport().focused.unwrap_or(true));
+        let (directory_every, messages_every) = match (self.live, focused) {
+            (true, _) => (PUSHED_EVERY, PUSHED_EVERY),
+            (false, true) => (DIRECTORY_EVERY, MESSAGES_FRONT_EVERY),
+            (false, false) => (DIRECTORY_EVERY, MESSAGES_EVERY),
+        };
+        if !self.directory_load.is_running() && due(self.directory_at, directory_every) {
             self.directory_at = Some(Instant::now());
             let backend = self.backend.clone();
             self.directory_load = Load::start(ctx, move || backend.directory());
         }
         if let Some(id) = self.open.clone()
             && !self.messages_load.is_running()
-            && due(self.messages_at, if ctx.input(|i| i.viewport().focused.unwrap_or(true)) { MESSAGES_FRONT_EVERY } else { MESSAGES_EVERY })
+            && due(self.messages_at, messages_every)
         {
             self.messages_at = Some(Instant::now());
             let backend = self.backend.clone();

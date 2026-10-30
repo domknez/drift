@@ -2,8 +2,9 @@
 //! the UI only sees this trait and the `model` types.
 
 use crate::model::markdown::Outgoing;
-use crate::model::{Directory, Meeting, Message, Picture, SearchHit};
+use crate::model::{ConversationId, Directory, Meeting, Message, Picture, SearchHit};
 use std::fmt;
+use std::sync::Arc;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Error {
@@ -26,6 +27,17 @@ impl fmt::Display for Error {
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
+
+/// A change the service pushes as it happens.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Push {
+    /// Something new or changed in a conversation.
+    Conversation(ConversationId),
+    /// Pushes may have been missed: fetch everything again.
+    Everything,
+    /// Whether pushes are coming (the socket is up).
+    Live(bool),
+}
 
 /// A signed-in chat service. Calls block; the UI makes them on background threads.
 pub trait Backend: Send + Sync {
@@ -75,4 +87,10 @@ pub trait Backend: Send + Sync {
 
     /// Pin a conversation to the top of the list, or unpin it.
     fn pin(&self, conversation: &str, pinned: bool) -> Result<()>;
+
+    /// Have changes pushed to `to` as they happen, for as long as the backend lives.
+    /// A service that can't push does nothing; the UI polls either way.
+    fn listen(self: Arc<Self>, to: Box<dyn Fn(Push) + Send>) {
+        let _ = to;
+    }
 }

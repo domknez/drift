@@ -15,6 +15,9 @@ png = "0.18"
 zune-jpeg = "0.5"
 serde_json = "1"
 ureq = { version = "3", features = ["json"] }
+# Trouter, the websocket Teams pushes changes through; some of its bodies come gzipped.
+tungstenite = { version = "0.28", default-features = false, features = ["handshake", "rustls-tls-webpki-roots"] }
+flate2 = "1"
 # The system's notifications for new messages.
 notify-rust = "4"
 # The system's file dialog, for attaching pictures.

@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>drift — icon concepts</title>
+<style>
+body{margin:0;font:15px/1.5 Geist,Inter,system-ui,sans-serif;background:#ebe7e2;color:#1d1b22}
+h1{font-weight:600;margin:40px 48px 4px}p.lead{margin:0 48px 32px;color:#6b6670}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:24px;padding:0 48px 48px}
+.card{background:#fff;border-radius:18px;padding:24px;box-shadow:0 1px 2px #0001}
+.card>img{width:100%;display:block}
+h2{font-size:17px;margin:12px 0 2px}.card p{margin:0 0 14px;color:#6b6670;font-size:14px}
+.sizes{display:flex;gap:14px;align-items:end;padding:12px 14px;border-radius:12px}
+.sizes.light{background:#f4f2ef}.sizes.dark{background:#1e1d24;margin-top:8px}
+</style></head><body>
+<h1>drift — app icon concepts</h1>
+<p class="lead">Five directions in the drift palette (violet #7461f0 / #6a55e8, mint accent). Each row below shows 96, 64, 32 and 16 px on light and dark docks.</p>
+<div class="grid" id="grid"></div>
+<script>
+const icons=[
+ ["1-current.svg","1 · Current","Three waves drifting past each other; the mint one is the conversation you're in. Closest to the name."],
+ ["2-bubble.svg","2 · Bubble","Chat bubble carrying a wave, with an unread dot. Says “messaging” at a glance."],
+ ["3-boat.svg","3 · Harbor","A sailboat on a mint wave under a small moon — nods to the Harbor layout. Calm, distinct in the Dock."],
+ ["4-ripple.svg","4 · Ripple","A violet orb resting on rippling water, on the light-theme warm canvas. Soft and premium."],
+ ["5-monogram.svg","5 · Monogram","Geometric glowing “d.” on near-black — the current icon redrawn for the dark theme."]];
+const sizes=[96,64,32,16];
+grid.innerHTML=icons.map(([f,t,d])=>`<div class="card"><img src="icons/${f}" alt="${t}"><h2>${t}</h2><p>${d}</p>
+${["light","dark"].map(c=>`<div class="sizes ${c}">${sizes.map(s=>`<img src="icons/${f}" width="${s}" height="${s}">`).join("")}</div>`).join("")}</div>`).join("");
+</script></body></html>
