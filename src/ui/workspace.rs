@@ -96,6 +96,8 @@ pub struct Workspace {
     clicked: (Sender<String>, Receiver<String>),
     /// The unread count last put on the Dock icon.
     badge: Option<usize>,
+    /// New messages shown in the corner while drift is in front.
+    pub toasts: super::toasts::Toasts,
 }
 
 /// A picture waiting in a composer to go with the next message.
@@ -191,6 +193,7 @@ impl Workspace {
             seen_once: false,
             clicked: std::sync::mpsc::channel(),
             badge: None,
+            toasts: Default::default(),
         }
     }
 
@@ -389,7 +392,7 @@ impl Workspace {
             return;
         }
         // A handful each on its own; more than that as one.
-        if new.len() > 3 {
+        if new.len() > 3 && !focused {
             let tx = self.clicked.0.clone();
             let first = new[0].id.clone();
             let ctx = ctx.clone();
@@ -409,6 +412,11 @@ impl Workspace {
             let one_to_one = c.kind == Kind::Chat && c.members.len() <= 1;
             let place = (!one_to_one).then_some(c.title.as_str());
             let body: String = last.text.chars().take(160).collect();
+            // In front: a toast in the corner; otherwise the system's notification.
+            if focused {
+                self.toasts.push(&last.author, place, &body, &c.id);
+                continue;
+            }
             let (tx, id, ctx) = (self.clicked.0.clone(), c.id.clone(), ctx.clone());
             crate::notify::show(&last.author, place, &body, move || {
                 let _ = tx.send(id);

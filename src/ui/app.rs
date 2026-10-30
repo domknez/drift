@@ -88,6 +88,14 @@ impl App {
             {
                 workspace.attach(false, path.rsplit('/').next().unwrap_or("picture.png"), bytes);
             }
+            if std::env::var_os("DRIFT_DEMO_TOAST").is_some() {
+                workspace.toasts.push(
+                    "Priya Nair",
+                    Some("Release crew"),
+                    "The cut moved to 16:00, a test is still red on main.",
+                    "19:release",
+                );
+            }
             if let Ok(find) = std::env::var("DRIFT_DEMO_FIND") {
                 workspace.start_find();
                 workspace.find = Some(find);

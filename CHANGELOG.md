@@ -32,6 +32,10 @@ The first version of drift:
 - Teams' own colour emoji in reactions and messages
 - A calendar tab: the next two weeks of meetings by day; Join opens Teams on the web;
   the meeting on now (or next today) in the top bar
+- Sent / Seen under your newest message in a chat (Seen by how many, in a group)
+- New messages from other conversations as toasts while drift is in front
+- The message box stays ready to type into
+- An icon, and `scripts/bundle-macos.sh` for drift.app
 - Notifications for new messages in chats and meeting chats and for mentions and
   replies, a click opens the conversation; the unread count on the Dock icon; a setting
   to turn them off

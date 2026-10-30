@@ -13,6 +13,7 @@ mod app;
 mod load;
 mod pictures;
 mod style;
+mod toasts;
 mod views;
 mod widgets;
 mod workspace;
@@ -29,6 +30,10 @@ pub fn run() -> eframe::Result {
         .with_inner_size(metrics::WINDOW_SIZE)
         .with_min_inner_size(metrics::MIN_WINDOW_SIZE)
         .with_drag_and_drop(true);
+    let viewport = match crate::icon::window_icon() {
+        Some(icon) => viewport.with_icon(std::sync::Arc::new(icon)),
+        None => viewport,
+    };
     // The sidebar runs up under a transparent title bar, the traffic lights over it.
     #[cfg(target_os = "macos")]
     let viewport = viewport.with_fullsize_content_view(true).with_title_shown(false).with_titlebar_shown(false);

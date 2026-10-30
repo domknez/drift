@@ -743,7 +743,11 @@ pub fn composer(ui: &mut Ui, ws: &mut Workspace, rect: Rect, hint: &str, reply: 
         .desired_rows(1)
         .desired_width(f32::INFINITY)
         .return_key(Some(egui::KeyboardShortcut::new(egui::Modifiers::SHIFT, egui::Key::Enter)));
-    let response = t.add_enabled(!sending, edit);
+    let response = t.add(edit);
+    // The box stays ready to type into: it takes the keys whenever nothing else has them.
+    if !reply && ws.find.is_none() && ui.memory(|m| m.focused().is_none()) {
+        response.request_focus();
+    }
     let enter = response.has_focus() && t.input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.shift);
     let has_text = !ws.draft(reply).trim().is_empty() || ws.attachments.iter().any(|(r, _)| *r == reply);
 

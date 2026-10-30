@@ -72,6 +72,9 @@ cargo build --release
 ./target/release/drift
 ```
 
+On macOS, `scripts/bundle-macos.sh` makes `dist/drift.app` (with its icon and an
+identity of its own, which notifications need); drag it to Applications.
+
 Linux needs D-Bus, GTK 3 and WebKitGTK 4.1 development packages (see
 `.github/linux-deps.sh`).
 

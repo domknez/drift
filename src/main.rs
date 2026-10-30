@@ -8,6 +8,7 @@ mod log;
 mod backend;
 mod credentials;
 mod demo;
+mod icon;
 mod login;
 mod model;
 mod notify;

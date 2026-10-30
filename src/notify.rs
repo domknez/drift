@@ -62,6 +62,7 @@ pub fn badge(count: usize) {
         let tile = NSApplication::sharedApplication(main).dockTile();
         let label = (count > 0).then(|| NSString::from_str(&if count > 99 { "99+".to_string() } else { count.to_string() }));
         tile.setBadgeLabel(label.as_deref());
+        tile.display();
     }
     #[cfg(not(target_os = "macos"))]
     let _ = count;

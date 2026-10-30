@@ -48,6 +48,10 @@ pub fn workspace(ui: &mut egui::Ui, ws: &mut Workspace, theme: Appearance) -> Op
         }
         list::show(&mut panel(ui, list), ws);
         conversation::show(&mut panel(ui, main), ws);
+        if let Some(id) = ws.toasts.show(ui.ctx(), main) {
+            ws.side = super::workspace::Side::List;
+            ws.open(&id);
+        }
     });
     request
 }
