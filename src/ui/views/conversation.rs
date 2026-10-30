@@ -11,8 +11,14 @@ use crate::ui::workspace::{Side, Workspace};
 use eframe::egui::{self, Align, CornerRadius, Frame, Layout, Margin, Rect, RichText, Sense, Stroke, Ui, pos2, vec2};
 use std::collections::HashMap;
 
-/// The composer's height, reserved at the bottom.
-pub const COMPOSER_HEIGHT: f32 = 80.0;
+/// The box's height with one line of text, and its tallest (more text scrolls in it).
+const BOX_LOW: f32 = 56.0;
+const BOX_HIGH: f32 = 260.0;
+/// Room above and below the text inside the box.
+const TEXT_PAD: f32 = 14.0;
+/// Room above the box, and below it (for the formatting hint).
+const ABOVE: f32 = 8.0;
+const BELOW: f32 = 22.0;
 /// The "replying to" / "editing" line above the composer.
 const BANNER: f32 = 44.0;
 /// The reactions offered on right-click.
@@ -74,11 +80,17 @@ fn focus_composer(ui: &Ui, reply: bool) {
     ui.memory_mut(|m| m.request_focus(composer_id(reply)));
 }
 
-/// The composer's height: taller with a "replying to" or "editing" line on top.
+/// The composer's height: its box grows with the text typed, and it's taller with a
+/// "replying to" or "editing" line, or pictures, on top.
 pub fn composer_height(ws: &Workspace, reply: bool) -> f32 {
     let banner = ws.quoting.as_ref().is_some_and(|(r, _)| *r == reply) || ws.editing.as_ref().is_some_and(|(r, _)| *r == reply);
     let pictures = ws.attachments.iter().any(|(r, _)| *r == reply);
-    COMPOSER_HEIGHT + if banner { BANNER } else { 0.0 } + if pictures { BANNER } else { 0.0 }
+    ABOVE + box_height(ws, reply) + BELOW + if banner { BANNER } else { 0.0 } + if pictures { BANNER } else { 0.0 }
+}
+
+/// The box's height for the text typed (as tall as it was last drawn).
+fn box_height(ws: &Workspace, reply: bool) -> f32 {
+    (ws.composer_text[usize::from(reply)] + 2.0 * TEXT_PAD).clamp(BOX_LOW, BOX_HIGH)
 }
 
 pub fn show(ui: &mut Ui, ws: &mut Workspace) {
@@ -756,15 +768,19 @@ pub fn composer(ui: &mut Ui, ws: &mut Workspace, rect: Rect, hint: &str, reply: 
     }
 
     let inner = Rect::from_min_max(
-        pos2(rect.left() + metrics::PAGE_PAD, rect.top() + 8.0),
-        pos2(rect.right() - metrics::PAGE_PAD, rect.bottom() - 16.0),
+        pos2(rect.left() + metrics::PAGE_PAD, rect.bottom() - BELOW - box_height(ws, reply)),
+        pos2(rect.right() - metrics::PAGE_PAD, rect.bottom() - BELOW),
     );
     ui.painter().rect_filled(inner, CornerRadius::same(16), p.surface);
     let sending = ws.sending();
-    let send_rect = Rect::from_min_size(pos2(inner.right() - 8.0 - 40.0, inner.center().y - 20.0), vec2(40.0, 40.0));
+    // The send button and the tools sit at the bottom of the box as it grows.
+    let send_rect = Rect::from_min_size(pos2(inner.right() - 8.0 - 40.0, inner.bottom() - 8.0 - 40.0), vec2(40.0, 40.0));
     let tools_w = 3.0 * 32.0;
+    // The text, centred while it's one line, then filling the box less its padding.
+    let text_h = ws.composer_text[usize::from(reply)];
+    let text_top = (inner.center().y - text_h / 2.0).max(inner.top() + TEXT_PAD);
     let text_rect =
-        Rect::from_min_max(pos2(inner.left() + 16.0, inner.top() + 6.0), pos2(send_rect.left() - tools_w - 10.0, inner.bottom() - 6.0));
+        Rect::from_min_max(pos2(inner.left() + 16.0, text_top), pos2(send_rect.left() - tools_w - 10.0, inner.bottom() - TEXT_PAD));
 
     // Keys the box shouldn't see: ↑ to edit, Esc to cancel, Tab/Enter to pick a person.
     let id = composer_id(reply);
@@ -791,7 +807,7 @@ pub fn composer(ui: &mut Ui, ws: &mut Workspace, rect: Rect, hint: &str, reply: 
         }
     }
 
-    let mut t = ui.new_child(egui::UiBuilder::new().max_rect(text_rect).layout(Layout::left_to_right(Align::Center)));
+    let mut t = ui.new_child(egui::UiBuilder::new().max_rect(text_rect).layout(Layout::top_down(Align::Min)));
     let edit = egui::TextEdit::multiline(ws.draft_mut(reply))
         .id(id)
         .hint_text(RichText::new(hint).color(p.faint))
@@ -801,7 +817,18 @@ pub fn composer(ui: &mut Ui, ws: &mut Workspace, rect: Rect, hint: &str, reply: 
         .desired_rows(1)
         .desired_width(f32::INFINITY)
         .return_key(Some(egui::KeyboardShortcut::new(egui::Modifiers::SHIFT, egui::Key::Enter)));
-    let response = t.add(edit);
+    // Taller than the box can grow: it scrolls, keeping the end (where one types) in view.
+    let response = egui::ScrollArea::vertical()
+        .id_salt(("composer-scroll", reply))
+        .max_height(BOX_HIGH - 2.0 * TEXT_PAD)
+        .stick_to_bottom(true)
+        .show(&mut t, |ui| ui.add(edit))
+        .inner;
+    let text_height = response.rect.height().round();
+    if text_height != ws.composer_text[usize::from(reply)] {
+        ws.composer_text[usize::from(reply)] = text_height;
+        ui.ctx().request_discard("the composer changed height");
+    }
     // The box stays ready to type into: it takes the keys whenever nothing else has them.
     if !reply && ws.find.is_none() && ws.switcher.is_none() && ui.memory(|m| m.focused().is_none()) {
         response.request_focus();
@@ -854,7 +881,7 @@ pub fn composer(ui: &mut Ui, ws: &mut Workspace, rect: Rect, hint: &str, reply: 
         response.request_focus();
     }
 
-    let tools = Rect::from_min_max(pos2(send_rect.left() - tools_w - 6.0, inner.top()), pos2(send_rect.left() - 6.0, inner.bottom()));
+    let tools = Rect::from_min_max(pos2(send_rect.left() - tools_w - 6.0, send_rect.top()), pos2(send_rect.left() - 6.0, send_rect.bottom()));
     let mut row = ui.new_child(egui::UiBuilder::new().max_rect(tools).layout(Layout::left_to_right(Align::Center)));
     row.spacing_mut().item_spacing.x = 2.0;
     if widgets::icon_button(&mut row, Icon::Clip, "Attach pictures (or drop them on the window)").clicked()
@@ -910,7 +937,7 @@ pub fn composer(ui: &mut Ui, ws: &mut Workspace, rect: Rect, hint: &str, reply: 
     }
     if response.has_focus() || has_text {
         let tip = "**bold**  *italic*  ~~strike~~  `code`  > quote  - list";
-        ui.painter().text(pos2(inner.left() + 16.0, inner.bottom() + 8.0), egui::Align2::LEFT_CENTER, tip, ty::meta(), p.faint);
+        ui.painter().text(pos2(inner.left() + 16.0, inner.bottom() + BELOW / 2.0 + 1.0), egui::Align2::LEFT_CENTER, tip, ty::meta(), p.faint);
     }
     let click = ui.interact(send_rect, ui.scope_id().with(("send", reply)), Sense::click());
     let fill = if has_text && !sending { p.accent_fill } else { p.border };

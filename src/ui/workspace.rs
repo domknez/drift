@@ -117,6 +117,8 @@ pub struct Workspace {
     pub recent: Vec<ConversationId>,
     /// Conversations muted in drift (None until the saved ones are in).
     pub muted_here: Option<HashSet<String>>,
+    /// The height of the text in the composer and in the thread's (as last drawn).
+    pub composer_text: [f32; 2],
     /// The picture shown over the window, by its URL.
     pub viewing: Option<String>,
     /// The conversation last drawn (its first drawing is laid out once unseen, so it
@@ -240,6 +242,7 @@ impl Workspace {
             switcher: None,
             recent: Vec::new(),
             muted_here: None,
+            composer_text: [20.0; 2],
             viewing: None,
             drawn: None,
             list_height: None,
