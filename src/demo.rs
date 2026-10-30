@@ -381,9 +381,14 @@ fn activity() -> Vec<Message> {
 
 fn pr(n: u32, title: &str, from: &str, to: &str) -> Card {
     Card {
-        title: format!("#{n} {title}"),
-        detail: format!("{from} → {to} · 5 reviewers"),
+        title: format!("{n}: {title}"),
+        detail: "Active | pm-ui".into(),
         link: Some(format!("https://example.com/pr/{n}")),
+        facts: vec![
+            ("Target branch".into(), to.into()),
+            ("Source branch".into(), from.into()),
+            ("Reviewers".into(), "Lea Novak, Tomás Rivera and 3 more".into()),
+        ],
     }
 }
 

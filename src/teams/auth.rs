@@ -168,7 +168,8 @@ fn identity(jwt: &str) -> Option<Identity> {
     Some(Identity { id: format!("8:orgid:{oid}"), name: name.to_string() })
 }
 
-fn base64url(s: &str) -> Option<Vec<u8>> {
+/// Base64, standard or URL-safe, padded or not.
+pub(super) fn base64url(s: &str) -> Option<Vec<u8>> {
     let value = |c: u8| match c {
         b'A'..=b'Z' => Some(c - b'A'),
         b'a'..=b'z' => Some(c - b'a' + 26),

@@ -157,13 +157,23 @@ fn message(m: &Value, me: &str) -> Option<Message> {
     let id = str_of(m, &["id"])?.to_string();
     let activity = &m["properties"]["activity"];
     let content = str_of(m, &["content"]).unwrap_or("");
-    let mut body = if kind == "Text" { text::plain(content) } else { text::from_html(content) };
+    let swift = (kind == "RichText/Media_Card").then(|| swift(content)).flatten();
+    let mut body = match &swift {
+        // A connector's card: its summary as the text (the rest of the content repeats it).
+        Some(card) => text::plain(card["summary"].as_str().unwrap_or("")),
+        None if kind == "Text" => text::plain(content),
+        None => text::from_html(content),
+    };
     if body.is_empty()
         && let Some(preview) = str_of(activity, &["messagePreview"])
     {
         body = text::plain(preview);
     }
-    let card = card(&m["properties"]["cards"]).or_else(|| card(&m["properties"]["attachments"]));
+    let card = swift
+        .as_ref()
+        .and_then(|s| card(&s["attachments"]))
+        .or_else(|| card(&m["properties"]["cards"]))
+        .or_else(|| card(&m["properties"]["attachments"]));
     if body.is_empty() && card.is_none() {
         return None;
     }
@@ -206,6 +216,16 @@ fn message(m: &Value, me: &str) -> Option<Message> {
     })
 }
 
+/// The card JSON inside a `RichText/Media_Card` message:
+/// `<URIObject type="SWIFT.1">…<Swift b64="…"/>…</URIObject>`.
+pub fn swift(content: &str) -> Option<Value> {
+    let at = content.find("<Swift")?;
+    let tag = &content[at..content[at..].find('>').map(|e| at + e)?];
+    let start = tag.find("b64=\"")? + 5;
+    let b64 = &tag[start..start + tag[start..].find('"')?];
+    serde_json::from_slice(&super::auth::base64url(b64)?).ok()
+}
+
 /// A JSON value the service may send as JSON text instead.
 fn embedded(v: &Value) -> Value {
     match v {
@@ -228,49 +248,82 @@ fn reactions(v: &Value, me: &str) -> Vec<Reaction> {
         .collect()
 }
 
-/// An adaptive card (or a hero card) reduced to its first lines and its link.
+/// An adaptive card (or a hero card) reduced to what the UI shows: the emphasised
+/// line as the title (a Markdown link in it is the card's link), the other lines,
+/// and its facts.
 fn card(v: &Value) -> Option<Card> {
     let v = embedded(v);
     if v.is_null() {
         return None;
     }
-    let mut lines = Vec::new();
-    let mut link = None;
-    walk(&v, &mut lines, &mut link);
-    let mut lines = lines.into_iter().map(|l| text::flatten(&text::from_html(&l))).filter(|l| !l.is_empty());
-    let title = lines.next()?;
-    let detail = lines.take(3).collect::<Vec<_>>().join(" · ");
-    Some(Card { title, detail, link })
+    let mut found = Found::default();
+    walk(&v, &mut found);
+    let mut lines: Vec<(String, bool)> = found.lines.into_iter().map(|(l, strong)| (strip_link(&l, &mut found.link), strong)).collect();
+    lines.retain(|(l, _)| !l.is_empty());
+    let at = lines.iter().position(|(_, strong)| *strong).unwrap_or(0);
+    if lines.is_empty() && found.facts.is_empty() {
+        return None;
+    }
+    let title = if lines.is_empty() { String::new() } else { lines.remove(at).0 };
+    let detail = lines.into_iter().map(|(l, _)| l).take(2).collect::<Vec<_>>().join(" · ");
+    let facts = found.facts.into_iter().map(|(t, v)| (t.trim_end_matches(':').to_string(), strip_link(&v, &mut None))).take(6).collect();
+    Some(Card { title, detail, link: found.link, facts })
 }
 
-fn walk(v: &Value, lines: &mut Vec<String>, link: &mut Option<String>) {
+#[derive(Default)]
+struct Found {
+    /// Text lines, and whether each is emphasised (bold, or a larger size).
+    lines: Vec<(String, bool)>,
+    facts: Vec<(String, String)>,
+    link: Option<String>,
+}
+
+fn walk(v: &Value, found: &mut Found) {
     match v {
         Value::Object(o) => {
             let kind = o.get("type").and_then(Value::as_str).unwrap_or("");
-            if link.is_none() && kind == "Action.OpenUrl" {
-                *link = o.get("url").and_then(Value::as_str).map(str::to_string);
+            let text = |k: &str| o.get(k).and_then(Value::as_str);
+            if found.link.is_none() && kind == "Action.OpenUrl" {
+                found.link = text("url").map(str::to_string);
             }
             if matches!(kind, "TextBlock" | "TextRun") {
-                if let Some(t) = o.get("text").and_then(Value::as_str) {
-                    lines.push(t.to_string());
+                if let Some(t) = text("text") {
+                    let strong = text("weight") == Some("bolder") || matches!(text("size"), Some("medium" | "large" | "extraLarge"));
+                    found.lines.push((text::flatten(&text::from_html(t)), strong));
                 }
-            } else if let Some(t) = o.get("title").and_then(Value::as_str).filter(|_| kind.is_empty() && !o.contains_key("value")) {
-                lines.push(t.to_string());
-            }
-            // Fact sets: "Target branch: develop".
-            if let (Some(t), Some(v)) = (o.get("title").and_then(Value::as_str), o.get("value").and_then(Value::as_str)) {
-                lines.push(format!("{t} {v}"));
+            } else if let (Some(t), Some(value)) = (text("title"), text("value")) {
+                found.facts.push((t.to_string(), value.to_string()));
+            } else if let Some(t) = text("title").filter(|_| kind.is_empty()) {
+                found.lines.push((t.to_string(), true));
             }
             for (k, child) in o {
-                if k != "text" && k != "title" {
-                    walk(child, lines, link);
+                if k != "text" && k != "title" && k != "value" {
+                    walk(child, found);
                 }
             }
         }
-        Value::Array(a) => a.iter().for_each(|c| walk(c, lines, link)),
-        Value::String(s) if s.trim_start().starts_with('{') || s.trim_start().starts_with('[') => walk(&embedded(v), lines, link),
+        Value::Array(a) => a.iter().for_each(|c| walk(c, found)),
+        Value::String(s) if s.trim_start().starts_with('{') || s.trim_start().starts_with('[') => walk(&embedded(v), found),
         _ => {}
     }
+}
+
+/// `[text](url)` as its text; the first url is kept as the link.
+fn strip_link(s: &str, link: &mut Option<String>) -> String {
+    let mut out = String::new();
+    let mut rest = s;
+    while let Some(open) = rest.find('[') {
+        let Some(close) = rest[open..].find("](").map(|c| open + c) else { break };
+        let Some(end) = rest[close + 2..].find(')').map(|e| close + 2 + e) else { break };
+        out.push_str(&rest[..open]);
+        out.push_str(&rest[open + 1..close]);
+        if link.is_none() {
+            *link = Some(rest[close + 2..end].to_string());
+        }
+        rest = &rest[end + 1..];
+    }
+    out.push_str(rest);
+    out.trim().to_string()
 }
 
 /// Display names by id from the middle tier's profile answer.
@@ -372,8 +425,54 @@ mod tests {
             "imdisplayname": "Repos", "properties": {"cards": cards.to_string()}}]});
         let card = messages(&v, ME).remove(0).card.unwrap();
         assert_eq!(card.title, "Lea created a pull request");
-        assert_eq!(card.detail, "10500: manual trigger sends the picked rule again · Target branch: main");
+        assert_eq!(card.detail, "10500: manual trigger sends the picked rule again");
+        assert_eq!(card.facts, [("Target branch".to_string(), "main".to_string())]);
         assert_eq!(card.link.as_deref(), Some("https://example.com/pr/10500"));
+    }
+
+    #[test]
+    fn reads_connector_cards() {
+        use crate::model::text::Block;
+        let card = json!({"summary": "Lea created a pull request", "attachments": [{"contentType": "application/vnd.microsoft.card.adaptive", "content": {
+            "type": "AdaptiveCard", "body": [
+                {"type": "ColumnSet", "columns": [{"type": "Column", "items": [{"type": "Image", "url": "https://x/icon.png"}]},
+                    {"type": "Column", "items": [
+                        {"type": "TextBlock", "size": "medium", "weight": "bolder", "text": "[10499: feat(timelines): pan by dragging](https://dev.example.com/pr/10499)"},
+                        {"type": "TextBlock", "size": "small", "isSubtle": true, "text": "Active | pm-ui"}]}]},
+                {"type": "Container", "items": [{"type": "FactSet", "facts": [{"title": "Target branch:", "value": "develop"}, {"title": "Source branch:", "value": "feature/pan"}]}]}]}}]});
+        let b64 = {
+            const A: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+            let bytes = card.to_string().into_bytes();
+            bytes
+                .chunks(3)
+                .map(|c| {
+                    let n = (u32::from(c[0]) << 16) | (u32::from(*c.get(1).unwrap_or(&0)) << 8) | u32::from(*c.get(2).unwrap_or(&0));
+                    (0..=c.len()).map(|i| A[(n >> (18 - 6 * i) & 63) as usize] as char).collect::<String>()
+                })
+                .collect::<String>()
+        };
+        let content = format!(
+            "<URIObject type=\"SWIFT.1\"><Title>Lea created a pull request</Title><Swift b64=\"{b64}\"/><Description>Lea created a pull request</Description></URIObject>"
+        );
+        let v = json!({"messages": [{"id": "1", "messagetype": "RichText/Media_Card", "content": content, "originalarrivaltime": "2026-10-30T10:42:00Z", "imdisplayname": "Azure Repos"}]});
+        let m = messages(&v, ME).remove(0);
+        assert_eq!(
+            m.body,
+            vec![Block::Text(
+                text::plain("Lea created a pull request")
+                    .into_iter()
+                    .flat_map(|b| match b {
+                        Block::Text(r) => r,
+                        _ => vec![],
+                    })
+                    .collect()
+            )]
+        );
+        let card = m.card.unwrap();
+        assert_eq!(card.title, "10499: feat(timelines): pan by dragging");
+        assert_eq!(card.link.as_deref(), Some("https://dev.example.com/pr/10499"));
+        assert_eq!(card.detail, "Active | pm-ui");
+        assert_eq!(card.facts.len(), 2);
     }
 
     #[test]

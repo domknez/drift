@@ -205,6 +205,44 @@ impl Teams {
             }
             out.push_str(&format!("== directory: {} teams, conversations by kind {by:?}, untitled {untitled}\n", dir.teams.len()));
         }
+        // The cards connectors post (Media_Card): their JSON, as structure.
+        if let Some(channel) =
+            parse::conversations(&list).into_iter().filter(|c| c.kind == Kind::Channel).max_by_key(|c| c.last.as_ref().map_or(0, |l| l.at))
+        {
+            let path = format!(
+                "/v1/users/ME/conversations/{}/messages?view=msnp24Equivalent|supportsMessageProperties&pageSize={PAGE}&startTime=1",
+                http::encode(&channel.id)
+            );
+            let answer = self.chat_service(&path)?;
+            let swift: Vec<Value> = answer["messages"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|m| m["messagetype"].as_str() == Some("RichText/Media_Card"))
+                .filter_map(|m| parse::swift(m["content"].as_str()?))
+                .collect();
+            out.push_str(&format!("== cards in Media_Card messages ({})\n{}", swift.len(), shape::describe(&Value::Array(swift), 12)));
+            let outside: Vec<Value> = answer["messages"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|m| m["messagetype"].as_str() == Some("RichText/Media_Card"))
+                .map(|m| {
+                    let c = m["content"].as_str().unwrap_or("");
+                    // Tag names only, to see what wraps the card.
+                    let tags: Vec<String> = c
+                        .split('<')
+                        .skip(1)
+                        .filter_map(|t| t.split([' ', '>', '/']).next())
+                        .filter(|t| !t.is_empty())
+                        .map(str::to_string)
+                        .collect();
+                    Value::from(tags.join(","))
+                })
+                .take(3)
+                .collect();
+            out.push_str(&format!("== Media_Card tags: {outside:?}\n"));
+        }
         let me = Picture::Person { id: self.my_id(), name: Backend::me(self) };
         match self.picture(&me) {
             Ok(bytes) => out.push_str(&format!("== own picture: {} bytes, starts {:02x?}\n", bytes.len(), &bytes[..bytes.len().min(4)])),

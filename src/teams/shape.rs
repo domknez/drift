@@ -23,6 +23,10 @@ const KINDS: &[&str] = &[
     "type",
     "key",
     "uniquerosterthread",
+    "size",
+    "weight",
+    "style",
+    "isSubtle",
 ];
 
 #[derive(Default)]

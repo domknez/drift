@@ -29,6 +29,16 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace) {
         chips(ui, ws, pos2(full.left() + 14.0, top));
         top += 30.0 + 6.0;
     }
+    // Collapse or expand every section at once.
+    let keys: Vec<String> = match ws.section {
+        Section::Chats => vec!["pinned".into(), "recent".into()],
+        Section::Teams => directory.teams.iter().map(|t| format!("team:{}", t.id)).collect(),
+        _ => Vec::new(),
+    };
+    if !keys.is_empty() {
+        fold_all(ui, ws, Rect::from_min_max(pos2(full.left() + 14.0, top), pos2(full.right() - 18.0, top + 20.0)), &keys);
+        top += 20.0;
+    }
     let area = Rect::from_min_max(pos2(full.left(), top), pos2(full.right(), full.bottom() - 6.0));
     let mut body = ui.new_child(egui::UiBuilder::new().max_rect(area).layout(Layout::top_down(Align::Min)));
     egui::ScrollArea::vertical().id_salt(("list", ws.section as u8)).auto_shrink([false, false]).show(&mut body, |ui| {
@@ -83,8 +93,7 @@ fn chats(ui: &mut Ui, ws: &mut Workspace, d: &Directory) {
     };
     let pinned: Vec<Conversation> =
         d.conversations.iter().filter(|c| c.pinned && c.kind != Kind::Feed && fits(c) && matches(ws, &c.title)).cloned().collect();
-    if !pinned.is_empty() {
-        label(ui, "PINNED");
+    if !pinned.is_empty() && section(ui, ws, "pinned", "PINNED") {
         for c in &pinned {
             row(ui, ws, d, c);
         }
@@ -104,8 +113,7 @@ fn chats(ui: &mut Ui, ws: &mut Workspace, d: &Directory) {
         })
         .cloned()
         .collect();
-    if !recent.is_empty() {
-        label(ui, "RECENT");
+    if !recent.is_empty() && section(ui, ws, "recent", "RECENT") {
         for c in &recent {
             row(ui, ws, d, c);
         }
@@ -184,13 +192,48 @@ fn activity(ui: &mut Ui, ws: &mut Workspace, d: &Directory) {
     }
 }
 
-fn label(ui: &mut Ui, text: &str) {
-    ui.add_space(8.0);
-    ui.horizontal(|ui| {
-        ui.add_space(20.0);
-        ui.label(RichText::new(text).font(ty::section()).color(colors().faint));
-    });
-    ui.add_space(2.0);
+/// A section label that folds its rows away (click it); true while it's open.
+fn section(ui: &mut Ui, ws: &mut Workspace, key: &str, text: &str) -> bool {
+    let p = colors();
+    let open = !ws.folded.contains(key);
+    ui.add_space(6.0);
+    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 24.0), Sense::click());
+    let color = if response.hovered() { p.dim } else { p.faint };
+    let chevron = Rect::from_min_size(pos2(rect.left() + 18.0, rect.center().y - 6.0), vec2(12.0, 12.0));
+    icons::paint(ui.painter(), chevron, if open { Icon::ChevronDown } else { Icon::ChevronRight }, color);
+    ui.painter().text(pos2(chevron.right() + 6.0, rect.center().y), Align2::LEFT_CENTER, text, ty::section(), color);
+    if response.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+        if open {
+            ws.folded.insert(key.to_string());
+        } else {
+            ws.folded.remove(key);
+        }
+    }
+    open
+}
+
+/// "Collapse all" / "Expand all" for the sections `keys`, right-aligned in `rect`.
+fn fold_all(ui: &mut Ui, ws: &mut Workspace, rect: Rect, keys: &[String]) {
+    if keys.is_empty() {
+        return;
+    }
+    let p = colors();
+    let any_open = keys.iter().any(|k| !ws.folded.contains(k));
+    let text = if any_open { "Collapse all" } else { "Expand all" };
+    let galley = ui.painter().layout_no_wrap(text.to_string(), ty::meta(), p.faint);
+    let r = Rect::from_min_size(pos2(rect.right() - galley.size().x - 4.0, rect.center().y - 9.0), vec2(galley.size().x + 4.0, 18.0));
+    let response = ui.interact(r, ui.scope_id().with("fold-all"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
+    let color = if response.hovered() { p.accent } else { p.faint };
+    ui.painter().text(pos2(r.right(), r.center().y), Align2::RIGHT_CENTER, text, ty::meta(), color);
+    if response.clicked() {
+        for k in keys {
+            if any_open {
+                ws.folded.insert(k.clone());
+            } else {
+                ws.folded.remove(k);
+            }
+        }
+    }
 }
 
 fn empty(ui: &mut Ui, text: &str) {

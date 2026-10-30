@@ -221,28 +221,42 @@ fn table(ui: &mut Ui, pictures: &mut Pictures, rows: &[Vec<Vec<Inline>>], header
 pub fn card(ui: &mut Ui, card: &Card) {
     let p = colors();
     ui.add_space(2.0);
+    let link = card.link.is_some();
     let response = Frame::new()
         .fill(p.panel)
         .corner_radius(CornerRadius::same(12))
         .inner_margin(Margin::symmetric(12, 10))
         .show(ui, |ui| {
-            ui.horizontal(|ui| {
+            ui.horizontal_top(|ui| {
                 ui.spacing_mut().item_spacing.x = 12.0;
                 let (tile, _) = ui.allocate_exact_size(vec2(34.0, 34.0), Sense::hover());
                 ui.painter().rect_filled(tile, CornerRadius::same(10), p.selected);
                 icons::paint(ui.painter(), Rect::from_center_size(tile.center(), vec2(18.0, 18.0)), Icon::Card, p.accent);
                 ui.vertical(|ui| {
-                    ui.spacing_mut().item_spacing.y = 2.0;
-                    ui.add(egui::Label::new(RichText::new(&card.title).font(ty::small_strong()).color(p.text)).truncate());
+                    ui.spacing_mut().item_spacing.y = 3.0;
+                    if !card.title.is_empty() {
+                        let color = if link { p.accent } else { p.text };
+                        ui.add(egui::Label::new(RichText::new(&card.title).font(ty::small_strong()).color(color)).wrap());
+                    }
                     if !card.detail.is_empty() {
                         ui.add(egui::Label::new(RichText::new(&card.detail).font(ty::mono_small()).color(p.faint)).truncate());
+                    }
+                    if !card.facts.is_empty() {
+                        ui.add_space(3.0);
+                        egui::Grid::new(ui.next_auto_id()).num_columns(2).spacing(vec2(12.0, 3.0)).show(ui, |ui| {
+                            for (label, value) in &card.facts {
+                                ui.label(RichText::new(label).font(ty::meta()).color(p.faint));
+                                ui.add(egui::Label::new(RichText::new(value).font(ty::small()).color(p.dim)).truncate());
+                                ui.end_row();
+                            }
+                        });
                     }
                 });
             });
         })
         .response;
     if let Some(url) = &card.link {
-        let response = response.interact(Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
+        let response = response.interact(Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(url);
         if response.clicked() {
             ui.ctx().open_url(egui::OpenUrl::new_tab(url));
         }

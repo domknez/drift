@@ -143,6 +143,8 @@ pub struct Card {
     pub title: String,
     pub detail: String,
     pub link: Option<String>,
+    /// Labelled values ("Target branch" → "develop"), as the card lists them.
+    pub facts: Vec<(String, String)>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

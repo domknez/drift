@@ -21,7 +21,10 @@ The first version of drift:
 - Reply with a quote, edit (↑ in an empty box edits your last message) and delete your
   messages; Markdown and @mentions when writing
 - Teams' own colour emoji in reactions and messages
-- Pin and unpin from the list's right-click menu
+- Pin and unpin from the list's right-click menu; fold any section of the list, or all
+  of them at once
+- Cards from connectors (Azure Repos pull requests and the like) with their title as a
+  link, their status and their facts (branches, reviewers)
 - Opening a conversation marks it read in Teams too
 - Messages keep their formatting: bold, italics, code, links, mentions and emoji;
   reactions under them; cards from bots and connectors (pull requests, alerts) as one
