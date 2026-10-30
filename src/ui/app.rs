@@ -66,6 +66,10 @@ pub enum Request {
 impl App {
     pub fn new(cc: &eframe::CreationContext) -> App {
         style::install_fonts(&cc.egui_ctx);
+        // Room for the passes a frame can ask for (a new table or card measures itself,
+        // a conversation's first drawing and a change in its height lay out again):
+        // past the limit egui shows the half-measured frame, and the list jumps.
+        cc.egui_ctx.options_mut(|o| o.max_passes = std::num::NonZeroUsize::new(4).expect("not zero"));
         crate::notify::init();
         let capture = std::env::var_os("DRIFT_SCREENSHOT").map(|path| Capture { path: path.into(), frames: 0, requested: false });
         // `DRIFT_DEMO=1`: the made-up workspace, with settings that are never saved.

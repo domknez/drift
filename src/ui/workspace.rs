@@ -104,6 +104,8 @@ pub struct Workspace {
     /// The conversation last drawn (its first drawing is laid out once unseen, so it
     /// opens at its newest messages without a flash of its oldest).
     pub drawn: Option<ConversationId>,
+    /// The message list's height last drawn, and whose (a change redraws the frame).
+    pub list_height: Option<(ConversationId, f32)>,
     /// Changes the service pushes.
     pushes: Receiver<Push>,
     /// Whether the service is pushing changes (then polling slows down).
@@ -215,6 +217,7 @@ impl Workspace {
             clicked: std::sync::mpsc::channel(),
             viewing: None,
             drawn: None,
+            list_height: None,
             pushes,
             live: false,
             badge: None,

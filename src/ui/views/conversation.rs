@@ -124,7 +124,7 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace) {
                 focus: focus.as_deref(),
                 scrolled: ws.focus_scrolled,
             };
-            egui::ScrollArea::vertical().id_salt(("messages", &id)).stick_to_bottom(true).auto_shrink([false, false]).show(
+            let scrolled = egui::ScrollArea::vertical().id_salt(("messages", &id)).stick_to_bottom(true).auto_shrink([false, false]).show(
                 &mut page,
                 |ui| {
                     Frame::new().inner_margin(Margin::symmetric(metrics::PAGE_PAD as i8, 10)).show(ui, |ui| {
@@ -140,6 +140,14 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace) {
                     });
                 },
             );
+            // The list grew or shrank (a picture came, "Seen" moved): this frame was drawn
+            // at the old scroll position, so it's laid out again at the new one rather
+            // than shown a frame off.
+            let height = scrolled.content_size.y;
+            if ws.list_height.as_ref().is_some_and(|(of, h)| *of == id && (h - height).abs() > 0.5) {
+                ui.ctx().request_discard("the message list changed height");
+            }
+            ws.list_height = Some((id.clone(), height));
             // The focused message is in the main list unless it's a reply (then the thread scrolls).
             if ws.thread.is_none() || !is_channel {
                 ws.focus_scrolled |= view.scrolled;
