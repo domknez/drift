@@ -245,6 +245,86 @@ pub struct SearchHit {
     pub place: String,
 }
 
+/// How available someone shows as.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Availability {
+    Available,
+    Busy,
+    DoNotDisturb,
+    BeRightBack,
+    Away,
+    Offline,
+    /// The service doesn't know (or didn't say).
+    Unknown,
+}
+
+impl Availability {
+    /// What the user can pick, in the order Teams lists them.
+    pub const PICKS: [Availability; 6] = [
+        Availability::Available,
+        Availability::Busy,
+        Availability::DoNotDisturb,
+        Availability::BeRightBack,
+        Availability::Away,
+        Availability::Offline,
+    ];
+
+    /// The service's name for it.
+    pub fn key(self) -> &'static str {
+        match self {
+            Availability::Available => "Available",
+            Availability::Busy => "Busy",
+            Availability::DoNotDisturb => "DoNotDisturb",
+            Availability::BeRightBack => "BeRightBack",
+            Availability::Away => "Away",
+            Availability::Offline => "Offline",
+            Availability::Unknown => "PresenceUnknown",
+        }
+    }
+
+    pub fn from_key(key: &str) -> Availability {
+        match key {
+            "Available" | "AvailableIdle" => Availability::Available,
+            "Busy" | "BusyIdle" => Availability::Busy,
+            "DoNotDisturb" => Availability::DoNotDisturb,
+            "BeRightBack" => Availability::BeRightBack,
+            "Away" => Availability::Away,
+            "Offline" => Availability::Offline,
+            _ => Availability::Unknown,
+        }
+    }
+
+    /// How it reads as a status.
+    pub fn label(self) -> &'static str {
+        match self {
+            Availability::Available => "Available",
+            Availability::Busy => "Busy",
+            Availability::DoNotDisturb => "Do not disturb",
+            Availability::BeRightBack => "Be right back",
+            Availability::Away => "Away",
+            Availability::Offline => "Offline",
+            Availability::Unknown => "Status unknown",
+        }
+    }
+
+    /// How it reads in the menu that sets it.
+    pub fn pick_label(self) -> &'static str {
+        match self {
+            Availability::Away => "Appear away",
+            Availability::Offline => "Appear offline",
+            other => other.label(),
+        }
+    }
+}
+
+/// The signed-in user's status: what others see, and what the user set (if they
+/// did; otherwise Teams goes by activity).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Status {
+    pub shown: Availability,
+    pub set: Option<Availability>,
+}
+
 /// Everything listed in the sidebar.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Directory {

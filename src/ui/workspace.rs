@@ -5,7 +5,7 @@ use super::load::Load;
 use super::pictures::Pictures;
 use crate::backend::{Backend, Error, Push};
 use crate::model::markdown::{self, Mention};
-use crate::model::{Conversation, ConversationId, Directory, Kind, Meeting, Message, Picture, SearchHit, text};
+use crate::model::{Availability, Conversation, ConversationId, Directory, Kind, Meeting, Message, Picture, SearchHit, Status, text};
 use eframe::egui;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -26,6 +26,8 @@ const MESSAGES_FRONT_EVERY: Duration = Duration::from_secs(5);
 pub const NEWEST: usize = 40;
 /// How often the calendar is fetched again.
 const CALENDAR_EVERY: Duration = Duration::from_secs(5 * 60);
+/// How often the user's status is fetched again (it changes in other clients too).
+const STATUS_EVERY: Duration = Duration::from_secs(60);
 /// Searching messages starts once typing has paused this long.
 const SEARCH_PAUSE: Duration = Duration::from_millis(500);
 
@@ -37,6 +39,12 @@ pub struct Workspace {
     pub meetings: Option<Vec<Meeting>>,
     meetings_load: Load<Vec<Meeting>, Error>,
     meetings_at: Option<Instant>,
+    /// The user's status (None until it's in).
+    pub status: Option<Status>,
+    status_load: Load<Status, Error>,
+    status_at: Option<Instant>,
+    /// Setting the user's status, while it's under way.
+    status_set: Load<(), Error>,
     /// The activity feed's items (mentions, replies), newest last; None until loaded.
     pub activity: Option<Vec<Message>>,
     activity_load: Load<Vec<Message>, Error>,
@@ -204,6 +212,10 @@ impl Workspace {
             meetings: None,
             meetings_load: Load::Idle,
             meetings_at: None,
+            status: None,
+            status_load: Load::Idle,
+            status_at: None,
+            status_set: Load::Idle,
             activity: None,
             activity_load: Load::Idle,
             activity_at: None,
@@ -589,6 +601,16 @@ impl Workspace {
         self.chores.push(Load::start(ctx, move || backend.mark_read(&id, &up_to.to_string()).map(|()| false)));
     }
 
+    /// Set the user's status (`None`: by activity again). It shows set right away.
+    pub fn set_status(&mut self, ctx: &egui::Context, to: Option<Availability>) {
+        if let Some(status) = self.status.as_mut() {
+            *status = Status { shown: to.unwrap_or(status.shown), set: to };
+        }
+        let backend = self.backend.clone();
+        self.status_load = Load::Idle;
+        self.status_set = Load::start(ctx, move || backend.set_status(to));
+    }
+
     /// Ask GitHub whether there's a newer drift.
     pub fn check_for_update(&mut self, ctx: &egui::Context) {
         self.update = Load::start(ctx, crate::update::check);
@@ -784,6 +806,24 @@ impl Workspace {
             }
         }
         self.read_activity(ctx);
+        if let Some(result) = self.status_set.take() {
+            match result {
+                Ok(()) => {}
+                Err(Error::SignedOut) => return Some(Outcome::SignedOut),
+                Err(e) => {
+                    log_warn!("setting the status: {e}");
+                    self.error = Some(format!("Couldn't set your status. {e}"));
+                }
+            }
+            // What the service makes of it (by activity: what it works out).
+            self.status_at = None;
+        }
+        if let Some(result) = self.status_load.take() {
+            match result {
+                Ok(status) => self.status = Some(status),
+                Err(e) => log_debug!("status: {e}"),
+            }
+        }
         if let Some(found) = self.update.take() {
             if let Err(e) = &found {
                 log_warn!("checking for updates: {e}");
@@ -849,6 +889,11 @@ impl Workspace {
             let backend = self.backend.clone();
             let now = crate::model::time::now_ms();
             self.meetings_load = Load::start(ctx, move || backend.calendar(now - 86_400_000, now + 15 * 86_400_000));
+        }
+        if !self.status_load.is_running() && !self.status_set.is_running() && due(self.status_at, STATUS_EVERY) {
+            self.status_at = Some(Instant::now());
+            let backend = self.backend.clone();
+            self.status_load = Load::start(ctx, move || backend.status());
         }
         // Who has read how far, in a chat (for "Seen").
         if let Some(id) = self.open.clone()

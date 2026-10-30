@@ -21,6 +21,8 @@ pub const SPACES: &str = "https://api.spaces.skype.com";
 pub const SEARCH: &str = "https://outlook.office.com/search";
 /// The audience of the chat service aggregator (teams, channels, chats).
 pub const CHAT_AGGREGATOR: &str = "https://chatsvcagg.teams.microsoft.com";
+/// The audience of the presence service (status).
+pub const PRESENCE: &str = "https://presence.teams.microsoft.com";
 /// Tokens are renewed when they have less than this left (ms).
 const MARGIN: i64 = 5 * 60 * 1000;
 /// The keychain key of the refresh token.
@@ -57,6 +59,10 @@ pub struct Skype {
     pub middle_tier: String,
     /// Where pictures and files live: `https://<region>-prod.asyncgw.teams.microsoft.com`
     pub ams: String,
+    /// The presence service (status) for this user's region:
+    /// `https://teams.microsoft.com/ups/<geo>`. (`presence.teams.microsoft.com`
+    /// refuses the same requests.)
+    pub presence: String,
     expires: i64,
 }
 
@@ -204,6 +210,8 @@ fn parse_authz(v: &Value) -> Option<Skype> {
     let aggregator = gtms["chatSvcAggAfd"].as_str().map_or_else(|| "https://teams.microsoft.com/api/csa".to_string(), str::to_string);
     let middle_tier = gtms["middleTier"].as_str().map_or_else(|| format!("https://teams.microsoft.com/api/mt/{region}"), str::to_string);
     let ams = gtms["ams"].as_str().or(gtms["amsV2"].as_str()).unwrap_or("https://teams.microsoft.com/api/amsMTProd").to_string();
+    let presence =
+        gtms["presenceUPS"].as_str().or(gtms["unifiedPresence"].as_str()).unwrap_or("https://presence.teams.microsoft.com").to_string();
     let trim = |s: String| s.trim_end_matches('/').to_string();
     Some(Skype {
         token,
@@ -211,6 +219,7 @@ fn parse_authz(v: &Value) -> Option<Skype> {
         aggregator: trim(aggregator),
         middle_tier: trim(middle_tier),
         ams: trim(ams),
+        presence: trim(presence),
         expires,
     })
 }

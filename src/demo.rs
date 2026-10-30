@@ -5,7 +5,8 @@ use crate::backend::{Backend, Error, Result};
 use crate::model::markdown::Outgoing;
 use crate::model::text::{self, Block};
 use crate::model::{
-    Author, Card, Channel, Conversation, Directory, Kind, Meeting, Message, Picture, Preview, Reaction, SearchHit, Source, Team, time,
+    Author, Availability, Card, Channel, Conversation, Directory, Kind, Meeting, Message, Picture, Preview, Reaction, SearchHit, Source,
+    Status, Team, time,
 };
 
 pub struct Demo;
@@ -422,6 +423,14 @@ impl Backend for Demo {
     }
 
     fn pin(&self, _conversation: &str, _pinned: bool) -> Result<()> {
+        Ok(())
+    }
+
+    fn status(&self) -> Result<Status> {
+        Ok(Status { shown: Availability::Available, set: None })
+    }
+
+    fn set_status(&self, _to: Option<Availability>) -> Result<()> {
         Ok(())
     }
 }

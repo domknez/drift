@@ -2,7 +2,7 @@
 //! the UI only sees this trait and the `model` types.
 
 use crate::model::markdown::Outgoing;
-use crate::model::{ConversationId, Directory, Meeting, Message, Picture, SearchHit};
+use crate::model::{Availability, ConversationId, Directory, Meeting, Message, Picture, SearchHit, Status};
 use std::fmt;
 use std::sync::Arc;
 
@@ -87,6 +87,13 @@ pub trait Backend: Send + Sync {
 
     /// Pin a conversation to the top of the list, or unpin it.
     fn pin(&self, conversation: &str, pinned: bool) -> Result<()>;
+
+    /// The user's status.
+    fn status(&self) -> Result<Status>;
+
+    /// Set the user's status, everywhere they're signed in; `None` lets the service
+    /// go by activity again.
+    fn set_status(&self, to: Option<Availability>) -> Result<()>;
 
     /// Have changes pushed to `to` as they happen, for as long as the backend lives.
     /// A service that can't push does nothing; the UI polls either way.

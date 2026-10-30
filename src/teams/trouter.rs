@@ -296,7 +296,7 @@ fn ack_id(frame: &str) -> Option<&str> {
 
 /// The endpoint id, kept across runs: a new one each time piles up endpoints until
 /// Teams refuses more.
-fn endpoint_id() -> String {
+pub(super) fn endpoint_id() -> String {
     let path = crate::settings::dir().map(|d| d.join("endpoint"));
     if let Some(id) = path.as_ref().and_then(|p| std::fs::read_to_string(p).ok()).map(|s| s.trim().to_string()).filter(|s| s.len() == 36) {
         return id;

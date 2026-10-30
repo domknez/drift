@@ -74,7 +74,10 @@ pub fn request(method: Method, url: &str, headers: &[(&str, &str)], body: Body) 
     let json = if text.trim().is_empty() { Value::Null } else { serde_json::from_str(&text).unwrap_or(Value::Null) };
     match status {
         200..=299 => Ok(json),
-        401 => Err(Error::SignedOut),
+        401 => {
+            log_debug!("{path}: HTTP 401: {}", error_text(&json, &text));
+            Err(Error::SignedOut)
+        }
         _ => {
             log_warn!("{path}: HTTP {status}: {}", error_text(&json, &text));
             Err(Error::Service(format!("HTTP {status}")))

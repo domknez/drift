@@ -14,8 +14,8 @@ mod trouter;
 
 use crate::backend::{Backend, Error, Push, Result};
 use crate::model::markdown::Outgoing;
-use crate::model::{Conversation, Directory, Kind, Meeting, Message, Picture, SearchHit};
-use auth::{CHAT_AGGREGATOR, SEARCH, SPACES, Session};
+use crate::model::{Availability, Conversation, Directory, Kind, Meeting, Message, Picture, SearchHit, Status};
+use auth::{CHAT_AGGREGATOR, PRESENCE, SEARCH, SPACES, Session};
 use http::{Body, Method};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -23,6 +23,8 @@ use std::sync::{Arc, Mutex};
 
 /// AMS only takes requests from a client calling itself this.
 const AMS_AGENT: &str = "SkypeOfficialClient/0/0.0.0.0";
+/// The client version the presence service is told.
+const PRESENCE_CLIENT_VERSION: &str = "49/25113001312";
 /// Messages fetched when a conversation opens.
 const PAGE: usize = 200;
 /// The kinds of conversation the chat service lists.
@@ -102,6 +104,34 @@ impl Teams {
                 ("X-Ms-Client-Version", "1.0.0.0"),
             ],
         )
+    }
+
+    /// A request to the presence service, with its bearer and headers.
+    fn presence(&self, method: Method, path: &str, body: Body) -> Result<Value> {
+        let (skype, bearer) = {
+            let mut session = self.session();
+            (session.skype()?, format!("Bearer {}", session.access(PRESENCE)?))
+        };
+        let endpoint = trouter::endpoint_id();
+        let headers = [
+            ("Authorization", bearer.as_str()),
+            ("X-Skypetoken", skype.token.as_str()),
+            ("Accept", "application/json"),
+            ("x-ms-client-user-agent", "Teams-V2-Desktop"),
+            ("x-ms-correlation-id", "1"),
+            ("x-ms-client-version", PRESENCE_CLIENT_VERSION),
+            ("x-ms-endpoint-id", endpoint.as_str()),
+        ];
+        http::request(method, &format!("{}{path}", skype.presence), &headers, body)
+    }
+
+    /// The user's own presence entry, as the presence service gives it.
+    fn status_raw(&self) -> Result<Value> {
+        // The id is known once a token has been fetched.
+        self.session().access(PRESENCE)?;
+        let body = serde_json::json!([{ "mri": self.my_id() }]);
+        let answer = self.presence(Method::Post, "/v1/presence/getpresence/", Body::Json(&body))?;
+        Ok(answer.as_array().and_then(|a| a.first()).cloned().unwrap_or(Value::Null))
     }
 
     /// The body of a send or an edit: the HTML, and who it mentions.
@@ -605,6 +635,20 @@ impl Backend for Teams {
         // The same property the conversation list reports as `favorite`.
         let path = format!("/v1/users/ME/conversations/{}/properties?name=favorite", http::encode(conversation));
         self.chat_write(Method::Put, &path, &serde_json::json!({"favorite": if pinned { "true" } else { "false" }}))
+    }
+
+    fn status(&self) -> Result<Status> {
+        Ok(parse::status(&self.status_raw()?))
+    }
+
+    fn set_status(&self, to: Option<Availability>) -> Result<()> {
+        match to {
+            Some(a) => {
+                let body = serde_json::json!({ "availability": a.key() });
+                self.presence(Method::Put, "/v1/me/forceavailability/", Body::Json(&body)).map(|_| ())
+            }
+            None => self.presence(Method::Delete, "/v1/me/forceavailability/", Body::None).map(|_| ()),
+        }
     }
 
     fn listen(self: Arc<Self>, to: Box<dyn Fn(Push) + Send>) {

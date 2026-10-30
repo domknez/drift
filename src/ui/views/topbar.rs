@@ -1,7 +1,7 @@
 //! The top bar: the wordmark, the tabs (Activity, Chats, Teams, Meetings) with what's
 //! unread, search, today's meeting with Join, and the user's menu.
 
-use crate::model::{Conversation, Directory, Kind, Picture, time};
+use crate::model::{Availability, Conversation, Directory, Kind, Picture, time};
 use crate::settings::Appearance;
 use crate::ui::app::Request;
 use crate::ui::style::icons::{self, Icon};
@@ -289,6 +289,9 @@ fn user_menu(ui: &mut Ui, ws: &mut Workspace, rect: Rect, theme: Appearance) -> 
     let response = widgets::avatar(&mut child, &ws.me_id, &ws.me, rect.width(), picture)
         .interact(Sense::click())
         .on_hover_cursor(egui::CursorIcon::PointingHand);
+    if let Some(status) = ws.status {
+        widgets::status_dot(ui.painter(), rect.right_bottom() - vec2(4.0, 4.0), 5.0, status.shown, p.canvas);
+    }
     let mut request = None;
     let mut popup = egui::Popup::menu(&response)
         .align(egui::RectAlign::BOTTOM_END)
@@ -306,17 +309,58 @@ fn user_menu(ui: &mut Ui, ws: &mut Workspace, rect: Rect, theme: Appearance) -> 
         ui.horizontal(|ui| {
             ui.add_space(6.0);
             let picture = if ws.me_id.is_empty() { None } else { ws.pictures.get(&me) };
-            widgets::avatar(ui, &ws.me_id, &ws.me, 40.0, picture);
+            let face = widgets::avatar(ui, &ws.me_id, &ws.me, 40.0, picture).rect;
+            if let Some(status) = ws.status {
+                widgets::status_dot(ui.painter(), face.right_bottom() - vec2(5.0, 5.0), 6.0, status.shown, p.panel);
+            }
             ui.add_space(12.0);
             ui.vertical(|ui| {
                 ui.add_space(3.0);
                 ui.label(RichText::new(&ws.me).font(ty::item()).color(p.text));
                 ui.add_space(2.0);
-                ui.label(RichText::new("Signed in to Microsoft Teams").font(ty::meta()).color(p.faint));
+                let line = match ws.status {
+                    Some(s) if s.set.is_some() => format!("{} (set by you)", s.shown.label()),
+                    Some(s) => s.shown.label().to_string(),
+                    None => "Signed in to Microsoft Teams".into(),
+                };
+                ui.label(RichText::new(line).font(ty::meta()).color(p.faint));
             });
         });
         ui.add_space(12.0);
         divider(ui);
+
+        // Status: what to show as, and going back to Teams working it out.
+        if let Some(status) = ws.status {
+            menu_label(ui, "Status");
+            let picks = Availability::PICKS.into_iter().map(Some);
+            for pick in picks.chain(status.set.is_some().then_some(None)) {
+                let (row, response) = ui.allocate_exact_size(vec2(ui.available_width(), 30.0), Sense::click());
+                let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
+                if response.hovered() {
+                    ui.painter().rect_filled(row.shrink2(vec2(2.0, 1.0)), CornerRadius::same(8), p.hover);
+                }
+                let text_x = row.left() + 34.0;
+                match pick {
+                    Some(a) => {
+                        widgets::status_dot(ui.painter(), pos2(row.left() + 18.0, row.center().y), 5.0, a, p.panel);
+                        ui.painter().text(pos2(text_x, row.center().y), Align2::LEFT_CENTER, a.pick_label(), ty::small(), p.text);
+                    }
+                    None => {
+                        let label = "Reset status";
+                        ui.painter().text(pos2(text_x, row.center().y), Align2::LEFT_CENTER, label, ty::small(), p.dim);
+                    }
+                }
+                if pick.is_some() && pick == status.set {
+                    let mark = Rect::from_center_size(pos2(row.right() - 18.0, row.center().y), vec2(14.0, 14.0));
+                    icons::paint(ui.painter(), mark, Icon::Check, p.accent);
+                }
+                if response.clicked() && pick != status.set {
+                    ws.set_status(ui.ctx(), pick);
+                }
+            }
+            ui.add_space(8.0);
+            divider(ui);
+        }
 
         // Appearance, as three segments.
         menu_label(ui, "Appearance");

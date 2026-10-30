@@ -27,6 +27,10 @@ fn main() -> eframe::Result {
         shape();
         return Ok(());
     }
+    if std::env::args().nth(1).as_deref() == Some("status") {
+        status();
+        return Ok(());
+    }
     if std::env::args().nth(1).as_deref() == Some("listen") {
         listen();
         return Ok(());
@@ -50,6 +54,22 @@ fn listen() {
     }));
     loop {
         std::thread::park();
+    }
+}
+
+/// `drift status`: the signed-in user's status, as drift reads it.
+fn status() {
+    use backend::Backend;
+    let Some(session) = teams::auth::Session::stored() else {
+        eprintln!("drift: not signed in");
+        std::process::exit(1);
+    };
+    match teams::Teams::new(session).status() {
+        Ok(s) => println!("shown: {}\nset: {}", s.shown.label(), s.set.map_or("nothing (by activity)", |a| a.label())),
+        Err(e) => {
+            eprintln!("drift: {e}");
+            std::process::exit(1);
+        }
     }
 }
 

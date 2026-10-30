@@ -2,7 +2,8 @@
 //! API isn't documented, and what's missing gets a default rather than an error.
 
 use crate::model::{
-    Author, Card, Channel, Conversation, Kind, Meeting, Message, Picture, Preview, Reaction, SearchHit, Source, Team, text, time,
+    Author, Availability, Card, Channel, Conversation, Kind, Meeting, Message, Picture, Preview, Reaction, SearchHit, Source, Status, Team,
+    text, time,
 };
 use serde_json::Value;
 
@@ -351,6 +352,18 @@ pub fn read_positions(v: &Value) -> Vec<(String, i64)> {
         .collect()
 }
 
+/// The user's status from their presence entry. A status set with an end that has
+/// passed no longer counts.
+pub fn status(entry: &Value) -> Status {
+    let presence = &entry["presence"];
+    let forced = &presence["forcedAvailability"];
+    let current = forced["expiry"].as_str().and_then(time::parse_iso).is_none_or(|end| end > time::now_ms());
+    Status {
+        shown: Availability::from_key(str_of(presence, &["availability"]).unwrap_or("")),
+        set: str_of(forced, &["availability"]).filter(|_| current).map(Availability::from_key).filter(|a| *a != Availability::Unknown),
+    }
+}
+
 /// Meetings from the middle tier's calendar view, earliest first.
 pub fn meetings(v: &Value) -> Vec<Meeting> {
     let mut list: Vec<Meeting> = v["value"]
@@ -416,6 +429,17 @@ pub fn profiles(v: &Value) -> Vec<(String, String)> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn reads_status() {
+        let set = json!({"presence": {"availability": "Offline", "activity": "OffWork",
+            "forcedAvailability": {"availability": "Offline", "activity": "OffWork", "expiry": "9999-12-31T23:59:59.9999999Z"}}});
+        assert_eq!(status(&set), Status { shown: Availability::Offline, set: Some(Availability::Offline) });
+        let ended =
+            json!({"presence": {"availability": "Away", "forcedAvailability": {"availability": "Busy", "expiry": "2020-01-01T00:00:00Z"}}});
+        assert_eq!(status(&ended), Status { shown: Availability::Away, set: None });
+        assert_eq!(status(&json!({"presence": {"availability": "AvailableIdle"}})).shown, Availability::Available);
+    }
 
     const ME: &str = "8:orgid:me";
 

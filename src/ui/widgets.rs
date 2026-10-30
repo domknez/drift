@@ -2,7 +2,7 @@
 
 use super::style::icons::{self, Icon};
 use super::style::{colors, metrics, palette, typography as ty};
-use crate::model::{Block, Card, Inline, Picture, Reaction};
+use crate::model::{Availability, Block, Card, Inline, Picture, Reaction};
 use crate::ui::pictures::Pictures;
 use eframe::egui::{self, Align2, Color32, CornerRadius, Frame, Margin, Rect, Response, RichText, Sense, Stroke, TextureId, Ui, vec2};
 
@@ -23,6 +23,29 @@ pub fn avatar(ui: &mut Ui, id: &str, name: &str, size: f32, picture: Option<Text
     painter.circle_filled(rect.center(), size / 2.0, palette::avatar(id));
     painter.text(rect.center(), Align2::CENTER_CENTER, initials(name), ty::initials(size), Color32::WHITE);
     response
+}
+
+/// A status dot centred at `center`, cut out of `behind` (the colour around it).
+pub fn status_dot(painter: &egui::Painter, center: egui::Pos2, radius: f32, status: Availability, behind: Color32) {
+    let p = colors();
+    let (green, red, amber) =
+        (Color32::from_rgb(0x5f, 0xb3, 0x36), Color32::from_rgb(0xd7, 0x46, 0x54), Color32::from_rgb(0xf0, 0xa3, 0x1e));
+    painter.circle_filled(center, radius + 2.0, behind);
+    let fill = match status {
+        Availability::Available => green,
+        Availability::Busy | Availability::DoNotDisturb => red,
+        Availability::BeRightBack | Availability::Away => amber,
+        Availability::Offline | Availability::Unknown => {
+            let ring = if status == Availability::Offline { p.dim } else { p.faint };
+            painter.circle_stroke(center, radius - 0.75, Stroke::new(1.5, ring));
+            return;
+        }
+    };
+    painter.circle_filled(center, radius, fill);
+    if status == Availability::DoNotDisturb {
+        let half = radius * 0.5;
+        painter.line_segment([center - vec2(half, 0.0), center + vec2(half, 0.0)], Stroke::new(radius * 0.4, Color32::WHITE));
+    }
 }
 
 /// A team's tile: its picture, or its initial on a rounded square.
