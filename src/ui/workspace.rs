@@ -5,14 +5,15 @@ use super::load::Load;
 use super::pictures::Pictures;
 use crate::backend::{Backend, Error};
 use crate::model::markdown::{self, Mention};
-use crate::model::{ConversationId, Directory, Message, Picture, SearchHit, text};
+use crate::model::{Conversation, ConversationId, Directory, Kind, Message, Picture, SearchHit, text};
 use eframe::egui;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::sync::mpsc::{Receiver, Sender};
 use std::time::{Duration, Instant};
 
 /// How often the sidebar is fetched again (until the service pushes changes).
-const DIRECTORY_EVERY: Duration = Duration::from_secs(60);
+const DIRECTORY_EVERY: Duration = Duration::from_secs(15);
 /// How often the open conversation is fetched again.
 const MESSAGES_EVERY: Duration = Duration::from_secs(20);
 /// Searching messages starts once typing has paused this long.
@@ -76,6 +77,15 @@ pub struct Workspace {
     chores: Vec<Load<bool, Error>>,
     /// The conversation and message last marked read, so it's marked once.
     marked: Option<(String, String)>,
+    /// Show a notification for each new message (the user's setting).
+    pub notifications: bool,
+    /// The newest message seen in each conversation (notifications are for newer ones).
+    seen: HashMap<String, i64>,
+    seen_once: bool,
+    /// Conversations whose notification was clicked.
+    clicked: (Sender<String>, Receiver<String>),
+    /// The unread count last put on the Dock icon.
+    badge: Option<usize>,
 }
 
 /// A picture waiting in a composer to go with the next message.
@@ -160,6 +170,11 @@ impl Workspace {
             sending: Load::Idle,
             chores: Vec::new(),
             marked: None,
+            notifications: true,
+            seen: HashMap::new(),
+            seen_once: false,
+            clicked: std::sync::mpsc::channel(),
+            badge: None,
         }
     }
 
@@ -327,6 +342,65 @@ impl Workspace {
         self.chores.push(Load::start(ctx, move || backend.react(&open, &message, &key, add).map(|()| true)));
     }
 
+    /// Notifications for messages newer than the last ones seen: in chats and meeting
+    /// chats (not the user's own, not muted ones, not the one on screen while drift is
+    /// in front), and in channels only what Activity shows (mentions, replies). The
+    /// first list only sets what's been seen.
+    fn notify_new(&mut self, ctx: &egui::Context, directory: &Directory) {
+        let focused = ctx.input(|i| i.viewport().focused.unwrap_or(true));
+        let mut new: Vec<&Conversation> = Vec::new();
+        for c in &directory.conversations {
+            let Some(last) = &c.last else { continue };
+            let before = self.seen.insert(c.id.clone(), last.at);
+            let newer = before.is_none_or(|at| last.at > at);
+            let on_screen = focused && self.open.as_deref() == Some(c.id.as_str());
+            let fresh = self.seen_once && newer && !c.muted && !on_screen;
+            match c.kind {
+                Kind::Chat | Kind::Meeting if fresh && last.author != self.me && !last.author.is_empty() => new.push(c),
+                Kind::Feed if fresh && self.notifications => {
+                    let (tx, id, ctx) = (self.clicked.0.clone(), c.id.clone(), ctx.clone());
+                    let body: String = last.text.chars().take(160).collect();
+                    crate::notify::show("New in Activity", None, &body, move || {
+                        let _ = tx.send(id);
+                        ctx.request_repaint();
+                    });
+                }
+                _ => {}
+            }
+        }
+        self.seen_once = true;
+        if !self.notifications || new.is_empty() {
+            return;
+        }
+        // A handful each on its own; more than that as one.
+        if new.len() > 3 {
+            let tx = self.clicked.0.clone();
+            let first = new[0].id.clone();
+            let ctx = ctx.clone();
+            crate::notify::show(
+                &format!("{} new messages", new.len()),
+                None,
+                &new.iter().map(|c| c.title.as_str()).collect::<Vec<_>>().join(", "),
+                move || {
+                    let _ = tx.send(first);
+                    ctx.request_repaint();
+                },
+            );
+            return;
+        }
+        for c in new {
+            let Some(last) = &c.last else { continue };
+            let one_to_one = c.kind == Kind::Chat && c.members.len() <= 1;
+            let place = (!one_to_one).then_some(c.title.as_str());
+            let body: String = last.text.chars().take(160).collect();
+            let (tx, id, ctx) = (self.clicked.0.clone(), c.id.clone(), ctx.clone());
+            crate::notify::show(&last.author, place, &body, move || {
+                let _ = tx.send(id);
+                ctx.request_repaint();
+            });
+        }
+    }
+
     /// Open the message an activity item is about: its conversation, its thread if it's
     /// a reply, and the message itself marked.
     pub fn open_message(&mut self, conversation: &str, message: Option<String>, root: Option<String>) {
@@ -426,6 +500,25 @@ impl Workspace {
                 Err(e) => self.failed(e),
             }
         }
+        // A notification was clicked: open its conversation (or Activity), in front.
+        while let Ok(id) = self.clicked.1.try_recv() {
+            let feed = self.directory.as_ref().and_then(|d| d.conversation(&id)).is_some_and(|c| c.kind == Kind::Feed);
+            self.section = if feed { Section::Activity } else { Section::Chats };
+            if !feed {
+                self.open(&id);
+            }
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        }
+        let unread = self
+            .directory
+            .as_ref()
+            .map_or(0, |d| d.conversations.iter().filter(|c| c.unread && !c.muted && matches!(c.kind, Kind::Chat | Kind::Meeting)).count());
+        if self.badge != Some(unread) {
+            self.badge = Some(unread);
+            crate::notify::badge(unread);
+        }
         let mut refetch = false;
         for chore in &mut self.chores {
             match chore.take() {
@@ -446,6 +539,7 @@ impl Workspace {
                         self.me = self.backend.me();
                         self.me_id = self.backend.me_id();
                     }
+                    self.notify_new(ctx, &directory);
                     self.directory = Some(directory);
                     self.error = None;
                 }

@@ -254,6 +254,11 @@ fn user_menu(ui: &mut Ui, ws: &mut Workspace, rect: Rect, theme: Appearance) -> 
             }
         }
         ui.separator();
+        let mut on = ws.notifications;
+        if ui.checkbox(&mut on, "Notifications for new messages").changed() {
+            request = Some(Request::Notifications(on));
+        }
+        ui.separator();
         if ui.button("Sign out").clicked() {
             request = Some(Request::SignOut);
         }

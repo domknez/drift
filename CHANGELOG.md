@@ -30,6 +30,9 @@ The first version of drift:
 - Reply with a quote, edit (↑ in an empty box edits your last message) and delete your
   messages; Markdown and @mentions when writing
 - Teams' own colour emoji in reactions and messages
+- Notifications for new messages in chats and meeting chats and for mentions and
+  replies, a click opens the conversation; the unread count on the Dock icon; a setting
+  to turn them off
 - Pin and unpin from the list's right-click menu; fold any section of the list, or all
   of them at once
 - Cards from connectors (Azure Repos pull requests and the like) with their title as a

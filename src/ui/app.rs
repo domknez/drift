@@ -59,6 +59,7 @@ impl SignIn {
 /// What the views ask the app for.
 pub enum Request {
     Theme(Appearance),
+    Notifications(bool),
     SignOut,
 }
 
@@ -170,6 +171,7 @@ impl App {
     fn handle(&mut self, request: Request) {
         match request {
             Request::Theme(theme) => self.prefs.update(|p| p.theme = theme),
+            Request::Notifications(on) => self.prefs.update(|p| p.notifications = on),
             Request::SignOut => {
                 Session::sign_out();
                 self.prefs.update(|p| p.conversation = None);
@@ -205,6 +207,7 @@ impl eframe::App for App {
                     return;
                 }
                 let before = workspace.open.clone();
+                workspace.notifications = self.prefs.notifications;
                 request = views::workspace(ui, workspace, self.prefs.theme);
                 if workspace.open != before {
                     let open = workspace.open.clone();

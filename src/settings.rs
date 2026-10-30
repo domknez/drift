@@ -47,6 +47,8 @@ pub struct Prefs {
     pub theme: Appearance,
     /// The conversation open last (its id).
     pub conversation: Option<String>,
+    /// A notification for each new message.
+    pub notifications: bool,
     /// The settings file changes are saved to; None keeps them in memory.
     file: Option<PathBuf>,
 }
@@ -65,6 +67,7 @@ impl Prefs {
         Prefs {
             theme: get("theme").and_then(Appearance::from_key).unwrap_or(Appearance::System),
             conversation: get("conversation").map(str::to_string),
+            notifications: get("notifications") != Some("false"),
             file: None,
         }
     }
@@ -87,8 +90,12 @@ impl Prefs {
         }
     }
 
-    fn values(&self) -> [(&'static str, String); 2] {
-        [("conversation", self.conversation.clone().unwrap_or_default()), ("theme", self.theme.key().into())]
+    fn values(&self) -> [(&'static str, String); 3] {
+        [
+            ("conversation", self.conversation.clone().unwrap_or_default()),
+            ("notifications", if self.notifications { "true" } else { "false" }.into()),
+            ("theme", self.theme.key().into()),
+        ]
     }
 }
 
@@ -112,7 +119,7 @@ fn merge(text: &str, changes: &[(&str, String)]) -> String {
 mod tests {
     use super::*;
 
-    const SAVED: &str = "conversation=19:abc@thread.v2\ntheme=light\n";
+    const SAVED: &str = "conversation=19:abc@thread.v2\nnotifications=false\ntheme=light\n";
 
     #[test]
     fn reads_a_saved_file() {

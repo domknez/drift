@@ -49,6 +49,10 @@ Sibling of [dust](https://github.com/domknez/dust) (music) and
 - **Pictures** in messages, and a tenant's own emoji in reactions
 - **Activity:** who mentioned you or replied, what they wrote and where; a click
   opens that very message, marked (in its thread if it's a reply)
+- **Notifications** for new messages in your chats and meeting chats, and for mentions
+  and replies (Activity); a click opens the conversation. Muted chats and the one on
+  screen stay quiet; the Dock icon shows how many chats are unread. Off in the menu
+  under your picture
 - **Pin and unpin** chats and channels from their right-click menu
 - **Read here, read in Teams:** opening a conversation marks it read for Teams too
 - **Messages as written:** bold, italics, strikethrough, code, tables, quotes, links,
