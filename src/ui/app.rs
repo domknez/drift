@@ -228,11 +228,20 @@ impl eframe::App for App {
                 if workspace.muted_here.is_none() {
                     workspace.muted_here = Some(self.prefs.muted.iter().cloned().collect());
                 }
+                if workspace.hidden.is_none() {
+                    workspace.hidden = Some(self.prefs.hidden.iter().cloned().collect());
+                }
                 let muted_before = workspace.muted_here.clone();
+                let hidden_before = workspace.hidden.clone();
                 request = views::workspace(ui, workspace, self.prefs.theme);
                 if workspace.open != before {
                     let open = workspace.open.clone();
                     self.prefs.update(|p| p.conversation = open);
+                }
+                if workspace.hidden != hidden_before {
+                    let mut hidden: Vec<(String, i64)> = workspace.hidden.iter().flatten().map(|(id, at)| (id.clone(), *at)).collect();
+                    hidden.sort();
+                    self.prefs.update(|p| p.hidden = hidden);
                 }
                 if workspace.muted_here != muted_before {
                     let mut muted: Vec<String> = workspace.muted_here.iter().flatten().cloned().collect();

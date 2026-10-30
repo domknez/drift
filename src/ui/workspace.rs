@@ -115,6 +115,8 @@ pub struct Workspace {
     pub switcher: Option<super::views::switcher::Switcher>,
     /// Conversations opened, the latest first.
     pub recent: Vec<ConversationId>,
+    /// Conversations hidden in drift, with when (None until the saved ones are in).
+    pub hidden: Option<HashMap<String, i64>>,
     /// Conversations muted in drift (None until the saved ones are in).
     pub muted_here: Option<HashSet<String>>,
     /// The height of the text in the composer and in the thread's (as last drawn).
@@ -226,7 +228,7 @@ impl Workspace {
             hits_load: Load::Idle,
             typed: (String::new(), Instant::now()),
             // Meeting chats pile up; they start folded.
-            folded: HashSet::from(["meetings".to_string()]),
+            folded: HashSet::from(["meetings".to_string(), "hidden".to_string()]),
             draft: String::new(),
             sending: Load::Idle,
             chores: Vec::new(),
@@ -242,6 +244,7 @@ impl Workspace {
             switcher: None,
             recent: Vec::new(),
             muted_here: None,
+            hidden: None,
             composer_text: [20.0; 2],
             viewing: None,
             drawn: None,
@@ -576,6 +579,25 @@ impl Workspace {
         }
         let (backend, id) = (self.backend.clone(), id.to_string());
         self.chores.push(Load::start(ctx, move || backend.mark_read(&id, &up_to.to_string()).map(|()| false)));
+    }
+
+    /// Whether a conversation is hidden: hidden in drift, and nothing newer since.
+    pub fn is_hidden(&self, c: &Conversation) -> bool {
+        self.hidden.as_ref().and_then(|h| h.get(&c.id)).is_some_and(|at| c.last.as_ref().is_none_or(|l| l.at <= *at))
+    }
+
+    /// Hide a conversation from the list (until something new comes), or show it again.
+    pub fn set_hidden(&mut self, id: &str, hidden: bool) {
+        let set = self.hidden.get_or_insert_default();
+        if hidden {
+            set.insert(id.to_string(), crate::model::time::now_ms());
+            if self.open.as_deref() == Some(id) {
+                self.open = None;
+                self.messages = None;
+            }
+        } else {
+            set.remove(id);
+        }
     }
 
     /// Mute a conversation in drift (no notifications, not counted unread), or unmute it.

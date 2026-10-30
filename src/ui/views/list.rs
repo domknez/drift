@@ -215,19 +215,15 @@ fn chats(ui: &mut Ui, ws: &mut Workspace, d: &Directory) {
         Chip::Channels => c.kind == Kind::Channel,
         Chip::People => c.kind == Kind::Chat,
     };
-    let pinned: Vec<Conversation> =
-        d.conversations.iter().filter(|c| c.pinned && c.kind != Kind::Feed && fits(c) && matches(ws, &c.title)).cloned().collect();
-    if !pinned.is_empty() && section(ui, ws, "pinned", "PINNED") {
-        for c in &pinned {
-            row(ui, ws, d, c);
-        }
-    }
+    let shown = |c: &&Conversation| c.kind != Kind::Feed && !ws.is_hidden(c) && fits(c) && matches(ws, &c.title);
+    let pinned: Vec<Conversation> = d.conversations.iter().filter(|c| c.pinned).filter(shown).cloned().collect();
     // Recent: chats and channels together, newest first; only a few meeting chats.
     let mut meetings = 0;
     let recent: Vec<Conversation> = d
         .conversations
         .iter()
-        .filter(|c| !c.pinned && c.kind != Kind::Feed && fits(c) && matches(ws, &c.title))
+        .filter(|c| !c.pinned)
+        .filter(shown)
         .filter(|c| {
             if c.kind != Kind::Meeting {
                 return true;
@@ -237,6 +233,11 @@ fn chats(ui: &mut Ui, ws: &mut Workspace, d: &Directory) {
         })
         .cloned()
         .collect();
+    if !pinned.is_empty() && section(ui, ws, "pinned", "PINNED") {
+        for c in &pinned {
+            row(ui, ws, d, c);
+        }
+    }
     if !recent.is_empty() && section(ui, ws, "recent", "RECENT") {
         for c in &recent {
             row(ui, ws, d, c);
@@ -244,6 +245,14 @@ fn chats(ui: &mut Ui, ws: &mut Workspace, d: &Directory) {
     }
     if pinned.is_empty() && recent.is_empty() {
         empty(ui, if ws.filter.trim().is_empty() { "Nothing here." } else { "No chats or channels by that name." });
+    }
+    // Hidden ones, folded away at the bottom (to show them again).
+    let hidden: Vec<Conversation> =
+        d.conversations.iter().filter(|c| ws.is_hidden(c) && fits(c) && matches(ws, &c.title)).cloned().collect();
+    if !hidden.is_empty() && section(ui, ws, "hidden", &format!("HIDDEN ({})", hidden.len())) {
+        for c in &hidden {
+            row(ui, ws, d, c);
+        }
     }
 }
 
@@ -678,6 +687,11 @@ pub fn conversation_menu(ui: &mut Ui, ws: &mut Workspace, c: &Conversation) {
     }
     if ui.button(if c.pinned { "Unpin" } else { "Pin to the top" }).clicked() {
         ws.set_pinned(ui.ctx(), &c.id, !c.pinned);
+        ui.close();
+    }
+    let hidden = ws.is_hidden(c);
+    if ui.button(if hidden { "Show in the list" } else { "Hide from the list" }).on_hover_text("It comes back when something new is written").clicked() {
+        ws.set_hidden(&c.id, !hidden);
         ui.close();
     }
     ui.separator();

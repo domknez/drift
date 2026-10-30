@@ -51,6 +51,9 @@ pub struct Prefs {
     pub notifications: bool,
     /// Conversations muted in drift (their ids): no notifications, not counted unread.
     pub muted: Vec<String>,
+    /// Conversations hidden in drift, each with when (Unix ms): they're listed again
+    /// once something newer comes.
+    pub hidden: Vec<(String, i64)>,
     /// The settings file changes are saved to; None keeps them in memory.
     file: Option<PathBuf>,
 }
@@ -70,6 +73,9 @@ impl Prefs {
             theme: get("theme").and_then(Appearance::from_key).unwrap_or(Appearance::System),
             conversation: get("conversation").map(str::to_string),
             notifications: get("notifications") != Some("false"),
+            hidden: get("hidden")
+                .map(|v| v.split(',').filter_map(|e| e.rsplit_once('|')).filter_map(|(id, at)| Some((id.to_string(), at.parse().ok()?))).collect())
+                .unwrap_or_default(),
             muted: get("muted").map(|v| v.split(',').filter(|s| !s.is_empty()).map(str::to_string).collect()).unwrap_or_default(),
             file: None,
         }
@@ -93,9 +99,10 @@ impl Prefs {
         }
     }
 
-    fn values(&self) -> [(&'static str, String); 4] {
+    fn values(&self) -> [(&'static str, String); 5] {
         [
             ("conversation", self.conversation.clone().unwrap_or_default()),
+            ("hidden", self.hidden.iter().map(|(id, at)| format!("{id}|{at}")).collect::<Vec<_>>().join(",")),
             ("muted", self.muted.join(",")),
             ("notifications", if self.notifications { "true" } else { "false" }.into()),
             ("theme", self.theme.key().into()),
@@ -123,7 +130,7 @@ fn merge(text: &str, changes: &[(&str, String)]) -> String {
 mod tests {
     use super::*;
 
-    const SAVED: &str = "conversation=19:abc@thread.v2\nmuted=19:x@thread.v2,19:y\nnotifications=false\ntheme=light\n";
+    const SAVED: &str = "conversation=19:abc@thread.v2\nhidden=19:old@thread.v2|1793000000000\nmuted=19:x@thread.v2,19:y\nnotifications=false\ntheme=light\n";
 
     #[test]
     fn reads_a_saved_file() {
