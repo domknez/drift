@@ -507,6 +507,31 @@ impl Backend for Teams {
                 });
             }
         }
+        // The chat with oneself, for notes: named for the user, with their picture;
+        // listed even before anything's written in it.
+        let my_name = names.get(&me).cloned().unwrap_or_else(|| Backend::me(self));
+        let notes = format!("{my_name} (You)");
+        let mine = Some(Picture::Person { id: me.clone(), name: my_name });
+        match conversations.iter_mut().find(|c| c.id == parse::NOTES) {
+            Some(c) => {
+                c.title = notes;
+                c.picture = mine;
+                c.members.clear();
+            }
+            None => conversations.push(Conversation {
+                id: parse::NOTES.to_string(),
+                kind: Kind::Chat,
+                title: notes,
+                last: None,
+                unread: false,
+                read_up_to: None,
+                pinned: false,
+                muted: false,
+                join_url: None,
+                picture: mine,
+                members: Vec::new(),
+            }),
+        }
         conversations.sort_by_key(|c| std::cmp::Reverse(c.last.as_ref().map_or(0, |l| l.at)));
         Ok(Directory { teams, conversations })
     }

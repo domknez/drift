@@ -85,6 +85,9 @@ pub fn roster_chats(roster: &Value) -> std::collections::HashMap<String, RosterC
         .collect()
 }
 
+/// The chat with oneself, for notes.
+pub const NOTES: &str = "48:notes";
+
 /// The chat service's conversation list: what's unread and the newest message, by id.
 pub fn conversations(v: &Value) -> Vec<Conversation> {
     v["conversations"]
@@ -97,6 +100,8 @@ pub fn conversations(v: &Value) -> Vec<Conversation> {
             let cprops = &c["properties"];
             // productThreadType is the clearest signal; fall back to threadType.
             let kind = match props["productThreadType"].as_str() {
+                // The chat with oneself (notes), which Teams keeps among its streams.
+                _ if id == NOTES => Kind::Chat,
                 Some("OneToOneChat" | "Chat") => Kind::Chat,
                 Some("Meeting") => Kind::Meeting,
                 Some(t) if t.starts_with("Teams") => Kind::Channel,
