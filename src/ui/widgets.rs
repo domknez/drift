@@ -203,9 +203,9 @@ pub fn blocks(ui: &mut Ui, pictures: &mut Pictures, blocks: &[Block]) -> Option<
                     ui,
                     |ui| {
                         ui.set_width(ui.available_width());
-                        egui::ScrollArea::horizontal().id_salt(code.as_ptr()).show(ui, |ui| {
-                            ui.add(egui::Label::new(RichText::new(code).font(ty::code()).color(p.text)).extend());
-                        });
+                        // Long lines wrap: a sideways scroll area inside the scrolling list
+                        // flips its scroll bar every frame, and the whole list flickers.
+                        ui.add(egui::Label::new(RichText::new(code).font(ty::code()).color(p.text)).wrap());
                     },
                 );
             }
@@ -264,12 +264,16 @@ fn quote(ui: &mut Ui, pictures: &mut Pictures, runs: &[Inline], clickable: bool)
         && response.interact(Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text("Go to this message").clicked()
 }
 
-/// A table with hairlines between its cells; wide ones scroll sideways.
+/// A table with hairlines between its cells.
 fn table(ui: &mut Ui, pictures: &mut Pictures, rows: &[Vec<Vec<Inline>>], header: bool) {
     let p = colors();
     let columns = rows.iter().map(Vec::len).max().unwrap_or(0);
     Frame::new().stroke(Stroke::new(1.0, p.line)).corner_radius(CornerRadius::same(metrics::RADIUS)).show(ui, |ui| {
-        egui::ScrollArea::horizontal().id_salt(rows.as_ptr()).show(ui, |ui| {
+        // Too wide a table is cut at the bubble's edge (no sideways scroll area: inside
+        // the scrolling list it flips its scroll bar every frame, and the list flickers).
+        let clip = ui.clip_rect().intersect(ui.max_rect());
+        ui.scope(|ui| {
+            ui.set_clip_rect(clip);
             let id = ui.next_auto_id();
             egui::Grid::new(id).spacing(vec2(0.0, 0.0)).min_col_width(40.0).max_col_width(320.0).show(ui, |ui| {
                 for (r, row) in rows.iter().enumerate() {
