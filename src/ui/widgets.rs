@@ -240,9 +240,11 @@ fn image(ui: &mut Ui, pictures: &mut Pictures, url: &str, size: Option<(u32, u32
     const MAX: f32 = 320.0;
     let p = colors();
     let texture = pictures.get(&Picture::Image(url.to_string()));
-    let natural = texture
-        .and_then(|t| ui.ctx().tex_manager().read().meta(t).map(|m| (m.size[0] as f32, m.size[1] as f32)))
-        .or(size.map(|(w, h)| (w as f32, h as f32)))
+    // The size the message gives comes first: the picture then takes the place its
+    // placeholder had, and the list doesn't move when it loads.
+    let natural = size
+        .map(|(w, h)| (w as f32, h as f32))
+        .or_else(|| texture.and_then(|t| ui.ctx().tex_manager().read().meta(t).map(|m| (m.size[0] as f32, m.size[1] as f32))))
         .unwrap_or((MAX, MAX * 0.6));
     let scale = (MAX.min(ui.available_width()) / natural.0).min(1.0);
     let shown = vec2(natural.0 * scale, natural.1 * scale);

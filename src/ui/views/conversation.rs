@@ -144,7 +144,7 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace) {
             // at the old scroll position, so it's laid out again at the new one rather
             // than shown a frame off.
             let height = scrolled.content_size.y;
-            if ws.list_height.as_ref().is_some_and(|(of, h)| *of == id && (h - height).abs() > 0.5) {
+            if ws.list_height.as_ref().is_some_and(|(of, h)| *of == id && *h != height) {
                 ui.ctx().request_discard("the message list changed height");
             }
             ws.list_height = Some((id.clone(), height));
