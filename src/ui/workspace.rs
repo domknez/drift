@@ -28,6 +28,10 @@ pub const NEWEST: usize = 40;
 const CALENDAR_EVERY: Duration = Duration::from_secs(5 * 60);
 /// How often the user's status is fetched again (it changes in other clients too).
 const STATUS_EVERY: Duration = Duration::from_secs(60);
+/// How often drift tells the presence service the user is (or isn't) at the computer.
+const ACTIVITY_EVERY: Duration = Duration::from_secs(120);
+/// Idle this long (s), the user shows as away.
+const IDLE_AFTER: f64 = 5.0 * 60.0;
 /// Searching messages starts once typing has paused this long.
 const SEARCH_PAUSE: Duration = Duration::from_millis(500);
 
@@ -45,6 +49,11 @@ pub struct Workspace {
     status_at: Option<Instant>,
     /// Setting the user's status, while it's under way.
     status_set: Load<(), Error>,
+    /// Telling the presence service whether the user is active: the last report,
+    /// what it said, and the report under way.
+    reported_at: Option<Instant>,
+    active: bool,
+    activity_report: Load<(), Error>,
     /// The activity feed's items (mentions, replies), newest last; None until loaded.
     pub activity: Option<Vec<Message>>,
     activity_load: Load<Vec<Message>, Error>,
@@ -216,6 +225,9 @@ impl Workspace {
             status_load: Load::Idle,
             status_at: None,
             status_set: Load::Idle,
+            reported_at: None,
+            active: false,
+            activity_report: Load::Idle,
             activity: None,
             activity_load: Load::Idle,
             activity_at: None,
@@ -818,6 +830,9 @@ impl Workspace {
             // What the service makes of it (by activity: what it works out).
             self.status_at = None;
         }
+        if let Some(Err(e)) = self.activity_report.take() {
+            log_debug!("reporting activity: {e}");
+        }
         if let Some(result) = self.status_load.take() {
             match result {
                 Ok(status) => self.status = Some(status),
@@ -889,6 +904,18 @@ impl Workspace {
             let backend = self.backend.clone();
             let now = crate::model::time::now_ms();
             self.meetings_load = Load::start(ctx, move || backend.calendar(now - 86_400_000, now + 15 * 86_400_000));
+        }
+        // Reported on a schedule, and right away when the user comes back or goes idle.
+        let active = crate::idle::seconds().is_none_or(|idle| idle < IDLE_AFTER);
+        if !self.activity_report.is_running() && (active != self.active || due(self.reported_at, ACTIVITY_EVERY)) {
+            let came_back = active && !self.active;
+            self.reported_at = Some(Instant::now());
+            self.active = active;
+            let backend = self.backend.clone();
+            self.activity_report = Load::start(ctx, move || backend.report_activity(active));
+            if came_back {
+                self.status_at = None;
+            }
         }
         if !self.status_load.is_running() && !self.status_set.is_running() && due(self.status_at, STATUS_EVERY) {
             self.status_at = Some(Instant::now());

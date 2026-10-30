@@ -9,6 +9,7 @@ mod backend;
 mod credentials;
 mod demo;
 mod icon;
+mod idle;
 mod login;
 mod model;
 mod notify;

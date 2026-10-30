@@ -651,6 +651,22 @@ impl Backend for Teams {
         }
     }
 
+    fn report_activity(&self, active: bool) -> Result<()> {
+        let id = trouter::endpoint_id();
+        // The endpoint first (created the first time, renewed after): activity is
+        // only taken from an endpoint the service knows.
+        let endpoint = serde_json::json!({
+            "id": id,
+            "availability": "Available",
+            "activity": "Available",
+            "activityReporting": "Transport",
+            "deviceType": "Desktop",
+        });
+        self.presence(Method::Put, "/v1/me/endpoints/", Body::Json(&endpoint))?;
+        let activity = serde_json::json!({ "endpointId": id, "isActive": active });
+        self.presence(Method::Post, "/v1/me/reportmyactivity/", Body::Json(&activity)).map(|_| ())
+    }
+
     fn listen(self: Arc<Self>, to: Box<dyn Fn(Push) + Send>) {
         let teams = Arc::downgrade(&self);
         let spawned = std::thread::Builder::new().name("trouter".into()).spawn(move || trouter::run(teams, to));

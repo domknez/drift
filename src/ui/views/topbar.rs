@@ -1,7 +1,7 @@
 //! The top bar: the wordmark, the tabs (Activity, Chats, Teams, Meetings) with what's
 //! unread, search, today's meeting with Join, and the user's menu.
 
-use crate::model::{Availability, Conversation, Directory, Kind, Picture, time};
+use crate::model::{Availability, Conversation, Directory, Kind, Picture, Status, time};
 use crate::settings::Appearance;
 use crate::ui::app::Request;
 use crate::ui::style::icons::{self, Icon};
@@ -319,7 +319,8 @@ fn user_menu(ui: &mut Ui, ws: &mut Workspace, rect: Rect, theme: Appearance) -> 
                 ui.label(RichText::new(&ws.me).font(ty::item()).color(p.text));
                 ui.add_space(2.0);
                 let line = match ws.status {
-                    Some(s) if s.set.is_some() => format!("{} (set by you)", s.shown.label()),
+                    Some(Status { shown, set: Some(set) }) if set == shown => format!("{} (set by you)", shown.label()),
+                    Some(Status { shown, set: Some(set) }) => format!("{}, set to {}", shown.label(), set.label()),
                     Some(s) => s.shown.label().to_string(),
                     None => "Signed in to Microsoft Teams".into(),
                 };

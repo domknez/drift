@@ -95,6 +95,14 @@ pub trait Backend: Send + Sync {
     /// go by activity again.
     fn set_status(&self, to: Option<Availability>) -> Result<()>;
 
+    /// Tell the service drift is running, and whether the user is at the computer:
+    /// this is what makes them show as available (or away when idle). A service
+    /// without presence does nothing.
+    fn report_activity(&self, active: bool) -> Result<()> {
+        let _ = active;
+        Ok(())
+    }
+
     /// Have changes pushed to `to` as they happen, for as long as the backend lives.
     /// A service that can't push does nothing; the UI polls either way.
     fn listen(self: Arc<Self>, to: Box<dyn Fn(Push) + Send>) {
