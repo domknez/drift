@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>drift — mockups</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
+body{background:#0c0c0d;color:#ddd;font:14px/1.4 Inter,system-ui,sans-serif;min-height:100vh;transition:background .2s}
+html[data-theme=light] body{background:#c9cacd;color:#222}
+
+/* ---------- mockup chrome (not part of the app) ---------- */
+.chrome{display:flex;gap:16px;align-items:center;justify-content:center;flex-wrap:wrap;padding:18px 20px 6px}
+.chrome .title{font:600 13px "JetBrains Mono",monospace;opacity:.7;margin-right:12px}
+.seg{display:flex;background:rgba(127,127,127,.15);border-radius:10px;padding:3px}
+.seg button{padding:7px 14px;border-radius:8px;font-size:13px;opacity:.7}
+.seg button.on{background:rgba(127,127,127,.35);opacity:1}
+.hint{text-align:center;font:12px "JetBrains Mono",monospace;opacity:.55;padding:2px 0 14px;max-width:1100px;margin:0 auto}
+.stage{display:flex;justify-content:center;padding:0 20px 40px}
+.design{display:none}.design.on{display:block}
+.win{width:1360px;height:820px;border-radius:12px;overflow:hidden;position:relative;box-shadow:0 30px 80px rgba(0,0,0,.45),0 0 0 1px rgba(255,255,255,.06);display:flex;flex-direction:column}
+.lights{display:flex;gap:8px;padding:0 14px;flex:none}
+.lights i{width:12px;height:12px;border-radius:50%;background:#ff5f57}
+.lights i:nth-child(2){background:#febc2e}.lights i:nth-child(3){background:#28c840}
+
+/* ---------- shared pieces ---------- */
+.av{position:relative;flex:none;display:inline-flex;align-items:center;justify-content:center;border-radius:50%;color:#fff;font-weight:600;letter-spacing:.01em}
+.av .pr{position:absolute;right:-2px;bottom:-2px;width:10px;height:10px;border-radius:50%;border:2px solid var(--pres-ring,#000)}
+.pr.on{background:#3ecf8e}.pr.away{background:#f5b742}.pr.busy{background:#ef5b5b}.pr.off{background:transparent;box-shadow:inset 0 0 0 1.5px #8a8d93}
+.bot{border-radius:7px}
+.grow{flex:1;min-width:0}
+.ell{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row{display:flex;align-items:center}
+.msgs{flex:1;overflow:hidden;display:flex;flex-direction:column;justify-content:flex-end}
+.react{display:inline-flex;align-items:center;gap:5px;font-size:12px;padding:2px 8px;border-radius:999px}
+code{font-family:"JetBrains Mono",monospace;font-size:.88em;padding:1px 5px;border-radius:5px}
+
+/* ======================================================================
+   A — TIDE: Slack-like three panes, teal accent, Inter
+   ====================================================================== */
+.da{--bg:#16181b;--rail:#0f1113;--side:#131518;--surface:#1c1f23;--hover:#20242a;--sel:#1f2b2d;--line:#262a2f;--border:#323840;--text:#e7e9ec;--dim:#9aa1aa;--faint:#6d747d;--accent:#3dd6c0;--fill:#2bc4ae;--on:#062420;--pres-ring:#131518;--code:#22272d}
+html[data-theme=light] .da{--bg:#ffffff;--rail:#eef0f2;--side:#f6f7f8;--surface:#ffffff;--hover:#eceff1;--sel:#dff4f0;--line:#e5e8eb;--border:#d4d9de;--text:#15181b;--dim:#59616b;--faint:#8a929b;--accent:#0f8f7e;--fill:#14a892;--on:#ffffff;--pres-ring:#f6f7f8;--code:#f0f2f4}
+.da .win{background:var(--bg);color:var(--text);font-family:Inter,sans-serif}
+.da .body{flex:1;display:flex;min-height:0}
+.da .rail{width:68px;background:var(--rail);display:flex;flex-direction:column;align-items:center;padding:40px 0 14px;gap:4px;border-right:1px solid var(--line)}
+.da .rail .lights{position:absolute;top:14px;left:0}
+.da .rail a{position:relative;width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;color:var(--dim)}
+.da .rail a svg{width:20px;height:20px}
+.da .rail a.on{background:var(--sel);color:var(--accent)}
+.da .rail a .n{position:absolute;top:5px;right:4px;min-width:17px;height:17px;border-radius:9px;background:var(--fill);color:var(--on);font:700 10px/17px Inter;text-align:center;padding:0 4px}
+.da .rail .sp{flex:1}
+.da .side{width:288px;background:var(--side);border-right:1px solid var(--line);display:flex;flex-direction:column}
+.da .side .hd{display:flex;align-items:center;gap:8px;padding:16px 16px 10px}
+.da .side .hd h2{font-size:18px;font-weight:700;letter-spacing:-.01em;flex:1}
+.da .ib{width:30px;height:30px;border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--dim)}
+.da .ib:hover{background:var(--hover)}
+.da .search{margin:0 12px 10px;height:34px;border-radius:9px;background:var(--surface);border:1px solid var(--line);display:flex;align-items:center;gap:8px;padding:0 10px;color:var(--faint);font-size:13px}
+.da .search kbd{margin-left:auto;font:11px "JetBrains Mono";opacity:.8}
+.da .meet{margin:2px 12px 12px;padding:10px 12px;border-radius:10px;background:var(--sel);display:flex;align-items:center;gap:10px}
+.da .meet .t{font-size:13px;font-weight:600}.da .meet .s{font-size:12px;color:var(--dim)}
+.da .join{background:var(--fill);color:var(--on);font-weight:600;font-size:12.5px;border-radius:8px;padding:6px 12px;display:inline-flex;gap:6px;align-items:center}
+.da .join svg{width:15px;height:15px}
+.da .sect{display:flex;align-items:center;gap:4px;font-size:12px;font-weight:600;color:var(--faint);padding:10px 18px 4px}
+.da .sect svg{width:13px;height:13px}
+.da .scroll{flex:1;overflow:hidden}
+.da .it{display:flex;align-items:center;gap:10px;margin:1px 8px;padding:6px 10px;border-radius:8px;color:var(--dim);font-size:13.5px}
+.da .it.on{background:var(--sel);color:var(--text)}
+.da .it.unread{color:var(--text);font-weight:600}
+.da .it .cnt{margin-left:auto;font-size:11px;font-weight:700;background:var(--fill);color:var(--on);border-radius:9px;padding:1px 7px}
+.da .it .ch{width:18px;color:var(--faint);display:flex;justify-content:center}
+.da .it .ch svg{width:15px;height:15px}
+.da .team{display:flex;align-items:center;gap:9px;margin:6px 8px 1px;padding:4px 10px;font-size:13px;font-weight:600}
+.da .tl{width:20px;height:20px;border-radius:6px;font:700 10px/20px Inter;text-align:center;color:#fff}
+.da .main{flex:1;display:flex;flex-direction:column;min-width:0}
+.da .ch-hd{height:58px;display:flex;align-items:center;gap:10px;padding:0 20px;border-bottom:1px solid var(--line)}
+.da .ch-hd h1{font-size:16px;font-weight:700}
+.da .ch-hd .sub{font-size:12.5px;color:var(--faint)}
+.da .ch-hd .ib{margin-left:2px}
+.da .ghost{border:1px solid var(--border);border-radius:8px;padding:5px 11px;font-size:12.5px;font-weight:500;display:inline-flex;align-items:center;gap:6px;color:var(--text)}
+.da .ghost svg{width:15px;height:15px}
+.da .msgs{padding:8px 0 4px}
+.da .day{display:flex;align-items:center;gap:12px;color:var(--faint);font-size:12px;font-weight:600;padding:10px 20px}
+.da .day:before,.da .day:after{content:"";flex:1;height:1px;background:var(--line)}
+.da .m{display:flex;gap:12px;padding:6px 20px}
+.da .m:hover{background:var(--hover)}
+.da .m .who{font-weight:700;font-size:14px}
+.da .m .tm{font-size:12px;color:var(--faint);margin-left:8px}
+.da .m .tx{font-size:14px;line-height:1.5;margin-top:2px;color:var(--text)}
+.da .m .tx a{color:var(--accent);text-decoration:none}
+.da .m code{background:var(--code)}
+.da .m.cont{padding-top:0}
+.da .m.cont .gutter{width:36px;flex:none}
+.da .card{margin-top:6px;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:8px;padding:9px 12px;background:var(--surface);max-width:560px}
+.da .card .ct{display:flex;align-items:center;gap:8px;font-weight:600;font-size:13.5px}
+.da .card .ct svg{color:var(--accent);width:16px;height:16px}
+.da .card .cm{font-size:12.5px;color:var(--dim);margin-top:3px;font-family:"JetBrains Mono";font-size:11.5px}
+.da .pill{font-size:11px;font-weight:600;padding:1px 7px;border-radius:999px;background:var(--sel);color:var(--accent)}
+.da .thr{display:inline-flex;align-items:center;gap:8px;margin-top:6px;font-size:12.5px;color:var(--accent);font-weight:600}
+.da .thr .avs{display:flex}.da .thr .avs .av{margin-right:-5px;border:2px solid var(--bg)}
+.da .thr span.l{color:var(--faint);font-weight:400}
+.da .react{background:var(--surface);border:1px solid var(--line);color:var(--dim);margin:6px 4px 0 0}
+.da .react.own{border-color:var(--accent);color:var(--accent)}
+.da .comp{margin:6px 20px 18px;border:1px solid var(--border);border-radius:12px;background:var(--surface)}
+.da .comp .in{padding:12px 14px 6px;color:var(--faint);font-size:14px}
+.da .comp .tools{display:flex;align-items:center;gap:2px;padding:4px 8px 8px;color:var(--faint)}
+.da .comp .send{margin-left:auto;width:32px;height:32px;border-radius:8px;background:var(--fill);color:var(--on);display:flex;align-items:center;justify-content:center}
+.da .comp .send svg{width:16px;height:16px}
+.da .thread{width:360px;border-left:1px solid var(--line);display:flex;flex-direction:column;background:var(--bg)}
+.da .thread .ch-hd{gap:8px}
+.da .thread .m{padding:8px 16px}
+.da .thread .comp{margin:6px 16px 18px}
+.da .rep{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--faint);padding:4px 16px}
+.da .rep:after{content:"";flex:1;height:1px;background:var(--line)}
+
+/* ======================================================================
+   B — CALM: two panes, one sidebar for everything, violet accent, Geist
+   ====================================================================== */
+.db{--bg:#131316;--side:#18181c;--surface:#1f1f24;--hover:#232329;--sel:#2a2836;--line:#26262c;--border:#34343c;--text:#ececf1;--dim:#a1a1ad;--faint:#70707c;--accent:#a99bff;--fill:#8b7cf6;--on:#ffffff;--pres-ring:#18181c;--code:#25252b}
+html[data-theme=light] .db{--bg:#fcfbf9;--side:#ebe7e2;--surface:#ffffff;--hover:#e2ddd6;--sel:#e2dbf6;--line:#e4dfd8;--border:#d6d0c8;--text:#1d1b19;--dim:#5f5a54;--faint:#938c85;--accent:#6a55e8;--fill:#7461f0;--on:#ffffff;--pres-ring:#ebe7e2;--code:#f1ede8}
+.db .win{background:var(--bg);color:var(--text);font-family:Geist,sans-serif}
+.db .body{flex:1;display:flex;min-height:0}
+.db .side{width:296px;background:var(--side);border-right:1px solid var(--line);display:flex;flex-direction:column;padding-top:12px}
+.db .side .top{display:flex;align-items:center;padding:2px 12px 14px 0}
+.db .side .top .sp{flex:1}
+.db .ib{width:30px;height:30px;border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--dim)}
+.db .me{display:flex;align-items:center;gap:10px;padding:0 16px 12px}
+.db .me .n{font-weight:600;font-size:14px}.db .me .s{font-size:12px;color:var(--faint)}
+.db .search{margin:0 12px 10px;height:34px;border-radius:9px;background:var(--surface);border:1px solid var(--line);display:flex;align-items:center;gap:8px;padding:0 10px;color:var(--faint);font-size:13px}
+.db .search kbd{margin-left:auto;font:11px "Geist Mono"}
+.db .nav{padding:0 8px 6px}
+.db .nav a{display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:8px;color:var(--dim);font-size:13.5px}
+.db .nav a svg{width:17px;height:17px}
+.db .nav a .cnt{margin-left:auto}
+.db .today{margin:6px 12px 8px;border-radius:12px;border:1px solid var(--line);background:var(--surface);padding:11px 12px}
+.db .today .l{font:500 10.5px "Geist Mono";letter-spacing:.06em;text-transform:uppercase;color:var(--faint);display:flex;justify-content:space-between}
+.db .today .ev{display:flex;align-items:center;gap:10px;margin-top:8px}
+.db .today .bar{width:3px;align-self:stretch;border-radius:2px;background:var(--fill)}
+.db .today .t{font-size:13.5px;font-weight:600}.db .today .s{font-size:12px;color:var(--dim)}
+.db .today .ev.later{opacity:.6}.db .today .ev.later .bar{background:var(--border)}
+.db .join{background:var(--fill);color:var(--on);font-weight:600;font-size:12.5px;border-radius:8px;padding:6px 12px;display:inline-flex;gap:6px;align-items:center;margin-left:auto}
+.db .join svg{width:15px;height:15px}
+.db .scroll{flex:1;overflow:hidden}
+.db .sect{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:500;color:var(--faint);padding:12px 18px 4px}
+.db .sect svg{width:12px;height:12px}
+.db .sect .sp{flex:1}
+.db .it{display:flex;align-items:center;gap:9px;margin:0 8px;padding:5px 10px;border-radius:8px;color:var(--dim);font-size:13.5px;height:32px}
+.db .it.on{background:var(--sel);color:var(--text)}
+.db .it.unread{color:var(--text);font-weight:600}
+.db .it .ch{width:18px;color:var(--faint);display:flex;justify-content:center}
+.db .it .ch svg{width:15px;height:15px}
+.db .it .muted{font-size:11px;color:var(--faint);margin-left:auto}
+.db .cnt{font:600 11px "Geist Mono";background:var(--fill);color:var(--on);border-radius:6px;padding:1px 6px;margin-left:auto}
+.db .dot{width:7px;height:7px;border-radius:50%;background:var(--accent);margin-left:auto}
+.db .tl{width:18px;height:18px;border-radius:5px;font:700 9.5px/18px Geist;text-align:center;color:#fff}
+.db .team .it{font-weight:500;color:var(--text)}
+.db .team .sub{padding-left:22px}
+.db .main{flex:1;display:flex;flex-direction:column;min-width:0}
+.db .ch-hd{height:56px;display:flex;align-items:center;gap:10px;padding:0 24px;border-bottom:1px solid var(--line)}
+.db .ch-hd h1{font-size:15.5px;font-weight:600}
+.db .ch-hd .crumb{color:var(--faint);font-size:15.5px}
+.db .ch-hd .sub{font-size:12.5px;color:var(--faint);margin-left:4px}
+.db .tabs{display:flex;gap:2px;margin-left:16px}
+.db .tabs a{font-size:13px;color:var(--dim);padding:5px 10px;border-radius:7px}
+.db .tabs a.on{background:var(--hover);color:var(--text);font-weight:500}
+.db .msgs{padding:8px 0 4px;max-width:880px;width:100%;margin:0 auto}
+.db .day{color:var(--faint);font:500 11px "Geist Mono";letter-spacing:.06em;text-transform:uppercase;padding:14px 24px 6px}
+.db .post{margin:6px 24px;padding:14px 16px;border:1px solid var(--line);border-radius:12px;background:var(--surface)}
+.db .m{display:flex;gap:12px}
+.db .m .who{font-weight:600;font-size:14px}
+.db .m .tm{font:12px "Geist Mono";color:var(--faint);margin-left:8px}
+.db .m .tx{font-size:14px;line-height:1.55;margin-top:2px}
+.db .m .tx a{color:var(--accent);text-decoration:none}
+.db code{background:var(--code)}
+.db .card{display:flex;align-items:center;gap:12px;margin-top:8px;padding:10px 12px;border-radius:10px;background:var(--bg);border:1px solid var(--line)}
+.db .card .ic{width:32px;height:32px;border-radius:8px;background:var(--sel);color:var(--accent);display:flex;align-items:center;justify-content:center}
+.db .card .ct{font-weight:600;font-size:13.5px}
+.db .card .cm{font:11.5px "Geist Mono";color:var(--faint);margin-top:2px}
+.db .pill{font:500 11px "Geist Mono";padding:2px 8px;border-radius:6px;background:var(--sel);color:var(--accent);margin-left:auto}
+.db .replies{margin-top:12px;padding-top:10px;border-top:1px solid var(--line)}
+.db .replies .m{margin-top:8px}
+.db .replies .tx{font-size:13.5px}
+.db .more{font-size:12.5px;color:var(--accent);font-weight:500;display:flex;align-items:center;gap:8px}
+.db .more .l{color:var(--faint);font-weight:400}
+.db .reply-in{margin-top:10px;font-size:13px;color:var(--faint);padding:8px 10px;border-radius:8px;border:1px dashed var(--border)}
+.db .react{background:var(--bg);border:1px solid var(--line);color:var(--dim);margin:8px 4px 0 0}
+.db .react.own{border-color:var(--accent);color:var(--accent)}
+.db .comp{margin:8px auto 18px;max-width:832px;width:calc(100% - 48px);border:1px solid var(--border);border-radius:14px;background:var(--surface);display:flex;align-items:center;padding:8px 8px 8px 16px;gap:4px;color:var(--faint)}
+.db .comp .in{flex:1;font-size:14px}
+.db .comp .send{width:34px;height:34px;border-radius:10px;background:var(--fill);color:var(--on);display:flex;align-items:center;justify-content:center;margin-left:4px}
+.db .comp .send svg{width:16px;height:16px}
+
+/* ======================================================================
+   C — HARBOR: floating panels on a tinted canvas, top tabs, coral accent
+   ====================================================================== */
+.dc{--canvas:#101214;--bg:#191c1f;--side:#191c1f;--surface:#22262a;--hover:#262a2f;--sel:#33221f;--line:#2a2e33;--border:#383d43;--text:#eef0f1;--dim:#a3a9af;--faint:#737a81;--accent:#ff8a73;--fill:#ff7a61;--on:#2a0d07;--pres-ring:#191c1f;--code:#2a2e33;--mine:#3a2622}
+html[data-theme=light] .dc{--canvas:#ebe7e2;--bg:#ffffff;--side:#ffffff;--surface:#f7f5f2;--hover:#f2efeb;--sel:#ffe9e3;--line:#ece8e3;--border:#ddd7d0;--text:#1d1b19;--dim:#615c56;--faint:#948d86;--accent:#d9533a;--fill:#f0664c;--on:#ffffff;--pres-ring:#ffffff;--code:#f1ede8;--mine:#ffe9e3}
+.dc .win{background:var(--canvas);color:var(--text);font-family:"Plus Jakarta Sans",sans-serif}
+.dc .topbar{height:56px;display:flex;align-items:center;gap:14px;padding-right:16px;flex:none}
+.dc .brand{font:800 17px "Plus Jakarta Sans";letter-spacing:-.02em;margin-left:6px}
+.dc .brand b{color:var(--accent)}
+.dc .tabs{display:flex;gap:4px;background:var(--bg);border-radius:12px;padding:4px;margin-left:24px;box-shadow:0 1px 2px rgba(0,0,0,.06)}
+.dc .tabs a{display:flex;align-items:center;gap:7px;font-size:13px;font-weight:600;color:var(--dim);padding:6px 14px;border-radius:9px}
+.dc .tabs a svg{width:16px;height:16px}
+.dc .tabs a.on{background:var(--fill);color:var(--on)}
+.dc .tabs a .n{font-size:10.5px;font-weight:700;background:var(--sel);color:var(--accent);border-radius:8px;padding:0 6px}
+.dc .tabs a.on .n{background:rgba(255,255,255,.25);color:inherit}
+.dc .gsearch{flex:1;max-width:420px;margin:0 auto;height:36px;border-radius:12px;background:var(--bg);display:flex;align-items:center;gap:8px;padding:0 12px;color:var(--faint);font-size:13px;box-shadow:0 1px 2px rgba(0,0,0,.06)}
+.dc .gsearch kbd{margin-left:auto;font:11px "JetBrains Mono"}
+.dc .nextm{display:flex;align-items:center;gap:10px;background:var(--bg);border-radius:12px;padding:5px 5px 5px 12px;font-size:12.5px;box-shadow:0 1px 2px rgba(0,0,0,.06)}
+.dc .nextm b{font-weight:700}.dc .nextm span{color:var(--dim)}
+.dc .join{background:var(--fill);color:var(--on);font-weight:700;font-size:12.5px;border-radius:9px;padding:6px 12px;display:inline-flex;gap:6px;align-items:center}
+.dc .join svg{width:15px;height:15px}
+.dc .body{flex:1;display:flex;gap:10px;padding:0 10px 10px;min-height:0}
+.dc .panel{background:var(--bg);border-radius:16px;box-shadow:0 1px 3px rgba(0,0,0,.08);display:flex;flex-direction:column;min-height:0;overflow:hidden}
+.dc .side{width:300px}
+.dc .filters{display:flex;gap:6px;padding:14px 14px 8px}
+.dc .chip{font-size:12px;font-weight:600;padding:5px 11px;border-radius:999px;color:var(--dim);background:var(--surface)}
+.dc .chip.on{background:var(--text);color:var(--bg)}
+.dc .sect{font-size:11.5px;font-weight:700;color:var(--faint);padding:12px 18px 4px;letter-spacing:.02em}
+.dc .it{display:flex;align-items:center;gap:11px;margin:1px 8px;padding:8px 10px;border-radius:12px}
+.dc .it.on{background:var(--sel)}
+.dc .it .n{font-size:13.5px;font-weight:600;color:var(--dim)}
+.dc .it.unread .n,.dc .it.on .n{color:var(--text)}
+.dc .it .p{font-size:12.5px;color:var(--faint);margin-top:1px}
+.dc .it.unread .p{color:var(--dim)}
+.dc .it .r{display:flex;flex-direction:column;align-items:flex-end;gap:4px;font-size:11px;color:var(--faint)}
+.dc .cnt{font-size:10.5px;font-weight:700;background:var(--fill);color:var(--on);border-radius:9px;padding:1px 6px}
+.dc .chi{width:36px;height:36px;border-radius:11px;display:flex;align-items:center;justify-content:center;background:var(--surface);color:var(--dim)}
+.dc .chi svg{width:16px;height:16px}
+.dc .main{flex:1;min-width:0}
+.dc .ch-hd{height:64px;display:flex;align-items:center;gap:12px;padding:0 22px;border-bottom:1px solid var(--line)}
+.dc .ch-hd h1{font-size:16px;font-weight:700}
+.dc .ch-hd .sub{font-size:12.5px;color:var(--faint)}
+.dc .ib{width:34px;height:34px;border-radius:10px;display:flex;align-items:center;justify-content:center;color:var(--dim);background:var(--surface)}
+.dc .msgs{padding:10px 22px 4px;gap:2px}
+.dc .day{align-self:center;font-size:11.5px;font-weight:700;color:var(--faint);background:var(--surface);border-radius:999px;padding:4px 12px;margin:10px 0}
+.dc .m{display:flex;gap:10px;align-items:flex-end;margin-top:8px}
+.dc .m .b{max-width:620px;background:var(--surface);border-radius:16px 16px 16px 4px;padding:10px 14px}
+.dc .m .who{font-weight:700;font-size:13px}
+.dc .m .tm{font-size:11.5px;color:var(--faint);margin-left:6px;font-weight:500}
+.dc .m .tx{font-size:14px;line-height:1.5;margin-top:2px}
+.dc .m .tx a{color:var(--accent);text-decoration:none;font-weight:600}
+.dc code{background:var(--code)}
+.dc .m.mine{flex-direction:row-reverse}
+.dc .m.mine .b{background:var(--mine);border-radius:16px 16px 4px 16px}
+.dc .card{display:flex;align-items:center;gap:12px;margin-top:8px;padding:10px 12px;border-radius:12px;background:var(--bg)}
+.dc .card .ic{width:34px;height:34px;border-radius:10px;background:var(--sel);color:var(--accent);display:flex;align-items:center;justify-content:center}
+.dc .card .ct{font-weight:700;font-size:13.5px}
+.dc .card .cm{font:11.5px "JetBrains Mono";color:var(--faint);margin-top:2px}
+.dc .thr{display:flex;align-items:center;gap:8px;margin-top:8px;font-size:12.5px;font-weight:700;color:var(--accent)}
+.dc .thr .avs{display:flex}.dc .thr .avs .av{margin-right:-5px;border:2px solid var(--surface)}
+.dc .thr span.l{color:var(--faint);font-weight:500}
+.dc .react{background:var(--bg);color:var(--dim);margin:8px 4px 0 0;font-weight:600}
+.dc .react.own{background:var(--sel);color:var(--accent)}
+.dc .comp{margin:8px 22px 18px;border-radius:16px;background:var(--surface);display:flex;align-items:center;padding:8px 8px 8px 16px;gap:4px;color:var(--faint)}
+.dc .comp .in{flex:1;font-size:14px}
+.dc .comp .ib{background:none}
+.dc .comp .send{width:38px;height:38px;border-radius:12px;background:var(--fill);color:var(--on);display:flex;align-items:center;justify-content:center}
+.dc .comp .send svg{width:17px;height:17px}
+</style>
+</head>
+<body>
+
+<div class="chrome">
+  <span class="title">drift_ mockups</span>
+  <div class="seg" id="designs">
+    <button data-d="a" class="on">A · Tide</button>
+    <button data-d="b">B · Calm</button>
+    <button data-d="c">C · Harbor</button>
+  </div>
+  <div class="seg" id="themes">
+    <button data-t="dark" class="on">Dark</button>
+    <button data-t="light">Light</button>
+  </div>
+</div>
+<p class="hint" id="hint"></p>
+
+<div class="stage">
+  <section class="design da on" data-d="a"><div class="win" id="a"></div></section>
+  <section class="design db" data-d="b"><div class="win" id="b"></div></section>
+  <section class="design dc" data-d="c"><div class="win" id="c"></div></section>
+</div>
+
+<script>
+// ---------- icons (stroke, 24×24) ----------
+const P = {
+  bell:'<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>',
+  chat:'<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
+  teams:'<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+  cal:'<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
+  files:'<path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2z"/>',
+  search:'<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
+  hash:'<path d="M4 9h16M4 15h16M10 3 8 21M16 3l-2 18"/>',
+  send:'<path d="m22 2-7 20-4-9-9-4z"/><path d="M22 2 11 13"/>',
+  smile:'<circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01"/>',
+  clip:'<path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/>',
+  video:'<path d="m22 8-6 4 6 4V8z"/><rect x="2" y="6" width="14" height="12" rx="2"/>',
+  down:'<path d="m6 9 6 6 6-6"/>',
+  right:'<path d="m9 18 6-6-6-6"/>',
+  at:'<circle cx="12" cy="12" r="4"/><path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8"/>',
+  pr:'<circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><path d="M6 9v12"/>',
+  thread:'<path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/>',
+  plus:'<path d="M12 5v14M5 12h14"/>',
+  edit:'<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
+  x:'<path d="M18 6 6 18M6 6l12 12"/>',
+  alert:'<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4M12 17h.01"/>',
+  bold:'<path d="M6 12h9a4 4 0 0 1 0 8H6V4h8a4 4 0 0 1 0 8"/>',
+  more:'<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>',
+  side:'<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/>',
+  users:'<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/>',
+  mute:'<path d="M8.7 3A6 6 0 0 1 18 8a21.3 21.3 0 0 0 .6 5"/><path d="M17 17H3s3-2 3-9a4.67 4.67 0 0 1 .3-1.7"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/><path d="m2 2 20 20"/>',
+};
+const I = (n) => `<svg viewBox="0 0 24 24">${P[n]}</svg>`;
+
+// ---------- made-up workspace ----------
+const people = {
+  me:    {name:'Alex Morgan',  ini:'AM', c:'#5b7cfa', pr:'on'},
+  maya:  {name:'Maya Lindqvist',ini:'ML', c:'#e0617a', pr:'on'},
+  tomas: {name:'Tomás Rivera', ini:'TR', c:'#d98a2b', pr:'away'},
+  priya: {name:'Priya Nair',   ini:'PN', c:'#2fa37a', pr:'busy'},
+  jonas: {name:'Jonas Weber',  ini:'JW', c:'#7a5cd6', pr:'off'},
+  lea:   {name:'Lea Novak',    ini:'LN', c:'#2b8fd9', pr:'on'},
+  repos: {name:'Repos',        ini:'',   c:'#e2553f', bot:'pr'},
+};
+const av = (k, s=36, pres=true) => {
+  const p = people[k];
+  const inner = p.bot ? I(p.bot) : p.ini;
+  const st = `width:${s}px;height:${s}px;background:${p.c};font-size:${Math.round(s*.36)}px`;
+  return `<span class="av ${p.bot?'bot':''}" style="${st}">${inner}${pres && p.pr ? `<i class="pr ${p.pr}"></i>`:''}</span>`;
+};
+const teams = [
+  {name:'Halcyon', ini:'H', c:'#2b8fd9', channels:[
+    {name:'General', t:'06.10'},
+    {name:'Nightly UI tests', unread:true, t:'05:13'},
+    {name:'PR Reviews', on:true, t:'10:42'},
+    {name:'Prod Alerts', unread:true, n:3, t:'09:58'},
+    {name:'Design', t:'Mon'},
+  ]},
+  {name:'Side project', ini:'S', c:'#2fa37a', channels:[{name:'Testing app', t:'17.09'}]},
+];
+const chats = [
+  {k:'maya',  prev:'lunch at 1? the new place on the corner', t:'10:31', n:2},
+  {k:'tomas', prev:'You: rebased, should be green now', t:'10:12'},
+  {group:'Release crew', ini:'RC', c:'#c0548f', prev:'Priya: cut is at 15:00 today', t:'09:40', unread:true},
+  {k:'priya', prev:'thanks, looks good 👍', t:'Yesterday'},
+  {k:'jonas', prev:'brutal 😅', t:'Mon', muted:true},
+];
+
+// ---------- the conversation: #PR Reviews ----------
+const pr = (n, title, from, to) => ({n, title, from, to});
+const msgs = [
+  {day:'Yesterday'},
+  {k:'repos', t:'17:34', text:'Lea Novak created a pull request', card:pr(10500,'release(122.102): manual trigger sends the picked rule again','releases/122.102','main')},
+  {day:'Today'},
+  {k:'tomas', t:'10:05', text:'Can someone take a look at <a>#10500</a> before the release cut? It only touches <code>trigger_rule()</code>, the rest is tests.',
+    reacts:[['👀',2,true],['🙏',1]],
+    thread:{n:3, who:['lea','priya','me'], last:'Last reply 12 min ago', replies:[
+      {k:'lea', t:'10:14', text:'On it. Is the form data still sent twice when the rule has no schedule?'},
+      {k:'tomas', t:'10:19', text:'No, that was the bug: the second request is gone now.'},
+      {k:'me', t:'10:30', text:'Approved. Left one nit about the error message, not blocking.'},
+    ]}},
+  {k:'repos', t:'10:42', text:'Maya Lindqvist created a pull request', card:pr(10503,'feat(timelines): pan by dragging, zoom with ⌘ + wheel','feature/timeline-pan-zoom','develop')},
+  {k:'maya', t:'10:44', cont:true, text:'Small one, mostly gestures. Happy to pair on it after stand-up 🙂'},
+];
+
+// ---------- A · Tide ----------
+function renderA(){
+  const rail = `<nav class="rail"><div class="lights"><i></i><i></i><i></i></div>
+    <a>${I('bell')}<span class="n">4</span></a><a>${I('chat')}<span class="n">2</span></a><a class="on">${I('teams')}</a><a>${I('cal')}</a><a>${I('files')}</a>
+    <span class="sp"></span>${av('me',32)}</nav>`;
+  const chanRow = c => `<div class="it ${c.on?'on':''} ${c.unread?'unread':''}"><span class="ch">${I('hash')}</span><span class="ell grow">${c.name}</span>${c.n?`<span class="cnt">${c.n}</span>`:''}</div>`;
+  const side = `<div class="side">
+    <div class="hd"><h2>Teams</h2><button class="ib">${I('edit')}</button></div>
+    <div class="search">${I('search')}Search<kbd>⌘K</kbd></div>
+    <div class="meet">${I('video')}<div class="grow"><div class="t">Daily stand-up</div><div class="s">10:00 – 10:15 · now</div></div><button class="join">Join</button></div>
+    <div class="scroll">
+      <div class="sect">${I('down')}Pinned</div>
+      ${chanRow({name:'PR Reviews', on:false})}${chanRow({name:'Prod Alerts', unread:true, n:3})}
+      ${teams.map(t=>`<div class="team"><span class="tl" style="background:${t.c}">${t.ini}</span>${t.name}</div>${t.channels.map(chanRow).join('')}`).join('')}
+    </div></div>`;
+  const msg = m => {
+    if (m.day) return `<div class="day">${m.day}</div>`;
+    const p = people[m.k];
+    const body = `<div class="tx">${m.text}</div>
+      ${m.card?`<div class="card"><div class="ct">${I('pr')}<span class="ell">#${m.card.n} ${m.card.title}</span><span class="pill">Active</span></div><div class="cm">${m.card.from} → ${m.card.to} · 5 reviewers</div></div>`:''}
+      ${m.reacts?m.reacts.map(r=>`<span class="react ${r[2]?'own':''}">${r[0]} ${r[1]}</span>`).join(''):''}
+      ${m.thread?`<div class="thr"><span class="avs">${m.thread.who.map(k=>av(k,20,false)).join('')}</span>${m.thread.n} replies <span class="l">${m.thread.last}</span></div>`:''}`;
+    if (m.cont) return `<div class="m cont"><span class="gutter"></span><div class="grow">${body}</div></div>`;
+    return `<div class="m">${av(m.k)}<div class="grow"><div><span class="who">${p.name}</span><span class="tm">${m.t}</span></div>${body}</div></div>`;
+  };
+  const comp = ph => `<div class="comp"><div class="in">${ph}</div><div class="tools"><button class="ib">${I('bold')}</button><button class="ib">${I('smile')}</button><button class="ib">${I('clip')}</button><button class="ib">${I('at')}</button><button class="send">${I('send')}</button></div></div>`;
+  const main = `<div class="main">
+    <div class="ch-hd"><span style="color:var(--faint);display:flex">${I('hash')}</span><h1>PR Reviews</h1><span class="sub">Halcyon · 14 members</span><span class="grow"></span>
+      <button class="ib">${I('search')}</button><button class="ib">${I('users')}</button><button class="ghost">${I('video')}Meet</button></div>
+    <div class="msgs">${msgs.map(msg).join('')}</div>${comp('Message #PR Reviews')}</div>`;
+  const t = msgs.find(m=>m.thread);
+  const thread = `<div class="thread">
+    <div class="ch-hd"><h1>Thread</h1><span class="sub">#PR Reviews</span><span class="grow"></span><button class="ib">${I('x')}</button></div>
+    <div class="msgs" style="justify-content:flex-start;padding-top:10px">
+      ${msg({...t, thread:null, reacts:null})}
+      <div class="rep">3 replies</div>
+      ${t.thread.replies.map(msg).join('')}
+    </div>${comp('Reply…')}</div>`;
+  document.getElementById('a').innerHTML = `<div class="body">${rail}${side}${main}${thread}</div>`;
+}
+
+// ---------- B · Calm ----------
+function renderB(){
+  const chanRow = (c, sub) => `<div class="it ${sub?'sub':''} ${c.on?'on':''} ${c.unread?'unread':''}"><span class="ch">${I('hash')}</span><span class="ell grow">${c.name}</span>${c.n?`<span class="cnt">${c.n}</span>`:c.unread?'<span class="dot"></span>':''}</div>`;
+  const chatRow = c => {
+    const a = c.group ? `<span class="av" style="width:22px;height:22px;border-radius:6px;background:${c.c};font-size:9px">${c.ini}</span>` : av(c.k,22);
+    const name = c.group || people[c.k].name;
+    const tail = c.n ? `<span class="cnt">${c.n}</span>` : c.unread ? '<span class="dot"></span>' : c.muted ? `<span class="muted">${I('mute')}</span>` : '';
+    return `<div class="it ${c.n||c.unread?'unread':''}">${a}<span class="ell grow">${name}</span>${tail}</div>`;
+  };
+  const side = `<div class="side">
+    <div class="top"><div class="lights"><i></i><i></i><i></i></div><span class="sp"></span><button class="ib">${I('side')}</button><button class="ib">${I('edit')}</button></div>
+    <div class="search">${I('search')}Search or jump to…<kbd>⌘K</kbd></div>
+    <div class="nav"><a>${I('at')}Activity<span class="cnt">4</span></a><a>${I('cal')}Calendar</a><a>${I('files')}Files</a></div>
+    <div class="today"><div class="l"><span>Today</span><span>Fri 30 Oct</span></div>
+      <div class="ev"><span class="bar"></span><div class="grow"><div class="t">Daily stand-up</div><div class="s">10:00 – 10:15 · started 2 min ago</div></div><button class="join">${I('video')}Join</button></div>
+      <div class="ev later"><span class="bar"></span><div class="grow"><div class="t">Release review</div><div class="s">15:00 – 15:30</div></div></div></div>
+    <div class="scroll">
+      ${teams.map(t=>`<div class="team"><div class="sect">${I('down')}<span class="tl" style="background:${t.c}">${t.ini}</span>${t.name}<span class="sp"></span></div>${t.channels.map(c=>chanRow(c)).join('')}</div>`).join('')}
+      <div class="sect">${I('down')}Direct messages<span class="sp"></span>${I('plus')}</div>
+      ${chats.map(chatRow).join('')}
+    </div></div>`;
+  const head = m => `<div class="m">${av(m.k,34)}<div class="grow"><div><span class="who">${people[m.k].name}</span><span class="tm">${m.t}</span></div><div class="tx">${m.text}</div>`;
+  const card = c => `<div class="card"><span class="ic">${I('pr')}</span><div class="grow"><div class="ct ell">#${c.n} ${c.title}</div><div class="cm">${c.from} → ${c.to} · 5 reviewers</div></div><span class="pill">Active</span></div>`;
+  // Channels are threads: each post is a card with its replies folded in under it.
+  const posts = [];
+  for (const m of msgs) {
+    if (m.day) { posts.push(`<div class="day">${m.day}</div>`); continue; }
+    if (m.cont) { posts[posts.length-1] = posts[posts.length-1].replace('<!--more-->', `<div class="tx" style="margin-top:8px">${m.text}</div><!--more-->`); continue; }
+    let html = `<div class="post">${head(m)}${m.card?card(m.card):''}<!--more-->`;
+    if (m.reacts) html += m.reacts.map(r=>`<span class="react ${r[2]?'own':''}">${r[0]} ${r[1]}</span>`).join('');
+    html += `</div></div>`;
+    if (m.thread) {
+      const last = m.thread.replies.slice(-2);
+      html += `<div class="replies"><div class="more">Show 1 earlier reply</div>${last.map(r=>`<div class="m">${av(r.k,26,false)}<div class="grow"><div><span class="who" style="font-size:13px">${people[r.k].name}</span><span class="tm">${r.t}</span></div><div class="tx">${r.text}</div></div></div>`).join('')}<div class="reply-in">Reply…</div></div>`;
+    }
+    posts.push(html + `</div>`);
+  }
+  const main = `<div class="main">
+    <div class="ch-hd"><span class="crumb">Halcyon /</span><h1># PR Reviews</h1><div class="tabs"><a class="on">Posts</a><a>Files</a></div><span class="grow"></span>
+      <button class="ib">${I('search')}</button><button class="ib">${I('users')}</button><button class="ib">${I('video')}</button><button class="ib">${I('more')}</button></div>
+    <div class="msgs">${posts.join('')}</div>
+    <div class="comp"><span class="in">Start a new post in #PR Reviews</span><button class="ib">${I('smile')}</button><button class="ib">${I('clip')}</button><button class="send">${I('send')}</button></div></div>`;
+  document.getElementById('b').innerHTML = `<div class="body">${side}${main}</div>`;
+}
+
+// ---------- C · Harbor ----------
+function renderC(){
+  const top = `<div class="topbar"><div class="lights"><i></i><i></i><i></i></div><span class="brand">drift<b>.</b></span>
+    <div class="tabs"><a>${I('bell')}Activity<span class="n">4</span></a><a class="on">${I('chat')}Chats<span class="n">3</span></a><a>${I('teams')}Teams</a><a>${I('cal')}Calendar</a><a>${I('files')}Files</a></div>
+    <div class="gsearch">${I('search')}Search messages, people, channels<kbd>⌘K</kbd></div>
+    <div class="nextm"><b>Daily stand-up</b><span>now</span><button class="join">${I('video')}Join</button></div>${av('me',32)}</div>`;
+  const row = (on, unread, icon, name, prev, t, n) => `<div class="it ${on?'on':''} ${unread?'unread':''}">${icon}<div class="grow"><div class="n ell">${name}</div><div class="p ell">${prev}</div></div><div class="r">${t}${n?`<span class="cnt">${n}</span>`:''}</div></div>`;
+  const side = `<div class="panel side">
+    <div class="filters"><span class="chip on">All</span><span class="chip">Unread</span><span class="chip">Channels</span><span class="chip">People</span></div>
+    <div class="sect">PINNED</div>
+    ${row(true,false,`<span class="chi">${I('hash')}</span>`,'PR Reviews','Maya: Small one, mostly gestures…','10:44')}
+    ${row(false,true,`<span class="chi">${I('alert')}</span>`,'Prod Alerts','Grafana: p95 latency above 800 ms','09:58',3)}
+    <div class="sect">RECENT</div>
+    ${chats.slice(0,4).map(c=> c.group
+      ? row(false,c.unread,`<span class="av" style="width:36px;height:36px;border-radius:11px;background:${c.c};font-size:12px">${c.ini}</span>`,c.group,c.prev,c.t)
+      : row(false,!!c.n,av(c.k,36),people[c.k].name,c.prev,c.t,c.n)).join('')}
+    ${row(false,true,`<span class="chi">${I('hash')}</span>`,'Nightly UI tests','Pipeline: 2 failed, 418 passed','05:13')}
+  </div>`;
+  const msg = m => {
+    if (m.day) return `<div class="day">${m.day}</div>`;
+    const p = people[m.k];
+    const card = m.card ? `<div class="card"><span class="ic">${I('pr')}</span><div class="grow"><div class="ct ell">#${m.card.n} ${m.card.title}</div><div class="cm">${m.card.from} → ${m.card.to}</div></div></div>` : '';
+    const extra = (m.reacts||[]).map(r=>`<span class="react ${r[2]?'own':''}">${r[0]} ${r[1]}</span>`).join('')
+      + (m.thread?`<div class="thr"><span class="avs">${m.thread.who.map(k=>av(k,20,false)).join('')}</span>${m.thread.n} replies <span class="l">${m.thread.last}</span></div>`:'');
+    const head = m.cont ? '' : `<div><span class="who">${p.name}</span><span class="tm">${m.t}</span></div>`;
+    return `<div class="m ${m.k==='me'?'mine':''}">${m.cont?'<span style="width:32px"></span>':av(m.k,32,false)}<div class="b">${head}<div class="tx">${m.text}</div>${card}</div></div>${extra?`<div style="margin-left:42px">${extra}</div>`:''}`;
+  };
+  const main = `<div class="panel main">
+    <div class="ch-hd"><span class="chi">${I('hash')}</span><div class="grow"><h1>PR Reviews</h1><div class="sub">Halcyon · 14 members</div></div>
+      <button class="ib">${I('search')}</button><button class="ib">${I('users')}</button><button class="ib">${I('video')}</button></div>
+    <div class="msgs">${msgs.map(msg).join('')}</div>
+    <div class="comp"><span class="in">Message #PR Reviews</span><button class="ib">${I('smile')}</button><button class="ib">${I('clip')}</button><button class="ib">${I('at')}</button><button class="send">${I('send')}</button></div></div>`;
+  document.getElementById('c').innerHTML = `${top}<div class="body">${side}${main}</div>`;
+}
+
+renderA(); renderB(); renderC();
+
+// ---------- mockup chrome ----------
+const hints = {
+  a:'A · Tide — Slack-like: icon rail (Activity, Chats, Teams, Calendar, Files), channel list with the next meeting on top, conversation, and a thread opened beside it. Inter, teal.',
+  b:'B · Calm — one sidebar for everything: Activity, today\'s meetings with Join, teams with their channels, direct messages. Channel posts are cards with their replies folded in. Geist, violet.',
+  c:'C · Harbor — floating panels on a tinted canvas, sections as tabs in the title bar, the next meeting always in the corner, bubbles for messages. Plus Jakarta Sans, coral.',
+};
+const setDesign = d => {
+  document.querySelectorAll('#designs button').forEach(b=>b.classList.toggle('on', b.dataset.d===d));
+  document.querySelectorAll('.design').forEach(s=>s.classList.toggle('on', s.dataset.d===d));
+  document.getElementById('hint').textContent = hints[d];
+};
+document.querySelectorAll('#designs button').forEach(b=>b.onclick=()=>setDesign(b.dataset.d));
+document.querySelectorAll('#themes button').forEach(b=>b.onclick=()=>{
+  document.documentElement.dataset.theme = b.dataset.t;
+  document.querySelectorAll('#themes button').forEach(x=>x.classList.toggle('on', x===b));
+});
+setDesign('a');
+</script>
+</body>
+</html>

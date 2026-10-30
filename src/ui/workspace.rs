@@ -1,0 +1,137 @@
+//! The signed-in state: what the sidebar lists, the open conversation and its
+//! messages, and keeping both fresh.
+
+use super::load::Load;
+use crate::backend::{Backend, Error};
+use crate::model::{ConversationId, Directory, Message};
+use eframe::egui;
+use std::collections::HashSet;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+/// How often the sidebar is fetched again (until the service pushes changes).
+const DIRECTORY_EVERY: Duration = Duration::from_secs(60);
+/// How often the open conversation is fetched again.
+const MESSAGES_EVERY: Duration = Duration::from_secs(20);
+
+pub struct Workspace {
+    pub backend: Arc<dyn Backend>,
+    pub me: String,
+    /// What the sidebar lists; None until the first load.
+    pub directory: Option<Directory>,
+    directory_load: Load<Directory, Error>,
+    directory_at: Option<Instant>,
+    pub open: Option<ConversationId>,
+    /// The open conversation's messages, oldest first; None while they load.
+    pub messages: Option<Vec<Message>>,
+    messages_load: Load<(ConversationId, Vec<Message>), Error>,
+    messages_at: Option<Instant>,
+    /// The last failure, shown until the next success.
+    pub error: Option<String>,
+    /// What the sidebar's search field holds.
+    pub filter: String,
+    /// Sidebar sections folded away, by key.
+    pub folded: HashSet<String>,
+    /// Posts showing all their replies, by id.
+    pub unfolded_threads: HashSet<String>,
+}
+
+/// What the workspace needs the app to do.
+pub enum Outcome {
+    /// The service no longer takes the sign-in.
+    SignedOut,
+}
+
+impl Workspace {
+    pub fn new(backend: Arc<dyn Backend>, open: Option<ConversationId>) -> Workspace {
+        Workspace {
+            me: backend.me(),
+            backend,
+            directory: None,
+            directory_load: Load::Idle,
+            directory_at: None,
+            open,
+            messages: None,
+            messages_load: Load::Idle,
+            messages_at: None,
+            error: None,
+            filter: String::new(),
+            // Meeting chats pile up; they start folded.
+            folded: HashSet::from(["meetings".to_string()]),
+            unfolded_threads: HashSet::new(),
+        }
+    }
+
+    /// Collect finished loads and start the ones that are due.
+    pub fn tick(&mut self, ctx: &egui::Context) -> Option<Outcome> {
+        if let Some(result) = self.directory_load.take() {
+            match result {
+                Ok(directory) => {
+                    if self.me.is_empty() {
+                        self.me = self.backend.me();
+                    }
+                    self.directory = Some(directory);
+                    self.error = None;
+                }
+                Err(Error::SignedOut) => return Some(Outcome::SignedOut),
+                Err(e) => self.failed(e),
+            }
+        }
+        if let Some(result) = self.messages_load.take() {
+            match result {
+                Ok((id, messages)) if Some(&id) == self.open.as_ref() => {
+                    self.messages = Some(messages);
+                    self.error = None;
+                }
+                Ok(_) => {}
+                Err(Error::SignedOut) => return Some(Outcome::SignedOut),
+                Err(e) => self.failed(e),
+            }
+        }
+
+        let due = |at: Option<Instant>, every| at.is_none_or(|at: Instant| at.elapsed() >= every);
+        if !self.directory_load.is_running() && due(self.directory_at, DIRECTORY_EVERY) {
+            self.directory_at = Some(Instant::now());
+            let backend = self.backend.clone();
+            self.directory_load = Load::start(ctx, move || backend.directory());
+        }
+        if let Some(id) = self.open.clone()
+            && !self.messages_load.is_running()
+            && due(self.messages_at, MESSAGES_EVERY)
+        {
+            self.messages_at = Some(Instant::now());
+            let backend = self.backend.clone();
+            self.messages_load = Load::start(ctx, move || backend.messages(&id).map(|m| (id, m)));
+        }
+        // Wake up for the next refresh even when nothing moves.
+        ctx.request_repaint_after(MESSAGES_EVERY);
+        None
+    }
+
+    fn failed(&mut self, e: Error) {
+        log_warn!("{e}");
+        self.error = Some(e.to_string());
+    }
+
+    /// Open a conversation; its messages load right away.
+    pub fn open(&mut self, id: &str) {
+        if self.open.as_deref() == Some(id) {
+            return;
+        }
+        self.open = Some(id.to_string());
+        self.messages = None;
+        self.messages_load = Load::Idle;
+        self.messages_at = None;
+        self.unfolded_threads.clear();
+        // Read here; Teams itself still counts it until it's read there.
+        if let Some(c) = self.directory.as_mut().and_then(|d| d.conversations.iter_mut().find(|c| c.id == id)) {
+            c.unread = false;
+        }
+    }
+
+    /// Fetch everything again now.
+    pub fn refresh(&mut self) {
+        self.directory_at = None;
+        self.messages_at = None;
+    }
+}
