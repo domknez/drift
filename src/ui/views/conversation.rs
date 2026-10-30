@@ -138,6 +138,13 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace) {
                             action = list(ui, &mut ws.pictures, &messages, &mut view);
                         }
                     });
+                    // Held at the bottom, the list scrolls by its height less the view's. Kept a
+                    // whole number of points, so the text (drawn on whole pixels) and the bubbles
+                    // (drawn where they fall) move together, not a pixel apart.
+                    let over = ui.min_rect().height() - ui.clip_rect().height();
+                    if over > 0.0 {
+                        ui.add_space(over.ceil() - over);
+                    }
                 },
             );
             // The list grew or shrank (a picture came, "Seen" moved): this frame was drawn
