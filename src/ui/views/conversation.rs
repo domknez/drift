@@ -39,6 +39,8 @@ pub enum Action {
     Show(String),
     /// Show older messages too.
     Earlier,
+    /// Mark the conversation unread from this message on.
+    UnreadFrom(String),
     /// See a picture big.
     View(String),
 }
@@ -65,6 +67,7 @@ pub fn apply(ui: &Ui, ws: &mut Workspace, action: Action, reply: bool) {
             ws.focus_scrolled = false;
         }
         Action::View(url) => ws.viewing = Some(url),
+        Action::UnreadFrom(message) => ws.unread_from(ui.ctx(), &message),
         Action::Earlier => {
             ws.newest += crate::ui::workspace::NEWEST;
             ws.earlier_from = ws.list_height.as_ref().map(|(_, h)| *h);
@@ -142,6 +145,7 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace) {
                 focus: focus.as_deref(),
                 scrolled: ws.focus_scrolled,
                 newest: ws.newest,
+                conversation: &id,
             };
             let mut area = egui::ScrollArea::vertical().id_salt(("messages", &id)).stick_to_bottom(true).auto_shrink([false, false]);
             if let Some(y) = ws.scroll_to.take() {
@@ -375,6 +379,8 @@ pub struct View<'a> {
     pub scrolled: bool,
     /// How many of the newest messages are shown (the rest behind "Show earlier").
     pub newest: usize,
+    /// The conversation's id (for links to its messages).
+    pub conversation: &'a str,
 }
 
 /// Whether `focus` is one of the replies to `m`.
@@ -436,6 +442,120 @@ pub fn list(ui: &mut Ui, pictures: &mut Pictures, messages: &[Message], view: &m
 
 fn continues(prev: &Message, m: &Message) -> bool {
     prev.author.id == m.author.id && m.at - prev.at < metrics::GROUP_GAP
+}
+
+/// The bar over a message while the pointer's on it: quick reactions, quote, and a
+/// menu of the rest. It stays while its menu is open.
+fn hover_bar(ui: &mut Ui, pictures: &mut Pictures, m: &Message, mine: bool, thread: bool, conversation: &str, bubble: Rect) -> Option<Action> {
+    const CELL: f32 = 32.0;
+    let p = colors();
+    let more_id = egui::Id::unique(("message-more", conversation, &m.id));
+    let menu_open = egui::Popup::is_id_open(ui.ctx(), more_id);
+    let cells = QUICK_REACTIONS.len() + 2;
+    let size = vec2(CELL * cells as f32 + 8.0, CELL + 6.0);
+    let x = if mine { bubble.left() + 8.0 } else { (bubble.right() - size.x - 8.0).max(bubble.left() + 8.0) };
+    let bar = Rect::from_min_size(pos2(x, bubble.top() - size.y + 10.0), size);
+    // DRIFT_DEMO_HOVER=<message>: the bar shown over that message, as if pointed at.
+    let over = ui.ctx().pointer_hover_pos().is_some_and(|at| bubble.contains(at) || bar.contains(at))
+        || std::env::var("DRIFT_DEMO_HOVER").is_ok_and(|id| id == m.id);
+    if !(over || menu_open) || ui.is_sizing_pass() {
+        return None;
+    }
+    ui.painter().add(egui::Shadow { offset: [0, 3], blur: 10, spread: 0, color: egui::Color32::from_black_alpha(30) }.as_shape(bar, CornerRadius::same(10)));
+    ui.painter().rect(bar, CornerRadius::same(10), p.panel, Stroke::new(1.0, p.border), egui::StrokeKind::Inside);
+    let mut action = None;
+    let cell = |i: usize| Rect::from_min_size(pos2(bar.left() + 4.0 + CELL * i as f32, bar.top() + 3.0), vec2(CELL, CELL));
+    for (i, (key, emoji)) in QUICK_REACTIONS.iter().enumerate() {
+        let rect = cell(i);
+        let response = ui.interact(rect, ui.scope_id().with(("react", &m.id, i)), Sense::click()).on_hover_text(*key);
+        if response.hovered() {
+            ui.painter().rect_filled(rect.shrink(1.0), CornerRadius::same(8), p.hover);
+        }
+        match pictures.get(&Picture::Emoji(key.to_string())) {
+            Some(texture) => {
+                egui::Image::new((texture, vec2(20.0, 20.0))).paint_at(ui, Rect::from_center_size(rect.center(), vec2(20.0, 20.0)));
+            }
+            None => {
+                ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, *emoji, egui::FontId::proportional(16.0), p.text);
+            }
+        }
+        if response.clicked() {
+            action = Some(Action::React { message: m.id.clone(), key: key.to_string() });
+        }
+    }
+    // Quote: reply with this message quoted.
+    let rect = cell(QUICK_REACTIONS.len());
+    let quote = ui.interact(rect, ui.scope_id().with(("quote", &m.id)), Sense::click()).on_hover_text("Reply with quote");
+    if quote.hovered() {
+        ui.painter().rect_filled(rect.shrink(1.0), CornerRadius::same(8), p.hover);
+    }
+    ui.painter().text(rect.center() + vec2(0.0, 5.0), egui::Align2::CENTER_CENTER, "\u{201C}", egui::FontId::new(26.0, ty::bold()), p.dim);
+    if quote.clicked() {
+        action = Some(Action::Quote(m.clone()));
+    }
+    // More: the rest of the message's menu.
+    let rect = cell(QUICK_REACTIONS.len() + 1);
+    let more = ui.interact(rect, ui.scope_id().with(("more", &m.id)), Sense::click()).on_hover_text("More actions");
+    if more.hovered() || menu_open {
+        ui.painter().rect_filled(rect.shrink(1.0), CornerRadius::same(8), p.hover);
+    }
+    for dx in [-6.0, 0.0, 6.0] {
+        ui.painter().circle_filled(rect.center() + vec2(dx, 0.0), 1.8, p.dim);
+    }
+    egui::Popup::menu(&more).id(more_id).show(|ui| {
+        ui.set_min_width(200.0);
+        message_menu(ui, m, mine, thread, conversation, &mut action);
+    });
+    action
+}
+
+/// A message's menu, after its quick reactions: replying, copying, reading, and for
+/// the user's own, editing and deleting.
+fn message_menu(ui: &mut Ui, m: &Message, mine: bool, thread: bool, conversation: &str, action: &mut Option<Action>) {
+    let p = colors();
+    if ui.button("Reply with quote").clicked() {
+        *action = Some(Action::Quote(m.clone()));
+        ui.close();
+    }
+    if thread && ui.button("Reply in thread").clicked() {
+        *action = Some(Action::OpenThread(m.id.clone()));
+        ui.close();
+    }
+    ui.separator();
+    if ui.button("Copy text").clicked() {
+        ui.ctx().copy_text(text::flatten(&m.body));
+        ui.close();
+    }
+    if ui.button("Copy link").clicked() {
+        let link = format!(
+            "https://teams.microsoft.com/l/message/{}/{}",
+            crate::teams::encode(conversation),
+            crate::teams::encode(&m.id)
+        );
+        ui.ctx().copy_text(link);
+        ui.close();
+    }
+    if let Some(url) = m.card.as_ref().and_then(|c| c.link.clone())
+        && ui.button("Open link").clicked()
+    {
+        ui.ctx().open_url(egui::OpenUrl::new_tab(url));
+        ui.close();
+    }
+    if !mine && ui.button("Mark as unread from here").clicked() {
+        *action = Some(Action::UnreadFrom(m.id.clone()));
+        ui.close();
+    }
+    if mine {
+        ui.separator();
+        if ui.button("Edit").clicked() {
+            *action = Some(Action::Edit(m.clone()));
+            ui.close();
+        }
+        if ui.button(RichText::new("Delete").color(p.danger)).clicked() {
+            *action = Some(Action::Delete(m.id.clone()));
+            ui.close();
+        }
+    }
 }
 
 /// One message as a bubble. `first` shows who and when inside it; `last` puts the
@@ -559,36 +679,12 @@ pub fn bubble(
             }
         });
         ui.separator();
-        if ui.button("Reply with quote").clicked() {
-            action = Some(Action::Quote(m.clone()));
-            ui.close();
-        }
-        if thread.is_some() && ui.button("Reply in thread").clicked() {
-            action = Some(Action::OpenThread(m.id.clone()));
-            ui.close();
-        }
-        if ui.button("Copy text").clicked() {
-            ui.ctx().copy_text(text::flatten(&m.body));
-            ui.close();
-        }
-        if let Some(url) = m.card.as_ref().and_then(|c| c.link.clone())
-            && ui.button("Open link").clicked()
-        {
-            ui.ctx().open_url(egui::OpenUrl::new_tab(url));
-            ui.close();
-        }
-        if mine {
-            ui.separator();
-            if ui.button("Edit").clicked() {
-                action = Some(Action::Edit(m.clone()));
-                ui.close();
-            }
-            if ui.button(RichText::new("Delete").color(p.danger)).clicked() {
-                action = Some(Action::Delete(m.id.clone()));
-                ui.close();
-            }
-        }
+        message_menu(ui, m, mine, thread.is_some(), view.conversation, &mut action);
     });
+    // Over a message: a bar on its top edge with quick reactions, quote and more.
+    if let Some(a) = hover_bar(ui, pictures, m, mine, thread.is_some(), view.conversation, frame.rect) {
+        action = Some(a);
+    }
 
     // Reactions hang off the bubble's bottom edge; the thread link sits right under it.
     if !m.reactions.is_empty() {

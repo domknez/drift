@@ -581,6 +581,21 @@ impl Workspace {
         self.chores.push(Load::start(ctx, move || backend.mark_read(&id, &up_to.to_string()).map(|()| false)));
     }
 
+    /// Mark the open conversation unread from `message` on.
+    pub fn unread_from(&mut self, ctx: &egui::Context, message: &str) {
+        let (Some(id), Ok(at)) = (self.open.clone(), message.parse::<i64>()) else { return };
+        if let Some(c) = self.directory.as_mut().and_then(|d| d.conversations.iter_mut().find(|c| c.id == id)) {
+            c.unread = true;
+            c.read_up_to = Some(at - 1);
+        }
+        // Not marked read again until something new comes.
+        let last = self.messages.as_ref().and_then(|m| m.last()).map(|m| m.id.clone()).unwrap_or_default();
+        self.marked = Some((id.clone(), last));
+        let backend = self.backend.clone();
+        let up_to = (at - 1).to_string();
+        self.chores.push(Load::start(ctx, move || backend.mark_read(&id, &up_to).map(|()| false)));
+    }
+
     /// Whether a conversation is hidden: hidden in drift, and nothing newer since.
     pub fn is_hidden(&self, c: &Conversation) -> bool {
         self.hidden.as_ref().and_then(|h| h.get(&c.id)).is_some_and(|at| c.last.as_ref().is_none_or(|l| l.at <= *at))

@@ -17,6 +17,7 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace) {
         ws.thread = None;
         return;
     };
+    let conversation = ws.open.clone().unwrap_or_default();
     let channel = ws.open.as_deref().and_then(|id| ws.directory.as_ref()?.conversation(id)).map(|c| c.title.clone()).unwrap_or_default();
 
     let mut h =
@@ -55,6 +56,7 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace) {
                 focus: focus.as_deref(),
                 scrolled: ws.focus_scrolled,
                 newest: usize::MAX,
+                conversation: &conversation,
             };
             action = conversation::list(ui, &mut ws.pictures, &thread, &mut view);
             ws.focus_scrolled |= view.scrolled;
