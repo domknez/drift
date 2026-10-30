@@ -336,6 +336,9 @@ impl Backend for Teams {
     }
 
     fn picture(&self, picture: &Picture) -> Result<Vec<u8>> {
+        if let Picture::Emoji(key) = picture {
+            return emoji(key);
+        }
         let (skype, token) = {
             let mut session = self.session();
             (session.skype()?, session.access(SPACES)?)
@@ -352,6 +355,7 @@ impl Backend for Teams {
                 http::encode(etag),
                 http::encode(name)
             ),
+            Picture::Emoji(_) => unreachable!("emoji are fetched above"),
             Picture::Group(members) => {
                 let users: Value = members.iter().map(|(id, name)| serde_json::json!({"userId": id, "displayName": name})).collect();
                 format!("{base}/beta/users/{object_id}/mergedProfilePicturev2?usersInfo={}&size=HR64x64", http::encode(&users.to_string()))
@@ -374,6 +378,18 @@ fn chat_picture(members: &[String], me: &str, names: &HashMap<String, String>) -
         }
         _ => Some(Picture::Group(others)),
     }
+}
+
+/// An emoji's image from Teams' own set (its key: `like`, `1f440_eyes`; a skin tone
+/// suffix like `-tone2` falls back to the plain one). No sign-in needed.
+pub fn emoji(key: &str) -> Result<Vec<u8>> {
+    let base = key.split("-tone").next().unwrap_or(key);
+    if base.is_empty() || !base.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-') {
+        return Err(Error::Service("not an emoji key".into()));
+    }
+    let url =
+        format!("https://statics.teams.cdn.office.net/evergreen-assets/personal-expressions/v2/assets/emoticons/{base}/default/50_f.png");
+    http::fetch(&url, &[])
 }
 
 /// A fresh 19-digit client message id (the service dedups and echoes it back).

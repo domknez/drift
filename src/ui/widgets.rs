@@ -2,7 +2,8 @@
 
 use super::style::icons::{self, Icon};
 use super::style::{colors, metrics, palette, typography as ty};
-use crate::model::{Block, Card, Inline, Reaction};
+use crate::model::{Block, Card, Inline, Picture, Reaction};
+use crate::ui::pictures::Pictures;
 use eframe::egui::{self, Align2, Color32, CornerRadius, Frame, Margin, Rect, Response, RichText, Sense, Stroke, TextureId, Ui, vec2};
 
 /// A round avatar: the picture once it's loaded, the initials until then.
@@ -68,7 +69,7 @@ pub fn icon_button(ui: &mut Ui, icon: Icon, hint: &str) -> Response {
 }
 
 /// A message's text: styled runs, wrapped to the width there is; links open.
-pub fn rich_text(ui: &mut Ui, body: &[Inline], color: Color32) {
+pub fn rich_text(ui: &mut Ui, pictures: &mut Pictures, body: &[Inline], color: Color32) {
     let p = colors();
     let mut lines: Vec<Vec<(&str, &Inline)>> = vec![Vec::new()];
     for run in body {
@@ -88,10 +89,18 @@ pub fn rich_text(ui: &mut Ui, body: &[Inline], color: Color32) {
                 ui.add_space(4.0);
                 continue;
             }
+            // A line of nothing but emoji shows them big, as chat apps do.
+            let line_is_emoji_only = line.iter().all(|(text, run)| run.span.emoji.is_some() || text.trim().is_empty());
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
                 for (text, run) in line {
                     let s = &run.span;
+                    // Emoji the service has a picture of are drawn in colour.
+                    if let Some(texture) = s.emoji.as_ref().and_then(|key| pictures.get(&Picture::Emoji(key.clone()))) {
+                        let size = if line_is_emoji_only { 30.0 } else { 19.0 };
+                        ui.add(egui::Image::new((texture, vec2(size, size))));
+                        continue;
+                    }
                     let font = if s.code {
                         ty::code()
                     } else if s.bold || s.mention {
@@ -127,19 +136,12 @@ pub fn rich_text(ui: &mut Ui, body: &[Inline], color: Color32) {
 }
 
 /// A message's blocks: paragraphs, tables, quotes and code.
-pub fn blocks(ui: &mut Ui, blocks: &[Block]) {
+pub fn blocks(ui: &mut Ui, pictures: &mut Pictures, blocks: &[Block]) {
     let p = colors();
     for block in blocks {
         match block {
-            Block::Text(runs) => rich_text(ui, runs, p.text),
-            Block::Quote(runs) => {
-                let response = Frame::new()
-                    .inner_margin(Margin { left: 12, right: 0, top: 2, bottom: 2 })
-                    .show(ui, |ui| rich_text(ui, runs, p.dim))
-                    .response;
-                let bar = Rect::from_min_size(response.rect.min, vec2(3.0, response.rect.height()));
-                ui.painter().rect_filled(bar, CornerRadius::same(2), p.border);
-            }
+            Block::Text(runs) => rich_text(ui, pictures, runs, p.text),
+            Block::Quote(runs) => quote(ui, pictures, runs),
             Block::Code(code) => {
                 Frame::new().fill(p.code).corner_radius(CornerRadius::same(metrics::RADIUS)).inner_margin(Margin::symmetric(12, 10)).show(
                     ui,
@@ -151,13 +153,36 @@ pub fn blocks(ui: &mut Ui, blocks: &[Block]) {
                     },
                 );
             }
-            Block::Table { rows, header } => table(ui, rows, *header),
+            Block::Table { rows, header } => table(ui, pictures, rows, *header),
         }
     }
 }
 
+/// A quote (or the message a reply quotes): a tinted box with an accent edge, the
+/// quoted author in the accent.
+fn quote(ui: &mut Ui, pictures: &mut Pictures, runs: &[Inline]) {
+    let p = colors();
+    let response = Frame::new()
+        .fill(p.accent_fill.gamma_multiply(0.13))
+        .corner_radius(CornerRadius::same(8))
+        .inner_margin(Margin { left: 13, right: 10, top: 7, bottom: 7 })
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            // The author's name (bold) in the accent, the quoted text dimmer.
+            let (name, rest): (Vec<Inline>, Vec<Inline>) = runs.iter().cloned().partition(|r| r.span.bold && !r.text.contains('\n'));
+            if !name.is_empty() {
+                let who: String = name.iter().map(|r| r.text.as_str()).collect();
+                ui.label(RichText::new(who.trim()).font(ty::small_strong()).color(p.accent));
+            }
+            rich_text(ui, pictures, &rest, p.dim);
+        })
+        .response;
+    let bar = Rect::from_min_size(response.rect.min, vec2(3.0, response.rect.height()));
+    ui.painter().rect_filled(bar, CornerRadius { nw: 8, sw: 8, ne: 0, se: 0 }, p.accent);
+}
+
 /// A table with hairlines between its cells; wide ones scroll sideways.
-fn table(ui: &mut Ui, rows: &[Vec<Vec<Inline>>], header: bool) {
+fn table(ui: &mut Ui, pictures: &mut Pictures, rows: &[Vec<Vec<Inline>>], header: bool) {
     let p = colors();
     let columns = rows.iter().map(Vec::len).max().unwrap_or(0);
     Frame::new().stroke(Stroke::new(1.0, p.line)).corner_radius(CornerRadius::same(metrics::RADIUS)).show(ui, |ui| {
@@ -171,7 +196,7 @@ fn table(ui: &mut Ui, rows: &[Vec<Vec<Inline>>], header: bool) {
                             .fill(if is_header { p.hover } else { egui::Color32::TRANSPARENT })
                             .inner_margin(Margin::symmetric(10, 6))
                             .show(ui, |ui| match row.get(c) {
-                                Some(cell) if !cell.is_empty() => rich_text(ui, cell, p.text),
+                                Some(cell) if !cell.is_empty() => rich_text(ui, pictures, cell, p.text),
                                 _ => {
                                     ui.label("");
                                 }
@@ -226,7 +251,7 @@ pub fn card(ui: &mut Ui, card: &Card) {
 
 /// Reactions under a message, as small pills; the user's own ones in the accent.
 /// Clicking one returns its key (to add it, or take it back).
-pub fn reactions(ui: &mut Ui, reactions: &[Reaction], right: bool) -> Option<String> {
+pub fn reactions(ui: &mut Ui, pictures: &mut Pictures, reactions: &[Reaction], right: bool) -> Option<String> {
     if reactions.is_empty() {
         return None;
     }
@@ -244,7 +269,18 @@ pub fn reactions(ui: &mut Ui, reactions: &[Reaction], right: bool) -> Option<Str
                 .corner_radius(CornerRadius::same(255))
                 .inner_margin(Margin::symmetric(9, 3))
                 .show(ui, |ui| {
-                    ui.label(RichText::new(format!("{} {}", r.emoji(), r.count)).font(ty::small_strong()).color(text));
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                        match pictures.get(&Picture::Emoji(r.key.clone())) {
+                            Some(texture) => {
+                                ui.add(egui::Image::new((texture, vec2(17.0, 17.0))));
+                            }
+                            None => {
+                                ui.label(RichText::new(r.emoji()).font(ty::small_strong()).color(text));
+                            }
+                        }
+                        ui.label(RichText::new(r.count.to_string()).font(ty::small_strong()).color(text));
+                    });
                 })
                 .response
                 .interact(Sense::click())

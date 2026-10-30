@@ -12,6 +12,8 @@ pub struct Span {
     pub code: bool,
     pub mention: bool,
     pub link: Option<String>,
+    /// The text is an emoji the service has a picture of, by its key.
+    pub emoji: Option<String>,
 }
 
 /// A run of text in one style. Line breaks are `\n` inside the text.
@@ -121,6 +123,7 @@ impl Builder {
             code: has(&["code"]),
             mention: has(&["mention"]),
             link: self.stack.iter().rev().find_map(|o| o.link.clone()),
+            emoji: None,
         }
     }
 
@@ -144,9 +147,16 @@ impl Builder {
                 return;
             }
             "img" => {
-                // Emoji come as images with the character in alt.
+                // Emoji come as images: their key in itemid, the character in alt.
                 if let Some(alt) = attr(attrs, "alt") {
-                    self.text(&decode(&alt));
+                    let key = attr(attrs, "itemtype").filter(|t| t.ends_with("/Emoji")).and(attr(attrs, "itemid"));
+                    match key {
+                        Some(key) if self.pre.is_none() => {
+                            let span = Span { emoji: Some(key), ..self.span() };
+                            self.runs.text(&decode(&alt), span);
+                        }
+                        _ => self.text(&decode(&alt)),
+                    }
                 }
                 return;
             }
@@ -491,7 +501,9 @@ mod tests {
 
     #[test]
     fn emoji_images_become_their_character() {
-        assert_eq!(flatten(&from_html(r#"<p>ok <img alt="🙂" itemtype="http://schema.skype.com/Emoji" src="x"></p>"#)), "ok 🙂");
+        let blocks = from_html(r#"<p>ok <img alt="🙂" itemtype="http://schema.skype.com/Emoji" itemid="smile" src="x"></p>"#);
+        assert_eq!(flatten(&blocks), "ok 🙂");
+        assert_eq!(runs(&blocks)[1].span.emoji.as_deref(), Some("smile"));
     }
 
     #[test]

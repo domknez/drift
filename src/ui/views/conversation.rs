@@ -239,7 +239,7 @@ pub fn bubble(
     let mut action = None;
     ui.add_space(if first { 8.0 } else { 3.0 });
     // What goes inside the bubble: who and when (on the first), the text, a card.
-    let content = |ui: &mut Ui| {
+    let mut content = |ui: &mut Ui| {
         ui.spacing_mut().item_spacing.y = 4.0;
         if first {
             ui.horizontal(|ui| {
@@ -255,7 +255,7 @@ pub fn bubble(
             });
         }
         if !m.body.is_empty() {
-            widgets::blocks(ui, &m.body);
+            widgets::blocks(ui, pictures, &m.body);
         }
         if let Some(card) = &m.card {
             widgets::card(ui, card);
@@ -300,7 +300,12 @@ pub fn bubble(
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
             for (key, emoji) in QUICK_REACTIONS {
-                let button = egui::Button::new(RichText::new(emoji).size(18.0)).frame(false).min_size(vec2(32.0, 32.0));
+                let button = match pictures.get(&Picture::Emoji(key.to_string())) {
+                    Some(texture) => {
+                        egui::Button::image(egui::Image::new((texture, vec2(24.0, 24.0)))).frame(false).min_size(vec2(34.0, 34.0))
+                    }
+                    None => egui::Button::new(RichText::new(emoji).size(18.0)).frame(false).min_size(vec2(34.0, 34.0)),
+                };
                 if ui.add(button).on_hover_text(key).clicked() {
                     action = Some(Action::React { message: m.id.clone(), key: key.to_string() });
                     ui.close();
@@ -329,7 +334,7 @@ pub fn bubble(
     if !m.reactions.is_empty() || has_thread {
         if mine {
             ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
-                if let Some(key) = widgets::reactions(ui, &m.reactions, true) {
+                if let Some(key) = widgets::reactions(ui, pictures, &m.reactions, true) {
                     action = Some(Action::React { message: m.id.clone(), key });
                 }
             });
@@ -337,7 +342,7 @@ pub fn bubble(
             ui.horizontal(|ui| {
                 ui.add_space(indent - ui.spacing().item_spacing.x);
                 ui.vertical(|ui| {
-                    if let Some(key) = widgets::reactions(ui, &m.reactions, false) {
+                    if let Some(key) = widgets::reactions(ui, pictures, &m.reactions, false) {
                         action = Some(Action::React { message: m.id.clone(), key });
                     }
                     if let Some(thread) = thread.filter(|t| !t.is_empty())

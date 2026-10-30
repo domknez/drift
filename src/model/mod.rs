@@ -54,6 +54,8 @@ pub enum Picture {
     },
     /// Members' ids and names, a few of them.
     Group(Vec<(String, String)>),
+    /// An emoji by the service's key for it (`like`, `1f440_eyes`).
+    Emoji(String),
 }
 
 impl Picture {
@@ -63,6 +65,7 @@ impl Picture {
             Picture::Person { id, .. } => format!("person:{id}"),
             Picture::Team { group, etag, .. } => format!("team:{group}:{etag}"),
             Picture::Group(members) => format!("group:{}", members.iter().map(|(id, _)| id.as_str()).collect::<Vec<_>>().join(",")),
+            Picture::Emoji(key) => format!("emoji:{key}"),
         }
     }
 }

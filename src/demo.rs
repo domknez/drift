@@ -210,9 +210,9 @@ impl Backend for Demo {
                     None,
                     ME,
                     today(10, 25),
-                    "<p>Good catch, I'll try that after stand-up.</p>",
+                    "<blockquote itemtype=\"http://schema.skype.com/Reply\"><strong itemprop=\"mri\">Maya Lindqvist</strong><p itemprop=\"preview\">Maybe scale it by deltaY instead of a fixed step?</p></blockquote><p>Good catch, I'll try that after stand-up.</p>",
                     None,
-                    vec![Reaction { key: "pray".into(), count: 1, mine: false }],
+                    vec![Reaction { key: "praying".into(), count: 1, mine: false }],
                 ),
                 message(
                     "3006",
@@ -223,7 +223,15 @@ impl Backend for Demo {
                     None,
                     vec![],
                 ),
-                message("3007", None, "maya", today(10, 31), "<p>lunch at 1? the new place on the corner 🍜</p>", None, like(true)),
+                message(
+                    "3007",
+                    None,
+                    "maya",
+                    today(10, 31),
+                    "<p>lunch at 1? the new place on the corner <img itemtype=\"http://schema.skype.com/Emoji\" itemid=\"yum\" alt=\"😋\"></p>",
+                    None,
+                    like(true),
+                ),
             ]);
         }
         if conversation != OPEN {
@@ -251,7 +259,10 @@ impl Backend for Demo {
                 today(10, 5),
                 "<p>Can someone take a look at <a href=\"https://example.com/pr/10500\">#10500</a> before the release cut? It only touches <code>trigger_rule()</code>, the rest is tests.</p>",
                 None,
-                vec![Reaction { key: "1f440_eyes".into(), count: 2, mine: true }, Reaction { key: "pray".into(), count: 1, mine: false }],
+                vec![
+                    Reaction { key: "1f440_eyes".into(), count: 2, mine: true },
+                    Reaction { key: "praying".into(), count: 1, mine: false },
+                ],
             ),
             message(
                 "1002",
@@ -294,15 +305,19 @@ impl Backend for Demo {
                 None,
                 "maya",
                 today(10, 44),
-                "<p>Small one, mostly gestures. Happy to pair on it after stand-up 🙂</p>",
+                "<p>Small one, mostly gestures. Happy to pair on it after stand-up <img itemtype=\"http://schema.skype.com/Emoji\" itemid=\"smile\" alt=\"🙂\"></p>",
                 None,
                 vec![],
             ),
         ])
     }
 
-    fn picture(&self, _picture: &Picture) -> Result<Vec<u8>> {
-        Err(Error::Service("no pictures in the demo".into()))
+    fn picture(&self, picture: &Picture) -> Result<Vec<u8>> {
+        match picture {
+            // Emoji are public; people in the demo have no photos.
+            Picture::Emoji(key) => crate::teams::emoji(key),
+            _ => Err(Error::Service("no pictures in the demo".into())),
+        }
     }
 
     fn send(&self, _conversation: &str, _text: &str) -> Result<()> {
