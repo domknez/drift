@@ -226,6 +226,134 @@ fn pair(s: &str, marker: &str, tag: &str) -> String {
     out
 }
 
+/// How a piece of typed text looks while it's typed: its Markdown shown as it will be
+/// sent, the marks themselves faint.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Look {
+    pub bold: bool,
+    pub italic: bool,
+    pub strike: bool,
+    pub code: bool,
+    /// A Markdown mark (`**`, `` ` ``, `>`…).
+    pub mark: bool,
+    pub quote: bool,
+}
+
+/// The look of each byte of `text`, by the same rules [`to_html`] sends it with.
+pub fn looks(text: &str) -> Vec<Look> {
+    let mut out = vec![Look::default(); text.len()];
+    let mut fenced = false;
+    let mut at = 0;
+    for line in text.split_inclusive('\n') {
+        let body = line.trim_end_matches('\n');
+        let start = at;
+        at += line.len();
+        let trimmed = body.trim_start();
+        let indent = body.len() - trimmed.len();
+        if trimmed.starts_with("```") {
+            fenced = !fenced;
+            out[start..start + body.len()].iter_mut().for_each(|l| *l = Look { mark: true, code: true, ..Look::default() });
+            continue;
+        }
+        if fenced {
+            out[start..start + body.len()].iter_mut().for_each(|l| l.code = true);
+            continue;
+        }
+        let mut from = start + indent;
+        if trimmed.starts_with('>') {
+            out[from].mark = true;
+            out[from + 1..start + body.len()].iter_mut().for_each(|l| l.quote = true);
+            from += 1;
+        } else if let Some((_, item)) = list_item(trimmed) {
+            let mark = trimmed.len() - item.len();
+            out[from..from + mark].iter_mut().for_each(|l| l.mark = true);
+            from += mark;
+        }
+        inline_looks(&text[from..start + body.len()], &mut out[from..start + body.len()]);
+    }
+    out
+}
+
+/// Code spans and emphasis in one line.
+fn inline_looks(line: &str, out: &mut [Look]) {
+    // Code first: what's in it isn't emphasis. Matched marks become \x01 in `work`,
+    // so they aren't matched again.
+    let mut work: Vec<u8> = line.as_bytes().to_vec();
+    let mut i = 0;
+    while let Some(open) = line[i..].find('`').map(|o| o + i) {
+        let Some(close) = line[open + 1..].find('`').map(|c| c + open + 1) else { break };
+        out[open].mark = true;
+        out[close].mark = true;
+        for (j, l) in out.iter_mut().enumerate().take(close).skip(open + 1) {
+            l.code = true;
+            work[j] = 1;
+        }
+        work[open] = 1;
+        work[close] = 1;
+        i = close + 1;
+    }
+    for (marker, set) in [("**", 0), ("__", 0), ("~~", 1), ("*", 2), ("_", 2)] {
+        let text = String::from_utf8_lossy(&work).into_owned();
+        for (open, close) in pairs(&text, marker) {
+            for j in open..open + marker.len() {
+                out[j].mark = true;
+                work[j] = 1;
+            }
+            for j in close..close + marker.len() {
+                out[j].mark = true;
+                work[j] = 1;
+            }
+            for l in &mut out[open + marker.len()..close] {
+                match set {
+                    0 => l.bold = true,
+                    1 => l.strike = true,
+                    _ => l.italic = true,
+                }
+            }
+        }
+    }
+}
+
+/// Where pairs of `marker` open and close in `s` (byte offsets of each mark), by
+/// the rules of [`pair`].
+fn pairs(s: &str, marker: &str) -> Vec<(usize, usize)> {
+    let word = |c: Option<char>| c.is_some_and(|c| c.is_alphanumeric());
+    let mut found = Vec::new();
+    let mut base = 0;
+    let mut rest = s;
+    while let Some(open) = rest.find(marker) {
+        let before = rest[..open].chars().last();
+        let inner_start = open + marker.len();
+        let opens = rest[inner_start..].chars().next().is_some_and(|c| !c.is_whitespace() && c != '\x01') && !(marker == "_" && word(before));
+        let close = opens
+            .then(|| {
+                let mut from = inner_start;
+                while let Some(at) = rest[from..].find(marker).map(|a| a + from) {
+                    let last = rest[..at].chars().last();
+                    let after = rest[at + marker.len()..].chars().next();
+                    if at > inner_start && last.is_some_and(|c| !c.is_whitespace()) && !(marker == "_" && word(after)) {
+                        return Some(at);
+                    }
+                    from = at + marker.len();
+                }
+                None
+            })
+            .flatten();
+        match close {
+            Some(close) => {
+                found.push((base + open, base + close));
+                base += close + marker.len();
+                rest = &rest[close + marker.len()..];
+            }
+            None => {
+                base += inner_start;
+                rest = &rest[inner_start..];
+            }
+        }
+    }
+    found
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -262,6 +390,21 @@ mod tests {
         assert_eq!(html("- one\n- two\n\n1. first\n2. second"), "<ul><li>one</li><li>two</li></ul><ol><li>first</li><li>second</li></ol>");
         assert_eq!(html("> quoted\nanswer"), "<blockquote><p>quoted</p></blockquote><p>answer</p>");
         assert_eq!(html("```\nfn a() {}\n  <x>\n```"), "<pre><code>fn a() {}\n  &lt;x&gt;</code></pre>");
+    }
+
+    #[test]
+    fn looks_while_typed() {
+        let text = "**hi** `x*y*` ~~no~~ and *it*";
+        let l = looks(text);
+        let at = |s: &str| text.find(s).unwrap();
+        assert!(l[0].mark && l[1].mark && l[at("hi")].bold && !l[at("hi")].mark);
+        assert!(l[at("x*")].code && !l[at("*y") + 1].italic);
+        assert!(l[at("no")].strike && l[at("it")].italic);
+        assert!(!l[at("and")].bold && !l[at("and")].mark);
+        let quoted = looks("> said\n- item");
+        assert!(quoted[0].mark && quoted[2].quote && quoted[7].mark && !quoted[9].mark);
+        let fenced = looks("```\nfn a()\n```\nafter");
+        assert!(fenced[0].mark && fenced[4].code && !fenced[15].code);
     }
 
     #[test]

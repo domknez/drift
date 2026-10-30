@@ -787,6 +787,47 @@ fn ago(at: i64) -> String {
     }
 }
 
+/// Typed text laid out with its Markdown shown: bold, italic, struck, code and quotes
+/// as they'll be sent, the marks faint.
+fn typed(text: &str) -> egui::text::LayoutJob {
+    let p = colors();
+    let looks = crate::model::markdown::looks(text);
+    let mut job = egui::text::LayoutJob::default();
+    let mut start = 0;
+    while start < text.len() {
+        let look = looks[start];
+        let mut end = start + 1;
+        while end < text.len() && (looks[end] == look || !text.is_char_boundary(end)) {
+            end += 1;
+        }
+        let font = if look.code {
+            ty::code()
+        } else if look.bold {
+            ty::body_strong()
+        } else {
+            ty::body()
+        };
+        let color = if look.mark {
+            p.faint
+        } else if look.quote {
+            p.dim
+        } else {
+            p.text
+        };
+        let mut format = egui::TextFormat::simple(font, color);
+        format.italics = look.italic || look.quote;
+        if look.strike {
+            format.strikethrough = Stroke::new(1.0, color);
+        }
+        if look.code && !look.mark {
+            format.background = p.code;
+        }
+        job.append(&text[start..end], 0.0, format);
+        start = end;
+    }
+    job
+}
+
 /// The composer: the text, a few tools and the send button in one rounded box, with
 /// a "replying to" or "editing" line above when there's one. Enter sends, Shift+Enter
 /// breaks the line, ↑ in an empty box edits the last message, Esc cancels, `@` offers
@@ -906,6 +947,12 @@ pub fn composer(ui: &mut Ui, ws: &mut Workspace, rect: Rect, hint: &str, reply: 
     }
 
     let mut t = ui.new_child(egui::UiBuilder::new().max_rect(text_rect).layout(Layout::top_down(Align::Min)));
+    // The Markdown shows as it will be sent while it's typed.
+    let mut layouter = |ui: &Ui, text: &dyn egui::TextBuffer, wrap: f32| {
+        let mut job = typed(text.as_str());
+        job.wrap.max_width = wrap;
+        ui.fonts_mut(|f| f.layout_job(job))
+    };
     let edit = egui::TextEdit::multiline(ws.draft_mut(reply))
         .id(id)
         .hint_text(RichText::new(hint).color(p.faint))
@@ -914,11 +961,20 @@ pub fn composer(ui: &mut Ui, ws: &mut Workspace, rect: Rect, hint: &str, reply: 
         .margin(Margin::ZERO)
         .desired_rows(1)
         .desired_width(f32::INFINITY)
-        .return_key(Some(egui::KeyboardShortcut::new(egui::Modifiers::SHIFT, egui::Key::Enter)));
+        .return_key(Some(egui::KeyboardShortcut::new(egui::Modifiers::SHIFT, egui::Key::Enter)))
+        .layouter(&mut layouter);
     // Taller than the box can grow: it scrolls, keeping the end (where one types) in view.
+    // Its bar shows only then (not for the frame a new line takes to grow the box).
+    let tallest = BOX_HIGH - 2.0 * TEXT_PAD;
+    let bar = if text_h >= tallest {
+        egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded
+    } else {
+        egui::scroll_area::ScrollBarVisibility::AlwaysHidden
+    };
     let response = egui::ScrollArea::vertical()
         .id_salt(("composer-scroll", reply))
-        .max_height(BOX_HIGH - 2.0 * TEXT_PAD)
+        .scroll_bar_visibility(bar)
+        .max_height(tallest)
         .stick_to_bottom(true)
         .show(&mut t, |ui| ui.add(edit))
         .inner;
