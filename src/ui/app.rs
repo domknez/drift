@@ -5,6 +5,7 @@ use super::style;
 use super::views;
 use super::workspace::{Outcome, Workspace};
 use crate::backend::Backend;
+use crate::demo;
 use crate::settings::{Appearance, Prefs};
 use crate::teams::Teams;
 use crate::teams::auth::Session;
@@ -16,6 +17,15 @@ pub struct App {
     /// The theme last applied.
     dark: Option<bool>,
     screen: Screen,
+    /// `DRIFT_SCREENSHOT=<file.png>`: save the window once it has loaded, then quit.
+    capture: Option<Capture>,
+}
+
+struct Capture {
+    path: std::path::PathBuf,
+    /// Frames drawn since everything loaded (pictures and layout settle).
+    frames: u32,
+    requested: bool,
 }
 
 enum Screen {
@@ -55,6 +65,15 @@ pub enum Request {
 impl App {
     pub fn new(cc: &eframe::CreationContext) -> App {
         style::install_fonts(&cc.egui_ctx);
+        let capture = std::env::var_os("DRIFT_SCREENSHOT").map(|path| Capture { path: path.into(), frames: 0, requested: false });
+        // `DRIFT_DEMO=1`: the made-up workspace, with settings that are never saved.
+        if std::env::var_os("DRIFT_DEMO").is_some() {
+            let theme = std::env::var("DRIFT_THEME").unwrap_or_default();
+            let prefs = Prefs::parse(&format!("theme={theme}"));
+            let mut workspace = Workspace::new(&cc.egui_ctx, Arc::new(demo::Demo), Some(demo::OPEN.to_string()));
+            workspace.thread = Some(demo::THREAD.to_string());
+            return App { prefs, dark: None, screen: Screen::Signed(Box::new(workspace)), capture };
+        }
         let prefs = Prefs::load();
         let screen = match Session::stored() {
             Some(session) => {
@@ -62,7 +81,30 @@ impl App {
             }
             None => Screen::SignIn(SignIn::new(None)),
         };
-        App { prefs, dark: None, screen }
+        App { prefs, dark: None, screen, capture }
+    }
+
+    /// Take the screenshot once the workspace has loaded, save it and quit.
+    fn capture(&mut self, ctx: &egui::Context) {
+        let Some(capture) = &mut self.capture else { return };
+        let ready = matches!(&self.screen, Screen::Signed(ws) if ws.directory.is_some() && ws.messages.is_some())
+            || matches!(&self.screen, Screen::SignIn(_));
+        if !ready {
+            return;
+        }
+        capture.frames += 1;
+        ctx.request_repaint();
+        if capture.frames == 30 && !capture.requested {
+            capture.requested = true;
+            let path = capture.path.clone();
+            let done = egui::ScreenshotCallback::new(move |image| {
+                if let Err(e) = save_png(&path, &image) {
+                    eprintln!("drift: screenshot: {e}");
+                }
+                std::process::exit(0);
+            });
+            ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(done));
+        }
     }
 
     fn apply_theme(&mut self, ctx: &egui::Context) {
@@ -125,5 +167,15 @@ impl eframe::App for App {
         if let Some(request) = request {
             self.handle(request);
         }
+        self.capture(&ctx);
     }
+}
+
+fn save_png(path: &std::path::Path, image: &egui::ColorImage) -> Result<(), String> {
+    let file = std::fs::File::create(path).map_err(|e| e.to_string())?;
+    let mut encoder = png::Encoder::new(std::io::BufWriter::new(file), image.size[0] as u32, image.size[1] as u32);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    let rgba: Vec<u8> = image.pixels.iter().flat_map(|c| c.to_array()).collect();
+    encoder.write_header().and_then(|mut w| w.write_image_data(&rgba)).map_err(|e| e.to_string())
 }

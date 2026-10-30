@@ -14,10 +14,6 @@ pub enum Icon {
     Calendar,
     /// A pull request's branches: cards from code hosts.
     Card,
-    Sun,
-    Moon,
-    /// A door with an arrow out: sign out.
-    SignOut,
     /// A paper plane: send.
     Send,
     /// An at sign: activity and mentions.
@@ -26,14 +22,22 @@ pub enum Icon {
     Video,
     /// A bell with a slash: muted.
     Mute,
-    /// A plus: new.
-    Plus,
-    /// Three dots: more.
-    More,
     /// Two people: members.
     Members,
     /// A magnifier: search.
     Search,
+    /// A speech bubble: chats.
+    Chat,
+    /// A pencil: a new message.
+    Edit,
+    /// A cross: close.
+    Close,
+    /// A "B": bold.
+    Bold,
+    /// A smiling face: emoji.
+    Smile,
+    /// A paperclip: attach.
+    Clip,
 }
 
 /// Paint `icon` into the square `rect`.
@@ -69,23 +73,6 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             line(&[(6.0, 8.6), (6.0, 21.0)]);
             line(&[(13.0, 6.0), (16.0, 6.0), (18.0, 8.0), (18.0, 15.4)]);
         }
-        Icon::Sun => {
-            circle(12.0, 12.0, 4.0);
-            for i in 0..8 {
-                let a = i as f32 * TAU / 8.0;
-                let (c, sn) = (a.cos(), a.sin());
-                line(&[(12.0 + 7.0 * c, 12.0 + 7.0 * sn), (12.0 + 9.5 * c, 12.0 + 9.5 * sn)]);
-            }
-        }
-        Icon::Moon => {
-            arc(12.0, 12.0, 8.5, 0.35 * PI, 1.95 * PI);
-            arc(15.5, 8.5, 6.0, 0.47 * PI, 1.03 * PI);
-        }
-        Icon::SignOut => {
-            line(&[(10.0, 4.0), (5.0, 4.0), (5.0, 20.0), (10.0, 20.0)]);
-            line(&[(10.0, 12.0), (20.0, 12.0)]);
-            line(&[(16.0, 8.0), (20.0, 12.0), (16.0, 16.0)]);
-        }
         Icon::Send => {
             line(&[(21.0, 3.0), (10.5, 13.5)]);
             line(&[(21.0, 3.0), (14.0, 21.0), (10.5, 13.5), (3.0, 10.0), (21.0, 3.0)]);
@@ -106,15 +93,6 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             line(&[(10.0, 19.0), (14.0, 19.0)]);
             line(&[(3.0, 4.0), (21.0, 21.0)]);
         }
-        Icon::Plus => {
-            line(&[(12.0, 5.0), (12.0, 19.0)]);
-            line(&[(5.0, 12.0), (19.0, 12.0)]);
-        }
-        Icon::More => {
-            for x in [5.5, 12.0, 18.5] {
-                painter.circle_filled(at(x, 12.0), 1.6 * s, color);
-            }
-        }
         Icon::Members => {
             circle(9.0, 8.0, 3.2);
             arc(9.0, 20.0, 6.0, PI, TAU);
@@ -124,6 +102,38 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
         Icon::Search => {
             circle(11.0, 11.0, 6.5);
             line(&[(16.0, 16.0), (20.5, 20.5)]);
+        }
+        Icon::Chat => {
+            line(&[(4.0, 5.0), (20.0, 5.0), (20.0, 16.0), (8.0, 16.0), (4.0, 20.0), (4.0, 5.0)]);
+        }
+        Icon::Edit => {
+            line(&[(12.0, 20.0), (21.0, 20.0)]);
+            line(&[(16.5, 3.5), (19.5, 6.5), (7.0, 19.0), (3.5, 20.0), (4.5, 16.5), (16.5, 3.5)]);
+        }
+        Icon::Close => {
+            line(&[(6.0, 6.0), (18.0, 18.0)]);
+            line(&[(18.0, 6.0), (6.0, 18.0)]);
+        }
+        Icon::Bold => {
+            line(&[(7.0, 4.0), (7.0, 20.0), (14.0, 20.0)]);
+            arc(14.0, 16.0, 4.0, -0.5 * PI, 0.5 * PI);
+            line(&[(7.0, 12.0), (13.0, 12.0)]);
+            arc(13.0, 8.0, 4.0, -0.5 * PI, 0.5 * PI);
+            line(&[(7.0, 4.0), (13.0, 4.0)]);
+        }
+        Icon::Smile => {
+            circle(12.0, 12.0, 9.0);
+            arc(12.0, 12.0, 5.0, 0.2 * PI, 0.8 * PI);
+            painter.circle_filled(at(9.0, 9.5), 1.1 * s, color);
+            painter.circle_filled(at(15.0, 9.5), 1.1 * s, color);
+        }
+        Icon::Clip => {
+            line(&[(16.5, 7.0), (8.5, 15.0)]);
+            arc(10.0, 16.5, 2.1, 0.25 * PI, 1.25 * PI);
+            line(&[(8.5, 18.0), (18.5, 8.0)]);
+            arc(16.0, 5.5, 3.5, -0.75 * PI, 0.25 * PI);
+            line(&[(13.5, 3.0), (5.0, 11.5)]);
+            arc(9.0, 15.5, 5.6, 0.75 * PI, 1.25 * PI);
         }
     }
 }

@@ -1,10 +1,11 @@
-//! egui front-end in the "Calm" look: one sidebar for everything, the open
-//! conversation beside it.
+//! egui front-end in the "Tide" look: an icon rail, a list beside it, the open
+//! conversation, and its thread on the right.
 //!
-//! - [`app`]: state, what happens each frame, signing in and out
-//! - [`workspace`]: the signed-in state: the directory, the open conversation, refreshes
-//! - [`views`]: the sidebar, the conversation, the sign-in page
+//! - [`app`]: state, what happens each frame, signing in and out, the demo and screenshots
+//! - [`workspace`]: the signed-in state: the section, the open conversation and thread, refreshes
+//! - [`views`]: the rail, the list, the conversation, the thread, the sign-in page
 //! - [`widgets`]: avatars, rich text, cards, reactions
+//! - [`pictures`]: people's and teams' pictures
 //! - [`style`]: palette, type, metrics and icons
 //! - [`load`]: background work
 

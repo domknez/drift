@@ -15,8 +15,8 @@ a fraction of the memory the official app keeps busy doing nothing.
 Sibling of [dust](https://github.com/domknez/dust) (music) and
 [haze](https://github.com/domknez/haze) (IPTV).
 
-> **Early days.** drift reads your teams, channels and chats today. Sending messages,
-> live updates and notifications come next; calls open in Teams itself.
+> **Early days.** drift reads and sends messages in your teams, channels and chats.
+> Live updates and notifications come next; calls open in Teams itself.
 
 ## Features
 
@@ -24,17 +24,19 @@ Sibling of [dust](https://github.com/domknez/dust) (music) and
   Microsoft's own sign-in page (MFA included). The sign-in is kept in the system
   keychain (macOS Keychain, Windows Credential Manager, Secret Service) and renewed
   on its own
-- **One sidebar for everything:** your teams with their channels, your chats and your
-  meeting chats (folded away until you want them), with what's unread in bold; the
-  search field narrows the list as you type
-- **Channels as threads:** each post is a card with its replies folded in under it —
-  the last two, and *Show earlier replies* for the rest
+- **A rail and a list:** Activity, Chats, Teams and Meetings on the rail, with counts
+  of what's unread; beside it your teams with their channels, or your direct
+  messages and meeting chats, with what's unread in bold; the search field narrows
+  the list as you type, and today's meeting sits on top with *Join*
+- **Channels with threads:** posts one under another, each with its replies a click
+  away in a thread beside the channel, where you can answer
 - **Chats:** messages grouped by author, with day dividers
+- **Write and send** in any chat or channel, or reply in a thread
 - **Messages as written:** bold, italics, code, links, mentions and emoji; reactions
   under them; cards from bots and connectors (pull requests, alerts) as one compact
   row that opens its link
-- **Modern UI ("Calm"):** a deep ink dark and a warm paper light theme (or follow the
-  system) with one violet accent, Geist and Geist Mono
+- **Modern UI ("Tide"):** a slate dark and a clean light theme (or follow the system)
+  with one teal accent, Inter and JetBrains Mono
 - Runs on macOS, Linux and Windows
 
 ## Build
@@ -69,9 +71,10 @@ src/
 ├── ui/
 │   ├── app.rs        the sign-in page or the workspace, the theme
 │   ├── workspace.rs  the signed-in state: sidebar, open conversation, refreshes
-│   ├── views/        the sidebar, the conversation, the sign-in page
+│   ├── views/        the rail, the list, the conversation, the thread, sign-in
 │   ├── widgets.rs    avatars, message text, cards, reactions
 │   └── style/        palette, type scale, metrics, icons — all visual constants
+├── demo.rs        a made-up workspace (DRIFT_DEMO=1) for screenshots
 ├── login.rs       "Sign in with Microsoft" webview helper (its own process)
 ├── credentials.rs the sign-in in one OS keychain item
 ├── settings.rs    settings file
@@ -81,6 +84,9 @@ src/
 - **Settings** live in `~/Library/Application Support/drift/` (macOS), `%APPDATA%\drift\`
   (Windows) or `~/.config/drift/` (Linux). The log is `~/Library/Logs/drift/drift.log`
   on macOS; `DRIFT_LOG=debug` prints more.
+- `DRIFT_DEMO=1` opens a made-up workspace instead of your account (with
+  `DRIFT_THEME=light|dark`); `DRIFT_SCREENSHOT=file.png` saves the window once it has
+  loaded and quits.
 - `cargo test` covers the parsers (message HTML, the services' answers, times) and the
   sign-in helpers.
 

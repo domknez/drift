@@ -13,6 +13,12 @@ pub fn avatar(ui: &mut Ui, id: &str, name: &str, size: f32, picture: Option<Text
         return response;
     }
     let painter = ui.painter();
+    // Bots and connectors (ids starting 28:) get a rounded square, people a circle.
+    if id.starts_with("28:") {
+        painter.rect_filled(rect, CornerRadius::same((size * 0.22) as u8), palette::avatar(id));
+        icons::paint(painter, Rect::from_center_size(rect.center(), vec2(size * 0.5, size * 0.5)), Icon::Card, Color32::WHITE);
+        return response;
+    }
     painter.circle_filled(rect.center(), size / 2.0, palette::avatar(id));
     painter.text(rect.center(), Align2::CENTER_CENTER, initials(name), ty::initials(size), Color32::WHITE);
     response
@@ -189,28 +195,29 @@ fn table(ui: &mut Ui, rows: &[Vec<Vec<Inline>>], header: bool) {
 /// A card a bot posted, as one compact row; clicking it opens its link.
 pub fn card(ui: &mut Ui, card: &Card) {
     let p = colors();
+    ui.add_space(2.0);
+    let width = ui.available_width().min(560.0);
     let response = Frame::new()
-        .fill(p.bg)
+        .fill(p.surface)
         .stroke(Stroke::new(1.0, p.line))
-        .corner_radius(CornerRadius::same(10))
-        .inner_margin(Margin::symmetric(12, 10))
+        .corner_radius(CornerRadius::same(metrics::RADIUS))
+        .inner_margin(Margin { left: 15, right: 12, top: 9, bottom: 9 })
         .show(ui, |ui| {
-            ui.set_width(ui.available_width());
+            ui.set_width(width - 27.0);
+            ui.spacing_mut().item_spacing.y = 3.0;
             ui.horizontal(|ui| {
-                let (tile, _) = ui.allocate_exact_size(vec2(32.0, 32.0), Sense::hover());
-                ui.painter().rect_filled(tile, CornerRadius::same(8), p.selected);
-                icons::paint(ui.painter(), Rect::from_center_size(tile.center(), vec2(18.0, 18.0)), Icon::Card, p.accent);
-                ui.add_space(4.0);
-                ui.vertical(|ui| {
-                    ui.spacing_mut().item_spacing.y = 2.0;
-                    ui.add(egui::Label::new(RichText::new(&card.title).font(ty::small_strong()).color(p.text)).truncate());
-                    if !card.detail.is_empty() {
-                        ui.add(egui::Label::new(RichText::new(&card.detail).font(ty::meta()).color(p.faint)).truncate());
-                    }
-                });
+                ui.spacing_mut().item_spacing.x = 8.0;
+                icon(ui, Icon::Card, 16.0, p.accent);
+                ui.add(egui::Label::new(RichText::new(&card.title).font(ty::item_strong()).color(p.text)).truncate());
             });
+            if !card.detail.is_empty() {
+                ui.add(egui::Label::new(RichText::new(&card.detail).font(ty::mono_small()).color(p.dim)).truncate());
+            }
         })
         .response;
+    // The accent edge on the left.
+    let edge = Rect::from_min_size(response.rect.min, vec2(3.0, response.rect.height()));
+    ui.painter().rect_filled(edge, CornerRadius { nw: metrics::RADIUS, sw: metrics::RADIUS, ne: 0, se: 0 }, p.accent);
     if let Some(url) = &card.link {
         let response = response.interact(Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
         if response.clicked() {

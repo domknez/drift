@@ -1,5 +1,5 @@
-//! The signed-in state: what the sidebar lists, the open conversation and its
-//! messages, and keeping both fresh.
+//! The signed-in state: the rail's section, what the list shows, the open
+//! conversation and thread, and keeping them fresh.
 
 use super::load::Load;
 use super::pictures::Pictures;
@@ -17,6 +17,11 @@ const MESSAGES_EVERY: Duration = Duration::from_secs(20);
 
 pub struct Workspace {
     pub backend: Arc<dyn Backend>,
+    pub section: Section,
+    /// The post whose thread is open beside the conversation.
+    pub thread: Option<String>,
+    /// The reply being typed in the open thread.
+    pub reply_draft: String,
     pub me: String,
     /// The signed-in user's id (for their picture).
     pub me_id: String,
@@ -36,11 +41,18 @@ pub struct Workspace {
     pub filter: String,
     /// Sidebar sections folded away, by key.
     pub folded: HashSet<String>,
-    /// Posts showing all their replies, by id.
-    pub unfolded_threads: HashSet<String>,
     /// The message being typed in the open conversation.
     pub draft: String,
     sending: Load<(), Error>,
+}
+
+/// What the rail picks for the list.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Section {
+    Activity,
+    Chats,
+    Teams,
+    Meetings,
 }
 
 /// What the workspace needs the app to do.
@@ -56,6 +68,9 @@ impl Workspace {
             me_id: backend.me_id(),
             pictures: Pictures::new(ctx, backend.clone()),
             backend,
+            section: Section::Teams,
+            thread: None,
+            reply_draft: String::new(),
             directory: None,
             directory_load: Load::Idle,
             directory_at: None,
@@ -67,7 +82,6 @@ impl Workspace {
             filter: String::new(),
             // Meeting chats pile up; they start folded.
             folded: HashSet::from(["meetings".to_string()]),
-            unfolded_threads: HashSet::new(),
             draft: String::new(),
             sending: Load::Idle,
         }
@@ -78,16 +92,23 @@ impl Workspace {
         self.sending.is_running()
     }
 
-    /// Send the draft to the open conversation; it's cleared and the view refreshes.
-    pub fn send(&mut self, ctx: &egui::Context) {
-        let text = self.draft.trim().to_string();
-        let Some(id) = self.open.clone() else { return };
+    /// Send the draft to the open conversation, or the reply to the open thread; it's
+    /// cleared and the view refreshes.
+    pub fn send(&mut self, ctx: &egui::Context, reply: bool) {
+        let Some(open) = self.open.clone() else { return };
+        let (draft, to) = if reply {
+            let Some(root) = self.thread.clone() else { return };
+            (&mut self.reply_draft, format!("{open};messageid={root}"))
+        } else {
+            (&mut self.draft, open)
+        };
+        let text = draft.trim().to_string();
         if text.is_empty() || self.sending.is_running() {
             return;
         }
-        self.draft.clear();
+        draft.clear();
         let backend = self.backend.clone();
-        self.sending = Load::start(ctx, move || backend.send(&id, &text));
+        self.sending = Load::start(ctx, move || backend.send(&to, &text));
     }
 
     /// Collect finished loads and start the ones that are due.
@@ -162,8 +183,9 @@ impl Workspace {
         self.messages = None;
         self.messages_load = Load::Idle;
         self.messages_at = None;
-        self.unfolded_threads.clear();
+        self.thread = None;
         self.draft.clear();
+        self.reply_draft.clear();
         // Read here; Teams itself still counts it until it's read there.
         if let Some(c) = self.directory.as_mut().and_then(|d| d.conversations.iter_mut().find(|c| c.id == id)) {
             c.unread = false;

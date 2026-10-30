@@ -1,5 +1,4 @@
-//! Colours: "Calm". A deep ink dark and a warm paper light (the sidebar a shade
-//! darker than the page), both with one violet accent.
+//! Colours: "Tide". A cool slate dark and a clean white light, with one teal accent.
 
 use eframe::egui::Color32;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -7,15 +6,18 @@ use std::sync::atomic::{AtomicBool, Ordering};
 pub struct Palette {
     /// The conversation's page.
     pub bg: Color32,
-    pub sidebar: Color32,
-    /// Posts, fields and other raised areas.
+    /// The icon rail on the far left.
+    pub rail: Color32,
+    /// The list beside the rail.
+    pub side: Color32,
+    /// Cards, fields and other raised areas.
     pub surface: Color32,
     pub hover: Color32,
-    /// The open conversation in the sidebar, tabs, own reactions.
+    /// The open conversation, the active rail button, the meeting card.
     pub selected: Color32,
     /// Hairlines between areas.
     pub line: Color32,
-    /// Outlines of fields and the reply box.
+    /// Outlines of fields, buttons and the composer.
     pub border: Color32,
     pub text: Color32,
     pub dim: Color32,
@@ -35,38 +37,40 @@ const fn rgb(r: u8, g: u8, b: u8) -> Color32 {
 }
 
 pub static DARK: Palette = Palette {
-    bg: rgb(0x13, 0x13, 0x16),
-    sidebar: rgb(0x18, 0x18, 0x1c),
-    surface: rgb(0x1f, 0x1f, 0x24),
-    hover: rgb(0x23, 0x23, 0x29),
-    selected: rgb(0x2a, 0x28, 0x36),
-    line: rgb(0x26, 0x26, 0x2c),
-    border: rgb(0x34, 0x34, 0x3c),
-    text: rgb(0xec, 0xec, 0xf1),
-    dim: rgb(0xa1, 0xa1, 0xad),
-    faint: rgb(0x70, 0x70, 0x7c),
-    accent: rgb(0xa9, 0x9b, 0xff),
-    accent_fill: rgb(0x8b, 0x7c, 0xf6),
-    on_accent: rgb(0xff, 0xff, 0xff),
-    code: rgb(0x25, 0x25, 0x2b),
+    bg: rgb(0x16, 0x18, 0x1b),
+    rail: rgb(0x0f, 0x11, 0x13),
+    side: rgb(0x13, 0x15, 0x18),
+    surface: rgb(0x1c, 0x1f, 0x23),
+    hover: rgb(0x20, 0x24, 0x2a),
+    selected: rgb(0x1f, 0x2b, 0x2d),
+    line: rgb(0x26, 0x2a, 0x2f),
+    border: rgb(0x32, 0x38, 0x40),
+    text: rgb(0xe7, 0xe9, 0xec),
+    dim: rgb(0x9a, 0xa1, 0xaa),
+    faint: rgb(0x6d, 0x74, 0x7d),
+    accent: rgb(0x3d, 0xd6, 0xc0),
+    accent_fill: rgb(0x2b, 0xc4, 0xae),
+    on_accent: rgb(0x06, 0x24, 0x20),
+    code: rgb(0x22, 0x27, 0x2d),
     danger: rgb(0xf2, 0x70, 0x6c),
 };
 
 pub static LIGHT: Palette = Palette {
-    bg: rgb(0xfc, 0xfb, 0xf9),
-    sidebar: rgb(0xeb, 0xe7, 0xe2),
+    bg: rgb(0xff, 0xff, 0xff),
+    rail: rgb(0xee, 0xf0, 0xf2),
+    side: rgb(0xf6, 0xf7, 0xf8),
     surface: rgb(0xff, 0xff, 0xff),
-    hover: rgb(0xe2, 0xdd, 0xd6),
-    selected: rgb(0xe2, 0xdb, 0xf6),
-    line: rgb(0xe4, 0xdf, 0xd8),
-    border: rgb(0xd6, 0xd0, 0xc8),
-    text: rgb(0x1d, 0x1b, 0x19),
-    dim: rgb(0x5f, 0x5a, 0x54),
-    faint: rgb(0x93, 0x8c, 0x85),
-    accent: rgb(0x6a, 0x55, 0xe8),
-    accent_fill: rgb(0x74, 0x61, 0xf0),
+    hover: rgb(0xec, 0xef, 0xf1),
+    selected: rgb(0xdf, 0xf4, 0xf0),
+    line: rgb(0xe5, 0xe8, 0xeb),
+    border: rgb(0xd4, 0xd9, 0xde),
+    text: rgb(0x15, 0x18, 0x1b),
+    dim: rgb(0x59, 0x61, 0x6b),
+    faint: rgb(0x8a, 0x92, 0x9b),
+    accent: rgb(0x0f, 0x8f, 0x7e),
+    accent_fill: rgb(0x14, 0xa8, 0x92),
     on_accent: rgb(0xff, 0xff, 0xff),
-    code: rgb(0xf1, 0xed, 0xe8),
+    code: rgb(0xf0, 0xf2, 0xf4),
     danger: rgb(0xc8, 0x3c, 0x34),
 };
 
@@ -80,7 +84,7 @@ pub(super) fn set_dark(dark: bool) {
     IS_DARK.store(dark, Ordering::Relaxed);
 }
 
-/// A person's avatar colour, the same for them every time.
+/// A person's or team's colour behind their initials, the same for them every time.
 pub fn avatar(id: &str) -> Color32 {
     const COLORS: [Color32; 8] = [
         rgb(0xe0, 0x61, 0x7a),

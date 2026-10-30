@@ -6,7 +6,7 @@ use eframe::egui::{self, Align, Frame, Layout, RichText, vec2};
 
 pub fn show(ui: &mut egui::Ui, sign_in: &mut SignIn) {
     let p = colors();
-    egui::CentralPanel::default().frame(Frame::new().fill(p.sidebar)).show(ui, |ui| {
+    egui::CentralPanel::default().frame(Frame::new().fill(p.side)).show(ui, |ui| {
         super::drag_area(ui, egui::Rect::from_min_size(ui.max_rect().min, vec2(ui.max_rect().width(), 40.0)), "sign-in-drag");
         ui.with_layout(Layout::top_down(Align::Center), |ui| {
             ui.add_space((ui.available_height() / 2.0 - 120.0).max(40.0));

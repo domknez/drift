@@ -293,7 +293,8 @@ impl Backend for Teams {
                 "imdisplayname": name,
             });
             let auth = format!("skypetoken={}", skype.token);
-            let headers = [("Authentication", auth.as_str()), ("X-Skypetoken", skype.token.as_str()), ("BehaviorOverride", "redirectAs404")];
+            let headers =
+                [("Authentication", auth.as_str()), ("X-Skypetoken", skype.token.as_str()), ("BehaviorOverride", "redirectAs404")];
             match http::request(Method::Post, &url, &headers, Body::Json(&body)) {
                 Err(Error::SignedOut) if attempt == 0 => self.session().drop_skype(),
                 Ok(_) => return Ok(()),

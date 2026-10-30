@@ -7,6 +7,7 @@
 mod log;
 mod backend;
 mod credentials;
+mod demo;
 mod login;
 mod model;
 mod settings;
