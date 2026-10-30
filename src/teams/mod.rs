@@ -650,6 +650,11 @@ fn chat_picture(members: &[String], me: &str, names: &HashMap<String, String>) -
     }
 }
 
+/// `s` percent-encoded, for a Teams link.
+pub fn encode(s: &str) -> String {
+    http::encode(s)
+}
+
 /// A meeting's join link as one that opens straight in Teams on the web (the plain
 /// link stops at a page asking which app to use).
 pub fn web_join(url: &str) -> String {

@@ -115,6 +115,8 @@ pub struct Workspace {
     pub switcher: Option<super::views::switcher::Switcher>,
     /// Conversations opened, the latest first.
     pub recent: Vec<ConversationId>,
+    /// Conversations muted in drift (None until the saved ones are in).
+    pub muted_here: Option<HashSet<String>>,
     /// The picture shown over the window, by its URL.
     pub viewing: Option<String>,
     /// The conversation last drawn (its first drawing is laid out once unseen, so it
@@ -237,6 +239,7 @@ impl Workspace {
             activity_new_after: None,
             switcher: None,
             recent: Vec::new(),
+            muted_here: None,
             viewing: None,
             drawn: None,
             list_height: None,
@@ -557,6 +560,34 @@ impl Workspace {
         self.chores.push(Load::start(ctx, move || backend.pin(&id, pinned).map(|()| false)));
     }
 
+    /// Mark a conversation read (up to now), or unread (from its newest message on).
+    pub fn set_read(&mut self, ctx: &egui::Context, id: &str, read: bool) {
+        let Some(c) = self.directory.as_mut().and_then(|d| d.conversations.iter_mut().find(|c| c.id == id)) else { return };
+        c.unread = !read;
+        let up_to = if read { crate::model::time::now_ms() } else { c.last.as_ref().map_or(0, |l| l.at) - 1 };
+        c.read_up_to = Some(up_to);
+        // The open one isn't marked read again until something new comes.
+        if !read && self.open.as_deref() == Some(id) {
+            let last = self.messages.as_ref().and_then(|m| m.last()).map(|m| m.id.clone()).unwrap_or_default();
+            self.marked = Some((id.to_string(), last));
+        }
+        let (backend, id) = (self.backend.clone(), id.to_string());
+        self.chores.push(Load::start(ctx, move || backend.mark_read(&id, &up_to.to_string()).map(|()| false)));
+    }
+
+    /// Mute a conversation in drift (no notifications, not counted unread), or unmute it.
+    pub fn set_muted(&mut self, id: &str, muted: bool) {
+        let set = self.muted_here.get_or_insert_default();
+        if muted {
+            set.insert(id.to_string());
+        } else {
+            set.remove(id);
+        }
+        if let Some(c) = self.directory.as_mut().and_then(|d| d.conversations.iter_mut().find(|c| c.id == id)) {
+            c.muted = muted;
+        }
+    }
+
     /// Mark the open conversation read up to its newest message, once per message.
     fn mark_read(&mut self, ctx: &egui::Context) {
         let (Some(open), Some(last)) = (self.open.clone(), self.messages.as_ref().and_then(|m| m.last()).map(|m| m.id.clone())) else {
@@ -639,7 +670,11 @@ impl Workspace {
         }
         if let Some(result) = self.directory_load.take() {
             match result {
-                Ok(directory) => {
+                Ok(mut directory) => {
+                    // Muted in drift counts as muted.
+                    for c in &mut directory.conversations {
+                        c.muted |= self.muted_here.as_ref().is_some_and(|m| m.contains(&c.id));
+                    }
                     if self.me.is_empty() {
                         self.me = self.backend.me();
                         self.me_id = self.backend.me_id();

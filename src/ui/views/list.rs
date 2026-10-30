@@ -659,13 +659,41 @@ fn row(ui: &mut Ui, ws: &mut Workspace, d: &Directory, c: &Conversation) {
     if response.clicked() {
         ws.open(&c.id);
     }
-    response.context_menu(|ui| {
-        let label = if c.pinned { "Unpin" } else { "Pin to the top" };
-        if ui.button(label).clicked() {
-            ws.set_pinned(ui.ctx(), &c.id, !c.pinned);
-            ui.close();
-        }
-    });
+    response.context_menu(|ui| conversation_menu(ui, ws, c));
+}
+
+/// What a right click on a conversation offers.
+pub fn conversation_menu(ui: &mut Ui, ws: &mut Workspace, c: &Conversation) {
+    let read = if c.unread { "Mark as read" } else { "Mark as unread" };
+    if ui.button(read).clicked() {
+        ws.set_read(ui.ctx(), &c.id, c.unread);
+        ui.close();
+    }
+    let here = ws.muted_here.as_ref().is_some_and(|m| m.contains(&c.id));
+    if c.muted && !here {
+        ui.add_enabled(false, egui::Button::new("Muted in Teams"));
+    } else if ui.button(if c.muted { "Unmute notifications" } else { "Mute notifications" }).clicked() {
+        ws.set_muted(&c.id, !c.muted);
+        ui.close();
+    }
+    if ui.button(if c.pinned { "Unpin" } else { "Pin to the top" }).clicked() {
+        ws.set_pinned(ui.ctx(), &c.id, !c.pinned);
+        ui.close();
+    }
+    ui.separator();
+    if ui.button("Copy link").clicked() {
+        ui.ctx().copy_text(link(ws, c));
+        ui.close();
+    }
+}
+
+/// A Teams link to a conversation.
+fn link(ws: &Workspace, c: &Conversation) -> String {
+    let id = crate::teams::encode(&c.id);
+    match ws.directory.as_ref().and_then(|d| d.channel(&c.id)) {
+        Some((_, channel)) => format!("https://teams.microsoft.com/l/channel/{id}/{}", crate::teams::encode(&channel.name)),
+        None => format!("https://teams.microsoft.com/l/chat/{id}/0"),
+    }
 }
 
 /// An activity item: who, what they did, where, what they wrote, and when.

@@ -225,10 +225,19 @@ impl eframe::App for App {
                 }
                 let before = workspace.open.clone();
                 workspace.notifications = self.prefs.notifications;
+                if workspace.muted_here.is_none() {
+                    workspace.muted_here = Some(self.prefs.muted.iter().cloned().collect());
+                }
+                let muted_before = workspace.muted_here.clone();
                 request = views::workspace(ui, workspace, self.prefs.theme);
                 if workspace.open != before {
                     let open = workspace.open.clone();
                     self.prefs.update(|p| p.conversation = open);
+                }
+                if workspace.muted_here != muted_before {
+                    let mut muted: Vec<String> = workspace.muted_here.iter().flatten().cloned().collect();
+                    muted.sort();
+                    self.prefs.update(|p| p.muted = muted);
                 }
             }
         }
