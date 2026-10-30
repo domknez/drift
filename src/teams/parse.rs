@@ -125,6 +125,7 @@ pub fn conversations(v: &Value) -> Vec<Conversation> {
                 title: str_of(props, &["topic"]).unwrap_or("").to_string(),
                 last,
                 unread,
+                read_up_to,
                 pinned: flag(cprops, "favorite"),
                 muted: cprops["alerts"].as_str().is_some_and(|a| a.eq_ignore_ascii_case("mute")),
                 join_url,

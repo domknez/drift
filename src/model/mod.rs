@@ -34,6 +34,8 @@ pub struct Conversation {
     pub last: Option<Preview>,
     /// Something arrived after what was last read.
     pub unread: bool,
+    /// The id of the last message read (message ids are times in ms), if known.
+    pub read_up_to: Option<i64>,
     /// Pinned to the top of the list (a favourite in Teams).
     pub pinned: bool,
     pub muted: bool,

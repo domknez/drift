@@ -108,6 +108,9 @@ pub struct Workspace {
     pub earlier_from: Option<f32>,
     /// A scroll position for the message list's next drawing.
     pub scroll_to: Option<f32>,
+    /// While Activity is shown: up to which item it had been read when it was opened
+    /// (newer ones stay marked new while it's looked at, though they're read by then).
+    pub activity_new_after: Option<i64>,
     /// The picture shown over the window, by its URL.
     pub viewing: Option<String>,
     /// The conversation last drawn (its first drawing is laid out once unseen, so it
@@ -227,6 +230,7 @@ impl Workspace {
             newest: NEWEST,
             earlier_from: None,
             scroll_to: None,
+            activity_new_after: None,
             viewing: None,
             drawn: None,
             list_height: None,
@@ -685,6 +689,7 @@ impl Workspace {
                 Err(e) => self.failed(e),
             }
         }
+        self.read_activity(ctx);
         if let Some(result) = self.read_load.take() {
             match result {
                 Ok((id, positions)) if Some(&id) == self.open.as_ref() => {
@@ -755,9 +760,9 @@ impl Workspace {
             let backend = self.backend.clone();
             self.read_load = Load::start(ctx, move || backend.read_by(&id).map(|r| (id, r)));
         }
-        if self.section == Section::Activity
-            && !self.activity_load.is_running()
-            && due(self.activity_at, MESSAGES_EVERY)
+        // The feed is fetched whatever's shown: its unread count is on the Activity tab.
+        if !self.activity_load.is_running()
+            && due(self.activity_at, if self.live { PUSHED_EVERY } else { MESSAGES_EVERY })
             && let Some(feed) = self.directory.as_ref().and_then(|d| d.activity()).map(|c| c.id.clone())
         {
             self.activity_at = Some(Instant::now());
@@ -799,6 +804,48 @@ impl Workspace {
         if let Some(c) = self.directory.as_mut().and_then(|d| d.conversations.iter_mut().find(|c| c.id == id)) {
             c.unread = false;
         }
+    }
+
+    /// How many activity items came after what was last read (before the feed is
+    /// loaded, 1 if anything did).
+    pub fn activity_unread(&self) -> usize {
+        let Some(feed) = self.directory.as_ref().and_then(|d| d.activity()) else { return 0 };
+        match (&self.activity, feed.read_up_to) {
+            (Some(items), Some(read)) => items.iter().filter(|m| m.id.parse::<i64>().is_ok_and(|id| id > read)).count(),
+            _ => usize::from(feed.unread),
+        }
+    }
+
+    /// Whether an activity item is new: after what was read when Activity was opened.
+    pub fn activity_is_new(&self, item: &Message) -> bool {
+        let read = self.activity_new_after.or_else(|| self.directory.as_ref().and_then(|d| d.activity()).and_then(|f| f.read_up_to));
+        read.is_some_and(|read| item.id.parse::<i64>().is_ok_and(|id| id > read))
+    }
+
+    /// With Activity shown, mark the feed read up to its newest item (as Teams does
+    /// when its bell is opened); the items that were new stay marked while it's shown.
+    fn read_activity(&mut self, ctx: &egui::Context) {
+        if self.section != Section::Activity {
+            self.activity_new_after = None;
+            return;
+        }
+        if self.activity_unread() == 0 {
+            return;
+        }
+        let newest = self.activity.as_ref().and_then(|items| items.iter().filter_map(|m| m.id.parse::<i64>().ok()).max());
+        let Some(newest) = newest else { return };
+        let Some(directory) = self.directory.as_mut() else { return };
+        let Some(id) = directory.activity().map(|f| f.id.clone()) else { return };
+        let Some(feed) = directory.conversations.iter_mut().find(|c| c.id == id) else { return };
+        if self.activity_new_after.is_none() {
+            self.activity_new_after = Some(feed.read_up_to.unwrap_or(newest));
+        }
+        // Read here at once; the service hears of it in the background.
+        feed.read_up_to = Some(newest);
+        feed.unread = false;
+        let backend = self.backend.clone();
+        let message = newest.to_string();
+        self.chores.push(Load::start(ctx, move || backend.mark_read(&id, &message).map(|()| false)));
     }
 
     /// Fetch everything again now.

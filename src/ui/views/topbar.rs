@@ -28,7 +28,7 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace, theme: Appearance) -> Option<Reques
     x += word_w + 34.0;
 
     // Tabs.
-    let counts = ws.directory.as_ref().map(unread_counts).unwrap_or_default();
+    let counts = (ws.activity_unread(), ws.directory.as_ref().map_or(0, unread_chats));
     let tabs = [
         (Section::Activity, Icon::Bell, "Activity", counts.0),
         (Section::Chats, Icon::Chat, "Chats", counts.1),
@@ -81,10 +81,9 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace, theme: Appearance) -> Option<Reques
 }
 
 /// Unread activity, and unread chats (direct messages and meeting chats).
-fn unread_counts(d: &Directory) -> (usize, usize) {
-    let activity = d.conversations.iter().filter(|c| c.kind == Kind::Feed && c.unread).count();
-    let chats = d.conversations.iter().filter(|c| matches!(c.kind, Kind::Chat | Kind::Meeting) && c.unread && !c.muted).count();
-    (activity, chats)
+/// Chats and meeting chats with something unread (not counting muted ones).
+fn unread_chats(d: &Directory) -> usize {
+    d.conversations.iter().filter(|c| matches!(c.kind, Kind::Chat | Kind::Meeting) && c.unread && !c.muted).count()
 }
 
 fn count_text(count: usize) -> String {

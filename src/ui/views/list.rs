@@ -687,6 +687,10 @@ fn activity_row(ui: &mut Ui, ws: &mut Workspace, d: &Directory, m: &Message) {
     let galley = ui.painter().layout_no_wrap(short_time(m.at), ty::meta(), p.faint);
     let time_w = galley.size().x;
     ui.painter().galley(pos2(rect.right() - 12.0 - time_w, rect.top() + 9.0), galley, p.faint);
+    // New since Activity was last looked at.
+    if ws.activity_is_new(m) {
+        ui.painter().circle_filled(pos2(rect.right() - 17.0, rect.bottom() - 15.0), 4.5, p.accent_fill);
+    }
 
     let what = match source.what.as_str() {
         "mention" | "mentionInChat" => "mentioned you",
@@ -714,7 +718,7 @@ fn activity_row(ui: &mut Ui, ws: &mut Workspace, d: &Directory, m: &Message) {
     } else {
         source.title.clone()
     };
-    let line3 = Rect::from_min_max(pos2(left, rect.top() + 46.0), pos2(rect.right() - 12.0, rect.top() + 62.0));
+    let line3 = Rect::from_min_max(pos2(left, rect.top() + 46.0), pos2(rect.right() - 30.0, rect.top() + 62.0));
     let mut c = ui.new_child(egui::UiBuilder::new().max_rect(line3).layout(Layout::left_to_right(Align::Center)));
     if !place.is_empty() {
         c.add(egui::Label::new(RichText::new(format!("in {place}")).font(ty::meta()).color(p.faint)).truncate().selectable(false));

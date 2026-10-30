@@ -46,6 +46,7 @@ fn chat(id: &str, kind: Kind, title: &str, last: (&str, &str, i64), unread: bool
         title: title.into(),
         last: Some(Preview { author: last.0.into(), text: last.1.into(), at: last.2 }),
         unread,
+        read_up_to: None,
         pinned: false,
         muted,
         join_url: None,
@@ -149,7 +150,11 @@ impl Backend for Demo {
                 join_url: Some("https://teams.microsoft.com/l/meetup-join/demo".into()),
                 ..chat("19:standup", Kind::Meeting, "Daily stand-up", ("Maya", "see you there", today(9, 58)), false, false, None)
             },
-            chat("48:mentions", Kind::Feed, "Activity", ("Maya", "mentioned you in PR Reviews", today(10, 44)), true, false, None),
+            // Read up to the oldest item: the two after it are new.
+            Conversation {
+                read_up_to: Some(4001),
+                ..chat("48:mentions", Kind::Feed, "Activity", ("Maya", "mentioned you in PR Reviews", today(10, 44)), true, false, None)
+            },
         ];
         for team in &teams {
             for c in &team.channels {
@@ -159,6 +164,7 @@ impl Backend for Demo {
                     title: c.name.clone(),
                     last: Some(channel_preview(&c.id)),
                     unread: c.unread,
+                    read_up_to: None,
                     pinned: c.pinned,
                     muted: false,
                     join_url: None,
