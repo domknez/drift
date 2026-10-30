@@ -22,6 +22,19 @@ pub fn workspace(ui: &mut egui::Ui, ws: &mut Workspace, theme: Appearance) -> Op
     if ui.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::R))) {
         ws.refresh();
     }
+    // ⌘1–⌘4: the tabs, in the top bar's order.
+    use super::workspace::Section;
+    for (key, section) in [
+        (egui::Key::Num1, Section::Activity),
+        (egui::Key::Num2, Section::Chats),
+        (egui::Key::Num3, Section::Teams),
+        (egui::Key::Num4, Section::Meetings),
+    ] {
+        if ui.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, key))) {
+            ws.section = section;
+            ws.filter.clear();
+        }
+    }
     // ⌘T: the quick switcher, to jump to a conversation or a place.
     if ui.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::T))) {
         ws.switcher = if ws.switcher.is_some() { None } else { Some(switcher::Switcher::default()) };

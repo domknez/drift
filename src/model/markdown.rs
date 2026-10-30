@@ -324,7 +324,8 @@ fn pairs(s: &str, marker: &str) -> Vec<(usize, usize)> {
     while let Some(open) = rest.find(marker) {
         let before = rest[..open].chars().last();
         let inner_start = open + marker.len();
-        let opens = rest[inner_start..].chars().next().is_some_and(|c| !c.is_whitespace() && c != '\x01') && !(marker == "_" && word(before));
+        let opens =
+            rest[inner_start..].chars().next().is_some_and(|c| !c.is_whitespace() && c != '\x01') && !(marker == "_" && word(before));
         let close = opens
             .then(|| {
                 let mut from = inner_start;

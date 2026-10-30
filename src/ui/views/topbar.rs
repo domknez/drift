@@ -42,9 +42,9 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace, theme: Appearance) -> Option<Reques
     );
     ui.painter().rect_filled(group, CornerRadius::same(12), p.panel);
     let mut tx = group.left() + 4.0;
-    for ((section, icon, label, count), w) in tabs.into_iter().zip(widths) {
+    for (i, ((section, icon, label, count), w)) in tabs.into_iter().zip(widths).enumerate() {
         let rect = Rect::from_min_size(pos2(tx, group.top() + 4.0), vec2(w, group.height() - 8.0));
-        if tab(ui, rect, icon, label, count, ws.section == section).clicked() {
+        if tab(ui, rect, icon, label, count, ws.section == section).on_hover_text(format!("⌘{}", i + 1)).clicked() {
             ws.section = section;
             ws.filter.clear();
         }

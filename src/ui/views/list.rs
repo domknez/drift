@@ -248,8 +248,12 @@ fn chats(ui: &mut Ui, ws: &mut Workspace, d: &Directory) {
         empty(ui, if ws.filter.trim().is_empty() { "Nothing here." } else { "No chats or channels by that name." });
     }
     // Hidden ones, folded away at the bottom (to show them again).
-    let hidden: Vec<Conversation> =
-        d.conversations.iter().filter(|c| c.kind != Kind::Channel && ws.is_hidden(c) && fits(c) && matches(ws, &c.title)).cloned().collect();
+    let hidden: Vec<Conversation> = d
+        .conversations
+        .iter()
+        .filter(|c| c.kind != Kind::Channel && ws.is_hidden(c) && fits(c) && matches(ws, &c.title))
+        .cloned()
+        .collect();
     if !hidden.is_empty() && section(ui, ws, "hidden", &format!("HIDDEN ({})", hidden.len())) {
         for c in &hidden {
             row(ui, ws, d, c);
