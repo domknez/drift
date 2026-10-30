@@ -1,48 +1,58 @@
-//! One file per part of the window: the rail, the list, the conversation, the
-//! thread beside it, and the sign-in page.
+//! One file per part of the window: the top bar, the list, the conversation, the
+//! thread beside it, and the sign-in page. Panels float on the canvas.
 
 pub mod conversation;
 pub mod list;
-pub mod rail;
 pub mod sign_in;
 pub mod thread;
+pub mod topbar;
 
 use super::app::Request;
 use super::style::{colors, metrics};
 use super::workspace::Workspace;
 use crate::settings::Appearance;
-use eframe::egui::{self, Frame, ViewportCommand};
+use eframe::egui::{self, CornerRadius, Frame, Rect, ViewportCommand, pos2, vec2};
 
-/// The signed-in window: rail, list, conversation, and the thread when one is open.
+/// The signed-in window: the top bar, then the list, the conversation, and the
+/// thread when one is open, as panels on the canvas.
 pub fn workspace(ui: &mut egui::Ui, ws: &mut Workspace, theme: Appearance) -> Option<Request> {
     let p = colors();
     let mut request = None;
     if ui.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::R))) {
         ws.refresh();
     }
-    let panel = |fill| Frame::new().fill(fill);
-    egui::Panel::left("rail")
-        .exact_size(metrics::RAIL_WIDTH)
-        .resizable(false)
-        .show_separator_line(false)
-        .frame(panel(p.rail))
-        .show(ui, |ui| request = rail::show(ui, ws, theme));
-    egui::Panel::left("list")
-        .exact_size(metrics::LIST_WIDTH)
-        .resizable(false)
-        .show_separator_line(false)
-        .frame(panel(p.side))
-        .show(ui, |ui| list::show(ui, ws));
-    if ws.thread.is_some() {
-        egui::Panel::right("thread")
-            .exact_size(metrics::THREAD_WIDTH)
-            .resizable(false)
-            .show_separator_line(false)
-            .frame(panel(p.bg))
-            .show(ui, |ui| thread::show(ui, ws));
-    }
-    egui::CentralPanel::default().frame(panel(p.bg)).show(ui, |ui| conversation::show(ui, ws));
+    egui::CentralPanel::default().frame(Frame::new().fill(p.canvas)).show(ui, |ui| {
+        let full = ui.max_rect();
+        let bar = Rect::from_min_size(full.min, vec2(full.width(), metrics::TOP_BAR));
+        request = topbar::show(&mut child(ui, bar), ws, theme);
+
+        let gap = metrics::GAP;
+        let body = Rect::from_min_max(pos2(full.left() + gap, bar.bottom()), pos2(full.right() - gap, full.bottom() - gap));
+        let list = Rect::from_min_size(body.min, vec2(metrics::LIST_WIDTH, body.height()));
+        let mut main = Rect::from_min_max(pos2(list.right() + gap, body.top()), body.max);
+        if ws.thread.is_some() {
+            let thread = Rect::from_min_max(pos2(body.right() - metrics::THREAD_WIDTH, body.top()), body.max);
+            main.max.x = thread.left() - gap;
+            thread::show(&mut panel(ui, thread), ws);
+        }
+        list::show(&mut panel(ui, list), ws);
+        conversation::show(&mut panel(ui, main), ws);
+    });
     request
+}
+
+/// A child Ui filling `rect`.
+fn child(ui: &mut egui::Ui, rect: Rect) -> egui::Ui {
+    ui.new_child(egui::UiBuilder::new().max_rect(rect))
+}
+
+/// A floating panel: a rounded plate in the panel colour, and a Ui clipped to it.
+fn panel(ui: &mut egui::Ui, rect: Rect) -> egui::Ui {
+    let p = colors();
+    ui.painter().rect_filled(rect, CornerRadius::same(metrics::PANEL_RADIUS), p.panel);
+    let mut inner = child(ui, rect);
+    inner.set_clip_rect(rect);
+    inner
 }
 
 /// Make `rect` drag the window (the title bar is hidden on macOS).

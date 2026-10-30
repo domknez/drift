@@ -3,7 +3,7 @@
 use super::load::Load;
 use super::style;
 use super::views;
-use super::workspace::{Outcome, Workspace};
+use super::workspace::{Outcome, Section, Workspace};
 use crate::backend::Backend;
 use crate::demo;
 use crate::settings::{Appearance, Prefs};
@@ -70,8 +70,18 @@ impl App {
         if std::env::var_os("DRIFT_DEMO").is_some() {
             let theme = std::env::var("DRIFT_THEME").unwrap_or_default();
             let prefs = Prefs::parse(&format!("theme={theme}"));
-            let mut workspace = Workspace::new(&cc.egui_ctx, Arc::new(demo::Demo), Some(demo::OPEN.to_string()));
-            workspace.thread = Some(demo::THREAD.to_string());
+            // DRIFT_DEMO_OPEN picks the conversation, DRIFT_DEMO_TAB the tab.
+            let open = std::env::var("DRIFT_DEMO_OPEN").unwrap_or_else(|_| demo::OPEN.to_string());
+            let mut workspace = Workspace::new(&cc.egui_ctx, Arc::new(demo::Demo), Some(open.clone()));
+            if open == demo::OPEN {
+                workspace.thread = Some(demo::THREAD.to_string());
+            }
+            workspace.section = match std::env::var("DRIFT_DEMO_TAB").as_deref() {
+                Ok("activity") => Section::Activity,
+                Ok("teams") => Section::Teams,
+                Ok("meetings") => Section::Meetings,
+                _ => Section::Chats,
+            };
             return App { prefs, dark: None, screen: Screen::Signed(Box::new(workspace)), capture };
         }
         let prefs = Prefs::load();

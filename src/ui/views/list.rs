@@ -1,139 +1,71 @@
-//! The list beside the rail: the section's title, search, the meeting going on
-//! today, and the section's conversations — teams with their channels, or chats.
+//! The list panel: what the tab picked — recent chats and channels behind filter
+//! chips, teams with their channels, meeting chats, or the activity feed. Each row
+//! has a picture, the name, the newest message and when it came.
 
-use crate::model::{Conversation, Directory, Kind, time};
-use crate::ui::style::icons::Icon;
+use crate::model::{Conversation, Directory, Kind, Message, Picture, time};
+use crate::ui::style::icons::{self, Icon};
 use crate::ui::style::{colors, metrics, typography as ty};
 use crate::ui::widgets;
-use crate::ui::workspace::{Section, Workspace};
-use eframe::egui::{self, Align, CornerRadius, Frame, Layout, Margin, Rect, RichText, Sense, Stroke, TextureId, Ui, pos2, vec2};
+use crate::ui::workspace::{Chip, Section, Workspace};
+use eframe::egui::{self, Align, Align2, CornerRadius, Layout, Rect, RichText, Sense, TextureId, Ui, pos2, vec2};
 
-/// Meeting chats listed under Chats when unfolded (the newest).
-const MEETINGS_SHOWN: usize = 12;
+/// Meeting chats listed under Recent (the newest); the Meetings tab has them all.
+const MEETINGS_IN_RECENT: usize = 5;
 
 pub fn show(ui: &mut Ui, ws: &mut Workspace) {
     let p = colors();
     let full = ui.max_rect();
-    super::drag_area(ui, Rect::from_min_size(full.min, vec2(full.width(), metrics::TITLE_BAR - 6.0)), "list-drag");
-    ui.painter().vline(full.right() - 0.5, full.y_range(), Stroke::new(1.0, p.line));
-
-    // Title and "new message".
-    let title = match ws.section {
-        Section::Activity => "Activity",
-        Section::Chats => "Chats",
-        Section::Teams => "Teams",
-        Section::Meetings => "Meetings",
-    };
-    let head = Rect::from_min_size(pos2(full.left() + 16.0, full.top() + 10.0), vec2(full.width() - 28.0, 32.0));
-    let mut h = ui.new_child(egui::UiBuilder::new().max_rect(head).layout(Layout::left_to_right(Align::Center)));
-    h.label(RichText::new(title).font(ty::list_title()).color(p.text));
-    h.with_layout(Layout::right_to_left(Align::Center), |ui| {
-        let _ = widgets::icon_button(ui, Icon::Edit, "New message (coming soon)");
-    });
-
-    // Search.
-    let field = Rect::from_min_size(pos2(full.left() + 12.0, head.bottom() + 8.0), vec2(full.width() - 24.0, 34.0));
-    ui.painter().rect(field, CornerRadius::same(9), p.surface, Stroke::new(1.0, p.line), egui::StrokeKind::Inside);
-    let icon = Rect::from_min_size(pos2(field.left() + 10.0, field.center().y - 7.5), vec2(15.0, 15.0));
-    crate::ui::style::icons::paint(ui.painter(), icon, Icon::Search, p.faint);
-    ui.painter().text(pos2(field.right() - 10.0, field.center().y), egui::Align2::RIGHT_CENTER, "⌘K", ty::meta(), p.faint);
-    let area = Rect::from_min_max(pos2(icon.right() + 8.0, field.top()), pos2(field.right() - 36.0, field.bottom()));
-    let mut s = ui.new_child(egui::UiBuilder::new().max_rect(area).layout(Layout::left_to_right(Align::Center)));
-    let search = egui::TextEdit::singleline(&mut ws.filter)
-        .id_salt("list-search")
-        .hint_text(RichText::new("Search").color(p.faint).font(ty::small()))
-        .font(ty::small())
-        .frame(Frame::NONE)
-        .margin(Margin::ZERO)
-        .desired_width(f32::INFINITY);
-    s.add(search);
-
-    let top = field.bottom() + 12.0;
-    let rest = Rect::from_min_max(pos2(full.left(), top), full.max);
-    let mut body = ui.new_child(egui::UiBuilder::new().max_rect(rest).layout(Layout::top_down(Align::Min)));
     let Some(directory) = ws.directory.clone() else {
-        body.add_space(20.0);
-        body.vertical_centered(|ui| {
+        let mut c = ui.new_child(egui::UiBuilder::new().max_rect(full.shrink(20.0)));
+        c.add_space(20.0);
+        c.vertical_centered(|ui| {
             ui.spinner();
             ui.label(RichText::new("Loading…").font(ty::small()).color(p.faint));
         });
         return;
     };
-    if ws.filter.trim().is_empty()
-        && matches!(ws.section, Section::Teams | Section::Chats)
-        && let Some(meeting) = live_meeting(&directory)
-    {
-        meeting_card(&mut body, ws, meeting);
-        body.add_space(8.0);
+    let mut top = full.top() + 14.0;
+    if ws.section == Section::Chats {
+        chips(ui, ws, pos2(full.left() + 14.0, top));
+        top += 30.0 + 6.0;
     }
-    egui::ScrollArea::vertical().id_salt(("list", title)).auto_shrink([false, false]).show(&mut body, |ui| {
+    let area = Rect::from_min_max(pos2(full.left(), top), pos2(full.right(), full.bottom() - 6.0));
+    let mut body = ui.new_child(egui::UiBuilder::new().max_rect(area).layout(Layout::top_down(Align::Min)));
+    egui::ScrollArea::vertical().id_salt(("list", ws.section as u8)).auto_shrink([false, false]).show(&mut body, |ui| {
         match ws.section {
-            Section::Teams => teams(ui, ws, &directory),
             Section::Chats => chats(ui, ws, &directory),
+            Section::Teams => teams(ui, ws, &directory),
             Section::Meetings => meetings(ui, ws, &directory),
             Section::Activity => activity(ui, ws, &directory),
         }
-        ui.add_space(14.0);
+        ui.add_space(10.0);
     });
 }
 
-/// The meeting to join today: the newest meeting chat with a link and activity today.
-fn live_meeting(d: &Directory) -> Option<&Conversation> {
-    let today = time::day_number(time::now_ms());
-    d.conversations
-        .iter()
-        .filter(|c| c.kind == Kind::Meeting && c.join_url.is_some())
-        .filter(|c| c.last.as_ref().is_some_and(|l| time::day_number(l.at) == today))
-        .max_by_key(|c| c.last.as_ref().map_or(0, |l| l.at))
-}
-
-/// The meeting card: a camera, the meeting's name and when it was last active, Join.
-fn meeting_card(ui: &mut Ui, ws: &mut Workspace, meeting: &Conversation) {
+/// The filter chips above the chats.
+fn chips(ui: &mut Ui, ws: &mut Workspace, at: egui::Pos2) {
     let p = colors();
-    Frame::new()
-        .outer_margin(Margin::symmetric(12, 0))
-        .fill(p.selected)
-        .corner_radius(CornerRadius::same(10))
-        .inner_margin(Margin::symmetric(12, 10))
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.horizontal(|ui| {
-                widgets::icon(ui, Icon::Video, 18.0, p.text);
-                ui.add_space(4.0);
-                let clicked = ui
-                    .vertical(|ui| {
-                        ui.spacing_mut().item_spacing.y = 1.0;
-                        ui.add(egui::Label::new(RichText::new(&meeting.title).font(ty::small_strong()).color(p.text)).truncate());
-                        let when = meeting.last.as_ref().map(|l| format!("Active {}", time::clock(l.at))).unwrap_or_default();
-                        ui.label(RichText::new(when).font(ty::meta()).color(p.dim));
-                    })
-                    .response
-                    .interact(Sense::click())
-                    .clicked();
-                if clicked {
-                    ws.open(&meeting.id);
-                }
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if accent_button(ui, "Join").clicked()
-                        && let Some(url) = &meeting.join_url
-                    {
-                        ui.ctx().open_url(egui::OpenUrl::new_tab(url));
-                    }
-                });
-            });
-        });
-}
-
-/// A small filled button in the accent.
-pub fn accent_button(ui: &mut Ui, label: &str) -> egui::Response {
-    let p = colors();
-    let galley = ui.painter().layout_no_wrap(label.to_string(), ty::small_strong(), p.on_accent);
-    let size = vec2(galley.size().x + 24.0, 28.0);
-    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
-    let fill = if response.hovered() { p.accent } else { p.accent_fill };
-    ui.painter().rect_filled(rect, CornerRadius::same(8), fill);
-    ui.painter().galley(rect.center() - galley.size() / 2.0, galley, p.on_accent);
-    response.on_hover_cursor(egui::CursorIcon::PointingHand)
+    let mut x = at.x;
+    for (chip, label) in [(Chip::All, "All"), (Chip::Unread, "Unread"), (Chip::Channels, "Channels"), (Chip::People, "People")] {
+        let galley = ui.painter().layout_no_wrap(label.to_string(), ty::small_strong(), p.text);
+        let rect = Rect::from_min_size(pos2(x, at.y), vec2(galley.size().x + 22.0, 28.0));
+        let response =
+            ui.interact(rect, ui.scope_id().with(("chip", label)), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
+        let on = ws.chip == chip;
+        let (fill, fg) = if on {
+            (p.text, p.panel)
+        } else if response.hovered() {
+            (p.hover, p.text)
+        } else {
+            (p.surface, p.dim)
+        };
+        ui.painter().rect_filled(rect, CornerRadius::same(14), fill);
+        ui.painter().text(rect.center(), Align2::CENTER_CENTER, label, ty::small_strong(), fg);
+        if response.clicked() {
+            ws.chip = chip;
+        }
+        x = rect.right() + 6.0;
+    }
 }
 
 fn matches(ws: &Workspace, title: &str) -> bool {
@@ -141,176 +73,292 @@ fn matches(ws: &Workspace, title: &str) -> bool {
     filter.is_empty() || title.to_lowercase().contains(&filter)
 }
 
-fn teams(ui: &mut Ui, ws: &mut Workspace, d: &Directory) {
-    let pinned: Vec<&Conversation> =
-        d.conversations.iter().filter(|c| c.pinned && c.kind == Kind::Channel && matches(ws, &c.title)).collect();
-    if !pinned.is_empty() && section(ui, ws, "pinned-channels", "Pinned") {
-        for c in pinned {
-            row(ui, ws, c);
+fn chats(ui: &mut Ui, ws: &mut Workspace, d: &Directory) {
+    let chip = ws.chip;
+    let fits = |c: &Conversation| match chip {
+        Chip::All => true,
+        Chip::Unread => c.unread,
+        Chip::Channels => c.kind == Kind::Channel,
+        Chip::People => c.kind == Kind::Chat,
+    };
+    let pinned: Vec<Conversation> =
+        d.conversations.iter().filter(|c| c.pinned && c.kind != Kind::Feed && fits(c) && matches(ws, &c.title)).cloned().collect();
+    if !pinned.is_empty() {
+        label(ui, "PINNED");
+        for c in &pinned {
+            row(ui, ws, d, c);
         }
     }
+    // Recent: chats and channels together, newest first; only a few meeting chats.
+    let mut meetings = 0;
+    let recent: Vec<Conversation> = d
+        .conversations
+        .iter()
+        .filter(|c| !c.pinned && c.kind != Kind::Feed && fits(c) && matches(ws, &c.title))
+        .filter(|c| {
+            if c.kind != Kind::Meeting {
+                return true;
+            }
+            meetings += 1;
+            meetings <= MEETINGS_IN_RECENT || c.unread
+        })
+        .cloned()
+        .collect();
+    if !recent.is_empty() {
+        label(ui, "RECENT");
+        for c in &recent {
+            row(ui, ws, d, c);
+        }
+    }
+    if pinned.is_empty() && recent.is_empty() {
+        empty(ui, "Nothing here.");
+    }
+}
+
+fn teams(ui: &mut Ui, ws: &mut Workspace, d: &Directory) {
+    let p = colors();
     for team in &d.teams {
-        let channels: Vec<&Conversation> = team
+        let channels: Vec<Conversation> = team
             .channels
             .iter()
             .filter(|c| matches(ws, &c.name) || matches(ws, &team.name))
             .filter_map(|c| d.conversation(&c.id))
+            .cloned()
             .collect();
         if channels.is_empty() {
             continue;
         }
-        let picture = team.picture.as_ref().and_then(|p| ws.pictures.get(p));
-        if team_header(ui, ws, &team.id, &team.name, picture) {
-            for c in channels {
-                row(ui, ws, c);
+        let key = format!("team:{}", team.id);
+        let open = !ws.folded.contains(&key);
+        ui.add_space(6.0);
+        let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 34.0), Sense::click());
+        let picture = team.picture.as_ref().and_then(|pic| ws.pictures.get(pic));
+        let mut c =
+            ui.new_child(egui::UiBuilder::new().max_rect(rect.shrink2(vec2(18.0, 0.0))).layout(Layout::left_to_right(Align::Center)));
+        widgets::tile(&mut c, &team.id, &team.name, 22.0, picture);
+        c.add_space(4.0);
+        c.label(RichText::new(&team.name).font(ty::team()).color(p.text));
+        c.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            widgets::icon(ui, if open { Icon::ChevronDown } else { Icon::ChevronRight }, 13.0, p.faint);
+        });
+        if response.clicked() {
+            if open {
+                ws.folded.insert(key);
+            } else {
+                ws.folded.remove(&key);
+            }
+        }
+        if open {
+            for channel in &channels {
+                row(ui, ws, d, channel);
             }
         }
     }
 }
 
-fn chats(ui: &mut Ui, ws: &mut Workspace, d: &Directory) {
-    let pinned: Vec<&Conversation> =
-        d.conversations.iter().filter(|c| c.pinned && matches!(c.kind, Kind::Chat | Kind::Meeting) && matches(ws, &c.title)).collect();
-    if !pinned.is_empty() && section(ui, ws, "pinned-chats", "Pinned") {
-        for c in pinned {
-            row(ui, ws, c);
-        }
-    }
-    let direct: Vec<&Conversation> = d.chats().filter(|c| !c.pinned && matches(ws, &c.title)).collect();
-    if !direct.is_empty() && section(ui, ws, "chats", "Direct messages") {
-        for c in direct {
-            row(ui, ws, c);
-        }
-    }
-    let meetings: Vec<&Conversation> =
-        d.conversations.iter().filter(|c| c.kind == Kind::Meeting && !c.pinned && matches(ws, &c.title)).take(MEETINGS_SHOWN).collect();
-    if !meetings.is_empty() && section(ui, ws, "meetings", "Meeting chats") {
-        for c in meetings {
-            row(ui, ws, c);
-        }
-    }
-}
-
 fn meetings(ui: &mut Ui, ws: &mut Workspace, d: &Directory) {
-    let list: Vec<&Conversation> = d.conversations.iter().filter(|c| c.kind == Kind::Meeting && matches(ws, &c.title)).collect();
+    let list: Vec<Conversation> = d.conversations.iter().filter(|c| c.kind == Kind::Meeting && matches(ws, &c.title)).cloned().collect();
     if list.is_empty() {
-        empty(ui, "No meetings yet.");
+        empty(ui, "No meeting chats yet.");
     }
-    for c in list {
-        row(ui, ws, c);
+    for c in &list {
+        row(ui, ws, d, c);
     }
 }
 
+/// The activity feed: who mentioned or answered you, and where.
 fn activity(ui: &mut Ui, ws: &mut Workspace, d: &Directory) {
-    let feeds: Vec<&Conversation> = d.conversations.iter().filter(|c| c.kind == Kind::Feed).take(1).collect();
-    if feeds.is_empty() {
-        empty(ui, "Nothing here yet.");
+    let Some(items) = ws.activity.clone() else {
+        ui.add_space(20.0);
+        ui.vertical_centered(|ui| ui.spinner());
+        return;
+    };
+    let shown: Vec<&Message> =
+        items.iter().rev().filter(|m| matches(ws, &m.author.name) || m.source.as_ref().is_some_and(|s| matches(ws, &s.title))).collect();
+    if shown.is_empty() {
+        empty(ui, "No mentions or replies yet.");
     }
-    for c in feeds {
-        row(ui, ws, c);
+    ui.add_space(4.0);
+    for m in shown {
+        activity_row(ui, ws, d, m);
     }
+}
+
+fn label(ui: &mut Ui, text: &str) {
+    ui.add_space(8.0);
+    ui.horizontal(|ui| {
+        ui.add_space(20.0);
+        ui.label(RichText::new(text).font(ty::section()).color(colors().faint));
+    });
+    ui.add_space(2.0);
 }
 
 fn empty(ui: &mut Ui, text: &str) {
-    ui.add_space(12.0);
+    ui.add_space(14.0);
     ui.horizontal(|ui| {
-        ui.add_space(18.0);
+        ui.add_space(20.0);
         ui.label(RichText::new(text).font(ty::small()).color(colors().faint));
     });
 }
 
-/// A section label that folds its rows away; true while it's open.
-fn section(ui: &mut Ui, ws: &mut Workspace, key: &str, label: &str) -> bool {
+/// What leads a row: a person's photo, a group's, or a tile with a channel's or a
+/// meeting's mark.
+fn lead(ui: &mut Ui, ws: &mut Workspace, c: &Conversation, rect: Rect) {
     let p = colors();
-    let open = !ws.folded.contains(key);
-    ui.add_space(6.0);
-    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 24.0), Sense::click());
-    let chevron = Rect::from_min_size(pos2(rect.left() + 16.0, rect.center().y - 6.5), vec2(13.0, 13.0));
-    crate::ui::style::icons::paint(ui.painter(), chevron, if open { Icon::ChevronDown } else { Icon::ChevronRight }, p.faint);
-    ui.painter().text(pos2(chevron.right() + 4.0, rect.center().y), egui::Align2::LEFT_CENTER, label, ty::section(), p.faint);
-    if response.clicked() {
-        toggle(ws, key, open);
+    let tile = |ui: &mut Ui, icon: Icon| {
+        ui.painter().rect_filled(rect, CornerRadius::same(11), p.surface);
+        icons::paint(ui.painter(), Rect::from_center_size(rect.center(), vec2(17.0, 17.0)), icon, p.dim);
+    };
+    match c.kind {
+        Kind::Channel => tile(ui, Icon::Hash),
+        Kind::Meeting => tile(ui, Icon::Calendar),
+        Kind::Feed => tile(ui, Icon::Bell),
+        Kind::Chat => {
+            let picture: Option<TextureId> = c.picture.as_ref().and_then(|pic| ws.pictures.get(pic));
+            let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+            widgets::avatar(&mut child, &c.id, &c.title, rect.width(), picture);
+        }
     }
-    open
 }
 
-/// A team's name with its tile; clicking folds its channels.
-fn team_header(ui: &mut Ui, ws: &mut Workspace, id: &str, name: &str, picture: Option<TextureId>) -> bool {
-    let p = colors();
-    let key = format!("team:{id}");
-    let open = !ws.folded.contains(&key);
-    ui.add_space(8.0);
-    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 28.0), Sense::click());
-    let mut c = ui.new_child(egui::UiBuilder::new().max_rect(rect.shrink2(vec2(18.0, 0.0))).layout(Layout::left_to_right(Align::Center)));
-    widgets::tile(&mut c, id, name, 20.0, picture);
-    c.add_space(4.0);
-    c.add(egui::Label::new(RichText::new(name).font(ty::team()).color(p.text)).truncate().selectable(false));
-    if response.clicked() {
-        toggle(ws, &key, open);
-    }
-    open
-}
-
-fn toggle(ws: &mut Workspace, key: &str, open: bool) {
-    if open {
-        ws.folded.insert(key.to_string());
+/// The newest message, as "Name: text" (or "You: text").
+fn preview(ws: &Workspace, c: &Conversation) -> String {
+    let Some(last) = &c.last else { return String::new() };
+    let first = last.author.split_whitespace().next().unwrap_or("");
+    if last.author == ws.me {
+        format!("You: {}", last.text)
+    } else if last.author.is_empty() || (c.kind == Kind::Chat && last.author == c.title) {
+        last.text.clone()
     } else {
-        ws.folded.remove(key);
+        format!("{first}: {}", last.text)
     }
 }
 
-/// A conversation's row: a channel's mark or a chat's avatar, the name, a mute mark
-/// or an unread dot.
-fn row(ui: &mut Ui, ws: &mut Workspace, c: &Conversation) {
+/// A conversation's row: picture, name and newest message; time and an unread dot
+/// (or the mute mark) on the right.
+fn row(ui: &mut Ui, ws: &mut Workspace, d: &Directory, c: &Conversation) {
     let p = colors();
     let selected = ws.open.as_deref() == Some(c.id.as_str());
     let (outer, response) = ui.allocate_exact_size(vec2(ui.available_width(), metrics::ROW + 2.0), Sense::click());
-    let rect = Rect::from_min_size(outer.min + vec2(metrics::SIDE_PAD, 1.0), vec2(outer.width() - 2.0 * metrics::SIDE_PAD, metrics::ROW));
+    let rect = Rect::from_min_size(outer.min + vec2(8.0, 1.0), vec2(outer.width() - 16.0, metrics::ROW));
     if selected || response.hovered() {
-        ui.painter().rect_filled(rect, CornerRadius::same(metrics::RADIUS), if selected { p.selected } else { p.hover });
+        ui.painter().rect_filled(rect, CornerRadius::same(12), if selected { p.selected } else { p.hover });
     }
-    let mut inner =
-        ui.new_child(egui::UiBuilder::new().max_rect(rect.shrink2(vec2(10.0, 0.0))).layout(Layout::left_to_right(Align::Center)));
-    match c.kind {
-        Kind::Channel => {
-            let (r, _) = inner.allocate_exact_size(vec2(18.0, 18.0), Sense::hover());
-            crate::ui::style::icons::paint(inner.painter(), Rect::from_center_size(r.center(), vec2(15.0, 15.0)), Icon::Hash, p.faint);
-        }
-        Kind::Meeting => {
-            let (r, _) = inner.allocate_exact_size(vec2(18.0, 18.0), Sense::hover());
-            crate::ui::style::icons::paint(inner.painter(), Rect::from_center_size(r.center(), vec2(15.0, 15.0)), Icon::Calendar, p.faint);
-        }
-        Kind::Feed => {
-            let (r, _) = inner.allocate_exact_size(vec2(18.0, 18.0), Sense::hover());
-            crate::ui::style::icons::paint(inner.painter(), Rect::from_center_size(r.center(), vec2(15.0, 15.0)), Icon::At, p.faint);
-        }
-        Kind::Chat => {
-            let picture = c.picture.as_ref().and_then(|pic| ws.pictures.get(pic));
-            widgets::avatar(&mut inner, &c.id, &c.title, 22.0, picture);
-        }
-    }
-    inner.add_space(2.0);
-    let (font, color) = if c.muted {
-        (ty::item(), p.faint)
+    let size = metrics::LIST_AVATAR;
+    let pic = Rect::from_min_size(pos2(rect.left() + 10.0, rect.center().y - size / 2.0), vec2(size, size));
+    lead(ui, ws, c, pic);
+
+    // Right column: time, and an unread dot or the mute mark under it.
+    let right = rect.right() - 12.0;
+    let when = c.last.as_ref().map(|l| short_time(l.at)).unwrap_or_default();
+    let galley = ui.painter().layout_no_wrap(when, ty::meta(), p.faint);
+    let time_w = galley.size().x;
+    ui.painter().galley(pos2(right - time_w, rect.top() + 10.0), galley, p.faint);
+    let mark = pos2(right - 5.0, rect.bottom() - 15.0);
+    if c.muted {
+        icons::paint(ui.painter(), Rect::from_center_size(mark, vec2(13.0, 13.0)), Icon::Mute, p.faint);
     } else if c.unread {
-        (ty::item_strong(), p.text)
-    } else if selected {
-        (ty::item(), p.text)
+        ui.painter().circle_filled(mark, 4.5, p.accent_fill);
+    }
+
+    // Name and preview.
+    let text_left = pic.right() + 11.0;
+    let text_right = right - time_w.max(14.0) - 8.0;
+    let strong = c.unread || selected;
+    let name_color = if c.muted {
+        p.faint
+    } else if strong {
+        p.text
     } else {
-        (ty::item(), p.dim)
+        p.dim
     };
-    let title = if c.title.is_empty() { "Untitled" } else { &c.title };
-    inner.with_layout(Layout::right_to_left(Align::Center), |ui| {
-        if c.muted {
-            widgets::icon(ui, Icon::Mute, 14.0, p.faint);
-        } else if c.unread {
-            widgets::unread_dot(ui);
-        }
-        ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-            ui.add(egui::Label::new(RichText::new(title).font(font).color(color)).truncate().selectable(false));
-        });
-    });
+    let mut name = c.title.clone();
+    if c.kind == Kind::Channel
+        && ws.section != Section::Teams
+        && let Some((team, _)) = d.channel(&c.id)
+    {
+        name = format!("{name} · {}", team.name);
+    }
+    let top = Rect::from_min_max(pos2(text_left, rect.top() + 8.0), pos2(text_right, rect.top() + 26.0));
+    let mut t = ui.new_child(egui::UiBuilder::new().max_rect(top).layout(Layout::left_to_right(Align::Center)));
+    t.add(egui::Label::new(RichText::new(name).font(ty::item()).color(name_color)).truncate().selectable(false));
+    let bottom = Rect::from_min_max(pos2(text_left, rect.top() + 28.0), pos2(rect.right() - 26.0, rect.bottom() - 6.0));
+    let mut b = ui.new_child(egui::UiBuilder::new().max_rect(bottom).layout(Layout::left_to_right(Align::Center)));
+    let preview_color = if c.unread && !c.muted { p.dim } else { p.faint };
+    b.add(egui::Label::new(RichText::new(preview(ws, c)).font(ty::small()).color(preview_color)).truncate().selectable(false));
+
     if response.clicked() {
         ws.open(&c.id);
+    }
+}
+
+/// An activity item: who, what they did, where, what they wrote, and when.
+fn activity_row(ui: &mut Ui, ws: &mut Workspace, d: &Directory, m: &Message) {
+    let p = colors();
+    let Some(source) = &m.source else { return };
+    let selected = ws.open.as_deref() == Some(source.conversation.as_str());
+    let (outer, response) = ui.allocate_exact_size(vec2(ui.available_width(), 74.0), Sense::click());
+    let rect = Rect::from_min_size(outer.min + vec2(8.0, 1.0), vec2(outer.width() - 16.0, 72.0));
+    if selected || response.hovered() {
+        ui.painter().rect_filled(rect, CornerRadius::same(12), if selected { p.selected } else { p.hover });
+    }
+    let size = metrics::LIST_AVATAR;
+    let pic = Rect::from_min_size(pos2(rect.left() + 10.0, rect.top() + 10.0), vec2(size, size));
+    let picture = ws.pictures.get(&Picture::Person { id: m.author.id.clone(), name: m.author.name.clone() });
+    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(pic));
+    widgets::avatar(&mut child, &m.author.id, &m.author.name, size, picture);
+
+    let galley = ui.painter().layout_no_wrap(short_time(m.at), ty::meta(), p.faint);
+    let time_w = galley.size().x;
+    ui.painter().galley(pos2(rect.right() - 12.0 - time_w, rect.top() + 9.0), galley, p.faint);
+
+    let what = match source.what.as_str() {
+        "mention" | "mentionInChat" => "mentioned you",
+        "reply" | "replyToReply" => "replied",
+        "reaction" | "reactionInChat" => "reacted",
+        "teamMembershipChange" => "added you",
+        _ => "",
+    };
+    let left = pic.right() + 11.0;
+    let line1 = Rect::from_min_max(pos2(left, rect.top() + 7.0), pos2(rect.right() - 18.0 - time_w, rect.top() + 25.0));
+    let mut a = ui.new_child(egui::UiBuilder::new().max_rect(line1).layout(Layout::left_to_right(Align::Center)));
+    let mut job = egui::text::LayoutJob::default();
+    job.append(&m.author.name, 0.0, egui::TextFormat::simple(ty::item(), p.text));
+    if !what.is_empty() {
+        job.append(what, 5.0, egui::TextFormat::simple(ty::small(), p.dim));
+    }
+    a.add(egui::Label::new(job).truncate().selectable(false));
+    let line2 = Rect::from_min_max(pos2(left, rect.top() + 27.0), pos2(rect.right() - 12.0, rect.top() + 44.0));
+    let mut b = ui.new_child(egui::UiBuilder::new().max_rect(line2).layout(Layout::left_to_right(Align::Center)));
+    b.add(
+        egui::Label::new(RichText::new(crate::model::text::flatten(&m.body)).font(ty::small()).color(p.dim)).truncate().selectable(false),
+    );
+    let place = if source.title.is_empty() {
+        d.conversation(&source.conversation).map_or(String::new(), |c| c.title.clone())
+    } else {
+        source.title.clone()
+    };
+    let line3 = Rect::from_min_max(pos2(left, rect.top() + 46.0), pos2(rect.right() - 12.0, rect.top() + 62.0));
+    let mut c = ui.new_child(egui::UiBuilder::new().max_rect(line3).layout(Layout::left_to_right(Align::Center)));
+    if !place.is_empty() {
+        c.add(egui::Label::new(RichText::new(format!("in {place}")).font(ty::meta()).color(p.faint)).truncate().selectable(false));
+    }
+    if response.clicked() {
+        ws.open(&source.conversation);
+    }
+}
+
+/// Today's time, "Yesterday", the weekday this week, or the date.
+fn short_time(at: i64) -> String {
+    let now = time::now_ms();
+    let day = time::day(at, now);
+    match time::day_number(now) - time::day_number(at) {
+        0 => time::clock(at),
+        1 => "Yesterday".into(),
+        2..=6 => day.chars().take(3).collect(),
+        _ => {
+            let parts: Vec<&str> = day.split_whitespace().collect();
+            if parts.len() >= 3 { format!("{} {}", parts[1], parts[2]) } else { day }
+        }
     }
 }

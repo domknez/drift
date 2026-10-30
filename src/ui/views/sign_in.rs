@@ -6,7 +6,7 @@ use eframe::egui::{self, Align, Frame, Layout, RichText, vec2};
 
 pub fn show(ui: &mut egui::Ui, sign_in: &mut SignIn) {
     let p = colors();
-    egui::CentralPanel::default().frame(Frame::new().fill(p.side)).show(ui, |ui| {
+    egui::CentralPanel::default().frame(Frame::new().fill(p.canvas)).show(ui, |ui| {
         super::drag_area(ui, egui::Rect::from_min_size(ui.max_rect().min, vec2(ui.max_rect().width(), 40.0)), "sign-in-drag");
         ui.with_layout(Layout::top_down(Align::Center), |ui| {
             ui.add_space((ui.available_height() / 2.0 - 120.0).max(40.0));
@@ -16,7 +16,7 @@ pub fn show(ui: &mut egui::Ui, sign_in: &mut SignIn) {
             ui.add_space(28.0);
             let waiting = sign_in.pending.is_running();
             let label = if waiting { "Waiting for the sign-in window…" } else { "Sign in with Microsoft" };
-            let button = egui::Button::new(RichText::new(label).font(ty::item_strong()).color(p.on_accent))
+            let button = egui::Button::new(RichText::new(label).font(ty::item()).color(p.on_accent))
                 .fill(p.accent_fill)
                 .min_size(vec2(240.0, 40.0))
                 .corner_radius(10);

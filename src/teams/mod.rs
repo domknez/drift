@@ -63,6 +63,23 @@ impl Teams {
         Err(Error::SignedOut)
     }
 
+    /// Write to the chat service (send, react, mark read); a refused skype token is
+    /// renewed once.
+    fn chat_write(&self, method: Method, path: &str, body: &Value) -> Result<()> {
+        for attempt in 0..2 {
+            let skype = self.session().skype()?;
+            let url = format!("{}{path}", skype.chat_service);
+            let auth = format!("skypetoken={}", skype.token);
+            let headers =
+                [("Authentication", auth.as_str()), ("X-Skypetoken", skype.token.as_str()), ("BehaviorOverride", "redirectAs404")];
+            match http::request(method, &url, &headers, Body::Json(body)) {
+                Err(Error::SignedOut) if attempt == 0 => self.session().drop_skype(),
+                answer => return answer.map(|_| ()),
+            }
+        }
+        Err(Error::SignedOut)
+    }
+
     /// The aggregator's roster: teams with their channels, and the chats.
     fn roster(&self) -> Result<Value> {
         let (skype, bearer) = {
@@ -178,13 +195,16 @@ impl Teams {
             }
         }
         let listed = parse::conversations(&list);
-        for kind in [Kind::Chat, Kind::Channel, Kind::Meeting] {
+        for kind in [Kind::Chat, Kind::Channel, Kind::Meeting, Kind::Feed] {
             if let Some(c) = listed.iter().filter(|c| c.kind == kind).max_by_key(|c| c.last.as_ref().map_or(0, |l| l.at)) {
                 let path = format!(
                     "/v1/users/ME/conversations/{}/messages?view=msnp24Equivalent|supportsMessageProperties&pageSize={PAGE}&startTime=1",
                     http::encode(&c.id)
                 );
-                out.push_str(&format!("== messages of the newest {kind:?}\n{}", shape::describe(&self.chat_service(&path)?, 7)));
+                out.push_str(&format!(
+                    "== messages of the newest {kind:?}\n{}",
+                    shape::describe(&self.chat_service(&path)?, if kind == Kind::Feed { 9 } else { 7 })
+                ));
             }
         }
         Ok(out)
@@ -281,27 +301,30 @@ impl Backend for Teams {
         if text.is_empty() {
             return Err(Error::Service("empty message".into()));
         }
-        let name = Backend::me(self);
-        for attempt in 0..2 {
-            let skype = self.session().skype()?;
-            let url = format!("{}/v1/users/ME/conversations/{}/messages", skype.chat_service, http::encode(conversation));
-            let body = serde_json::json!({
-                "clientmessageid": client_message_id(),
-                "content": text,
-                "messagetype": "Text",
-                "contenttype": "text",
-                "imdisplayname": name,
-            });
-            let auth = format!("skypetoken={}", skype.token);
-            let headers =
-                [("Authentication", auth.as_str()), ("X-Skypetoken", skype.token.as_str()), ("BehaviorOverride", "redirectAs404")];
-            match http::request(Method::Post, &url, &headers, Body::Json(&body)) {
-                Err(Error::SignedOut) if attempt == 0 => self.session().drop_skype(),
-                Ok(_) => return Ok(()),
-                Err(e) => return Err(e),
-            }
-        }
-        Err(Error::SignedOut)
+        let body = serde_json::json!({
+            "clientmessageid": client_message_id(),
+            "content": text,
+            "messagetype": "Text",
+            "contenttype": "text",
+            "imdisplayname": Backend::me(self),
+        });
+        self.chat_write(Method::Post, &format!("/v1/users/ME/conversations/{}/messages", http::encode(conversation)), &body)
+    }
+
+    fn react(&self, conversation: &str, message: &str, key: &str, add: bool) -> Result<()> {
+        let path = format!("/v1/users/ME/conversations/{}/messages/{message}/properties?name=emotions", http::encode(conversation));
+        let (method, body) = if add {
+            (Method::Put, serde_json::json!({"emotions": {"key": key, "value": crate::model::time::now_ms()}}))
+        } else {
+            (Method::Delete, serde_json::json!({"emotions": {"key": key}}))
+        };
+        self.chat_write(method, &path, &body)
+    }
+
+    fn mark_read(&self, conversation: &str, message: &str) -> Result<()> {
+        let path = format!("/v1/users/ME/conversations/{}/properties?name=consumptionhorizon", http::encode(conversation));
+        let now = crate::model::time::now_ms();
+        self.chat_write(Method::Put, &path, &serde_json::json!({"consumptionhorizon": format!("{message};{now};{message}")}))
     }
 
     fn messages(&self, conversation: &str) -> Result<Vec<Message>> {

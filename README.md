@@ -24,19 +24,27 @@ Sibling of [dust](https://github.com/domknez/dust) (music) and
   Microsoft's own sign-in page (MFA included). The sign-in is kept in the system
   keychain (macOS Keychain, Windows Credential Manager, Secret Service) and renewed
   on its own
-- **A rail and a list:** Activity, Chats, Teams and Meetings on the rail, with counts
-  of what's unread; beside it your teams with their channels, or your direct
-  messages and meeting chats, with what's unread in bold; the search field narrows
-  the list as you type, and today's meeting sits on top with *Join*
-- **Channels with threads:** posts one under another, each with its replies a click
-  away in a thread beside the channel, where you can answer
-- **Chats:** messages grouped by author, with day dividers
+- **Tabs, not clutter:** Activity, Chats, Teams and Meetings in the top bar, with counts
+  of what's unread; today's meeting sits beside them with *Join*
+- **One list for what's going on:** chats and channels together, newest first, each
+  with its newest message and the time; chips narrow it to unread, channels or
+  people, and the search field to a name
+- **Chats as bubbles:** others' on the left with their picture, yours on the right;
+  runs of messages share one bubble group, with a day pill between days
+- **Channels with threads:** posts as bubbles with a link to their thread, which
+  opens beside the channel for reading and replying
+- **Right-click a message** to react, reply in its thread, copy it or open its link;
+  click a reaction to add yours (or take it back)
+- **Activity:** who mentioned you or replied, what they wrote and where; a click
+  opens it
+- **Read here, read in Teams:** opening a conversation marks it read for Teams too
 - **Write and send** in any chat or channel, or reply in a thread
-- **Messages as written:** bold, italics, code, links, mentions and emoji; reactions
-  under them; cards from bots and connectors (pull requests, alerts) as one compact
-  row that opens its link
-- **Modern UI ("Tide"):** a slate dark and a clean light theme (or follow the system)
-  with one teal accent, Inter and JetBrains Mono
+- **Messages as written:** bold, italics, strikethrough, code, tables, quotes, links,
+  mentions and emoji; reactions under them; cards from bots and connectors (pull
+  requests, alerts) as one compact row that opens its link
+- **Modern UI:** panels floating on a canvas, a deep ink dark and a warm paper light
+  theme (or follow the system) with one violet accent, Plus Jakarta Sans and
+  JetBrains Mono
 - Runs on macOS, Linux and Windows
 
 ## Build
@@ -71,7 +79,7 @@ src/
 ├── ui/
 │   ├── app.rs        the sign-in page or the workspace, the theme
 │   ├── workspace.rs  the signed-in state: sidebar, open conversation, refreshes
-│   ├── views/        the rail, the list, the conversation, the thread, sign-in
+│   ├── views/        the top bar, the list, the conversation, the thread, sign-in
 │   ├── widgets.rs    avatars, message text, cards, reactions
 │   └── style/        palette, type scale, metrics, icons — all visual constants
 ├── demo.rs        a made-up workspace (DRIFT_DEMO=1) for screenshots

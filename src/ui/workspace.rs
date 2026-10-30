@@ -1,4 +1,4 @@
-//! The signed-in state: the rail's section, what the list shows, the open
+//! The signed-in state: the tab picked, what the list shows, the open
 //! conversation and thread, and keeping them fresh.
 
 use super::load::Load;
@@ -18,6 +18,11 @@ const MESSAGES_EVERY: Duration = Duration::from_secs(20);
 pub struct Workspace {
     pub backend: Arc<dyn Backend>,
     pub section: Section,
+    pub chip: Chip,
+    /// The activity feed's items (mentions, replies), newest last; None until loaded.
+    pub activity: Option<Vec<Message>>,
+    activity_load: Load<Vec<Message>, Error>,
+    activity_at: Option<Instant>,
     /// The post whose thread is open beside the conversation.
     pub thread: Option<String>,
     /// The reply being typed in the open thread.
@@ -44,15 +49,29 @@ pub struct Workspace {
     /// The message being typed in the open conversation.
     pub draft: String,
     sending: Load<(), Error>,
+    /// Writes in the background (reactions, read marks); true asks to fetch the
+    /// messages again after.
+    chores: Vec<Load<bool, Error>>,
+    /// The conversation and message last marked read, so it's marked once.
+    marked: Option<(String, String)>,
 }
 
-/// What the rail picks for the list.
+/// The tab picked in the top bar: what the list shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Section {
     Activity,
     Chats,
     Teams,
     Meetings,
+}
+
+/// The chip picked above the list of chats.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Chip {
+    All,
+    Unread,
+    Channels,
+    People,
 }
 
 /// What the workspace needs the app to do.
@@ -68,7 +87,11 @@ impl Workspace {
             me_id: backend.me_id(),
             pictures: Pictures::new(ctx, backend.clone()),
             backend,
-            section: Section::Teams,
+            section: Section::Chats,
+            chip: Chip::All,
+            activity: None,
+            activity_load: Load::Idle,
+            activity_at: None,
             thread: None,
             reply_draft: String::new(),
             directory: None,
@@ -84,6 +107,8 @@ impl Workspace {
             folded: HashSet::from(["meetings".to_string()]),
             draft: String::new(),
             sending: Load::Idle,
+            chores: Vec::new(),
+            marked: None,
         }
     }
 
@@ -111,6 +136,37 @@ impl Workspace {
         self.sending = Load::start(ctx, move || backend.send(&to, &text));
     }
 
+    /// React to a message (or take the reaction back): shown at once, sent behind.
+    pub fn react(&mut self, ctx: &egui::Context, message: &str, key: &str) {
+        let Some(open) = self.open.clone() else { return };
+        let Some(m) = self.messages.as_mut().and_then(|ms| ms.iter_mut().find(|m| m.id == message)) else { return };
+        let add = !m.reactions.iter().any(|r| r.key == key && r.mine);
+        match m.reactions.iter_mut().find(|r| r.key == key) {
+            Some(r) => {
+                r.mine = add;
+                r.count = if add { r.count + 1 } else { r.count.saturating_sub(1) };
+            }
+            None if add => m.reactions.push(crate::model::Reaction { key: key.to_string(), count: 1, mine: true }),
+            None => {}
+        }
+        m.reactions.retain(|r| r.count > 0);
+        let (backend, message, key) = (self.backend.clone(), message.to_string(), key.to_string());
+        self.chores.push(Load::start(ctx, move || backend.react(&open, &message, &key, add).map(|()| true)));
+    }
+
+    /// Mark the open conversation read up to its newest message, once per message.
+    fn mark_read(&mut self, ctx: &egui::Context) {
+        let (Some(open), Some(last)) = (self.open.clone(), self.messages.as_ref().and_then(|m| m.last()).map(|m| m.id.clone())) else {
+            return;
+        };
+        if self.marked.as_ref() == Some(&(open.clone(), last.clone())) {
+            return;
+        }
+        self.marked = Some((open.clone(), last.clone()));
+        let backend = self.backend.clone();
+        self.chores.push(Load::start(ctx, move || backend.mark_read(&open, &last).map(|()| false)));
+    }
+
     /// Collect finished loads and start the ones that are due.
     pub fn tick(&mut self, ctx: &egui::Context) -> Option<Outcome> {
         self.pictures.begin_frame();
@@ -123,6 +179,19 @@ impl Workspace {
                 Err(Error::SignedOut) => return Some(Outcome::SignedOut),
                 Err(e) => self.failed(e),
             }
+        }
+        let mut refetch = false;
+        for chore in &mut self.chores {
+            match chore.take() {
+                Some(Ok(again)) => refetch |= again,
+                Some(Err(Error::SignedOut)) => return Some(Outcome::SignedOut),
+                Some(Err(e)) => log_warn!("{e}"),
+                None => {}
+            }
+        }
+        self.chores.retain(Load::is_running);
+        if refetch {
+            self.messages_at = None;
         }
         if let Some(result) = self.directory_load.take() {
             match result {
@@ -138,11 +207,19 @@ impl Workspace {
                 Err(e) => self.failed(e),
             }
         }
+        if let Some(result) = self.activity_load.take() {
+            match result {
+                Ok(items) => self.activity = Some(items),
+                Err(Error::SignedOut) => return Some(Outcome::SignedOut),
+                Err(e) => self.failed(e),
+            }
+        }
         if let Some(result) = self.messages_load.take() {
             match result {
                 Ok((id, messages)) if Some(&id) == self.open.as_ref() => {
                     self.messages = Some(messages);
                     self.error = None;
+                    self.mark_read(ctx);
                 }
                 Ok(_) => {}
                 Err(Error::SignedOut) => return Some(Outcome::SignedOut),
@@ -163,6 +240,15 @@ impl Workspace {
             self.messages_at = Some(Instant::now());
             let backend = self.backend.clone();
             self.messages_load = Load::start(ctx, move || backend.messages(&id).map(|m| (id, m)));
+        }
+        if self.section == Section::Activity
+            && !self.activity_load.is_running()
+            && due(self.activity_at, MESSAGES_EVERY)
+            && let Some(feed) = self.directory.as_ref().and_then(|d| d.activity()).map(|c| c.id.clone())
+        {
+            self.activity_at = Some(Instant::now());
+            let backend = self.backend.clone();
+            self.activity_load = Load::start(ctx, move || backend.messages(&feed));
         }
         // Wake up for the next refresh even when nothing moves.
         ctx.request_repaint_after(MESSAGES_EVERY);
@@ -196,5 +282,6 @@ impl Workspace {
     pub fn refresh(&mut self) {
         self.directory_at = None;
         self.messages_at = None;
+        self.activity_at = None;
     }
 }

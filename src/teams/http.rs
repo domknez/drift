@@ -26,33 +26,43 @@ pub enum Body<'a> {
     Form(&'a [(&'a str, &'a str)]),
 }
 
+#[derive(Clone, Copy)]
 pub enum Method {
     Get,
     Post,
+    Put,
+    Delete,
 }
 
 /// Send a request and read the answer as JSON (`Null` for an empty one).
 pub fn request(method: Method, url: &str, headers: &[(&str, &str)], body: Body) -> Result<Value> {
     let path = url.split('?').next().unwrap_or(url);
-    log_debug!("{} {path}", if matches!(method, Method::Get) { "GET" } else { "POST" });
-    let response = match method {
-        Method::Get => {
-            let mut req = AGENT.get(url);
-            for (k, v) in headers {
-                req = req.header(*k, *v);
-            }
-            req.call()
+    let verb = match method {
+        Method::Get => "GET",
+        Method::Post => "POST",
+        Method::Put => "PUT",
+        Method::Delete => "DELETE",
+    };
+    log_debug!("{verb} {path}");
+    let response = if matches!(method, Method::Get) {
+        let mut req = AGENT.get(url);
+        for (k, v) in headers {
+            req = req.header(*k, *v);
         }
-        Method::Post => {
-            let mut req = AGENT.post(url);
-            for (k, v) in headers {
-                req = req.header(*k, *v);
-            }
-            match body {
-                Body::None => req.send_empty(),
-                Body::Json(v) => req.send_json(v),
-                Body::Form(f) => req.send_form(f.iter().copied()),
-            }
+        req.call()
+    } else {
+        let mut req = match method {
+            Method::Put => AGENT.put(url),
+            Method::Delete => AGENT.delete(url).force_send_body(),
+            _ => AGENT.post(url),
+        };
+        for (k, v) in headers {
+            req = req.header(*k, *v);
+        }
+        match body {
+            Body::None => req.send_empty(),
+            Body::Json(v) => req.send_json(v),
+            Body::Form(f) => req.send_form(f.iter().copied()),
         }
     };
     let response = response.map_err(|e| Error::Network(e.to_string()))?;

@@ -14,10 +14,13 @@ use std::sync::Arc;
 pub fn install_fonts(ctx: &egui::Context) {
     let mut fonts = FontDefinitions::default();
     for (name, bytes) in [
-        ("Inter", &include_bytes!("../../../assets/fonts/Inter-Regular.ttf")[..]),
-        ("Inter-Medium", include_bytes!("../../../assets/fonts/Inter-Medium.ttf")),
-        ("Inter-SemiBold", include_bytes!("../../../assets/fonts/Inter-SemiBold.ttf")),
-        ("Inter-Bold", include_bytes!("../../../assets/fonts/Inter-Bold.ttf")),
+        ("Jakarta", &include_bytes!("../../../assets/fonts/PlusJakartaSans-Regular.ttf")[..]),
+        ("Jakarta-Medium", include_bytes!("../../../assets/fonts/PlusJakartaSans-Medium.ttf")),
+        ("Jakarta-SemiBold", include_bytes!("../../../assets/fonts/PlusJakartaSans-SemiBold.ttf")),
+        ("Jakarta-Bold", include_bytes!("../../../assets/fonts/PlusJakartaSans-Bold.ttf")),
+        ("Jakarta-ExtraBold", include_bytes!("../../../assets/fonts/PlusJakartaSans-ExtraBold.ttf")),
+        // Wider coverage (Cyrillic, Greek, symbols) where Plus Jakarta Sans has no glyph.
+        ("Inter", include_bytes!("../../../assets/fonts/Inter-Regular.ttf")),
         ("Mono", include_bytes!("../../../assets/fonts/JetBrainsMono-Regular.ttf")),
         // Monochrome emoji (egui can't paint colour fonts): reactions, message emoji.
         ("Emoji", include_bytes!("../../../assets/fonts/NotoEmoji-Regular.ttf")),
@@ -27,10 +30,11 @@ pub fn install_fonts(ctx: &egui::Context) {
     // egui's own fonts stay last in every chain as a final fallback.
     let fallbacks = fonts.families.get(&FontFamily::Proportional).cloned().unwrap_or_default();
     let chain = |first: &str| [vec![first.to_string(), "Inter".to_string(), "Emoji".to_string()], fallbacks.clone()].concat();
-    fonts.families.insert(FontFamily::Proportional, chain("Inter"));
-    fonts.families.insert(typography::medium(), chain("Inter-Medium"));
-    fonts.families.insert(typography::semibold(), chain("Inter-SemiBold"));
-    fonts.families.insert(typography::bold(), chain("Inter-Bold"));
+    fonts.families.insert(FontFamily::Proportional, chain("Jakarta"));
+    fonts.families.insert(typography::medium(), chain("Jakarta-Medium"));
+    fonts.families.insert(typography::semibold(), chain("Jakarta-SemiBold"));
+    fonts.families.insert(typography::bold(), chain("Jakarta-Bold"));
+    fonts.families.insert(typography::extrabold(), chain("Jakarta-ExtraBold"));
     fonts.families.insert(FontFamily::Monospace, chain("Mono"));
     ctx.set_fonts(fonts);
 }
@@ -60,8 +64,8 @@ pub fn apply(ctx: &egui::Context, dark: bool) {
 fn visuals(dark: bool) -> Visuals {
     let p = colors();
     let mut v = if dark { Visuals::dark() } else { Visuals::light() };
-    v.panel_fill = p.bg;
-    v.window_fill = p.surface;
+    v.panel_fill = p.canvas;
+    v.window_fill = p.panel;
     v.window_stroke = Stroke::new(1.0, p.line);
     v.window_corner_radius = CornerRadius::same(12);
     v.menu_corner_radius = CornerRadius::same(10);

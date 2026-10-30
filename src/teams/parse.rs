@@ -1,7 +1,7 @@
 //! The services' JSON as `model` types. Fields are read leniently: the web client's
 //! API isn't documented, and what's missing gets a default rather than an error.
 
-use crate::model::{Author, Card, Channel, Conversation, Kind, Message, Picture, Preview, Reaction, Team, text, time};
+use crate::model::{Author, Card, Channel, Conversation, Kind, Message, Picture, Preview, Reaction, Source, Team, text, time};
 use serde_json::Value;
 
 fn str_of<'a>(v: &'a Value, keys: &[&str]) -> Option<&'a str> {
@@ -155,8 +155,14 @@ fn message(m: &Value, me: &str) -> Option<Message> {
         return None;
     }
     let id = str_of(m, &["id"])?.to_string();
+    let activity = &m["properties"]["activity"];
     let content = str_of(m, &["content"]).unwrap_or("");
-    let body = if kind == "Text" { text::plain(content) } else { text::from_html(content) };
+    let mut body = if kind == "Text" { text::plain(content) } else { text::from_html(content) };
+    if body.is_empty()
+        && let Some(preview) = str_of(activity, &["messagePreview"])
+    {
+        body = text::plain(preview);
+    }
     let card = card(&m["properties"]["cards"]).or_else(|| card(&m["properties"]["attachments"]));
     if body.is_empty() && card.is_none() {
         return None;
@@ -170,10 +176,19 @@ fn message(m: &Value, me: &str) -> Option<Message> {
         })
         .filter(|r| *r != id);
     let from = str_of(m, &["from"]).unwrap_or("");
-    let author = Author {
-        id: from.rsplit('/').next().unwrap_or(from).to_string(),
-        name: str_of(m, &["imdisplayname"]).unwrap_or("Unknown").to_string(),
+    // Activity-feed items are written by the service; who acted is in `activity`.
+    let author = match str_of(activity, &["sourceUserId"]) {
+        Some(id) => Author { id: id.to_string(), name: str_of(activity, &["sourceUserImDisplayName"]).unwrap_or("Someone").to_string() },
+        None => Author {
+            id: from.rsplit('/').next().unwrap_or(from).to_string(),
+            name: str_of(m, &["imdisplayname", "fromDisplayNameInToken"]).unwrap_or("Someone").to_string(),
+        },
     };
+    let source = str_of(activity, &["sourceThreadId"]).map(|conversation| Source {
+        conversation: conversation.to_string(),
+        title: str_of(activity, &["sourceThreadTopic"]).unwrap_or("").to_string(),
+        what: str_of(activity, &["activityType"]).unwrap_or("").to_string(),
+    });
     Some(Message {
         id,
         root,
@@ -181,8 +196,9 @@ fn message(m: &Value, me: &str) -> Option<Message> {
         at,
         body,
         card,
-        edited: m["properties"]["edittime"].is_string() || m["skypeeditedid"].is_string(),
+        edited: !m["properties"]["edittime"].is_null() || m["skypeeditedid"].is_string(),
         reactions: reactions(&m["properties"]["emotions"], me),
+        source,
     })
 }
 
@@ -325,6 +341,17 @@ mod tests {
         assert_eq!(m[1].author, Author { id: ME.into(), name: "Alex".into() });
         assert!(m[1].edited);
         assert_eq!(m[1].reactions, [Reaction { key: "like".into(), count: 2, mine: true }]);
+    }
+
+    #[test]
+    fn activity_items_name_who_acted() {
+        let v = json!({"messages": [{"id": "9", "messagetype": "RichText/Html", "content": "<p>please take over</p>", "imdisplayname": "",
+            "from": "8:orgid:me", "originalarrivaltime": "2026-10-30T10:00:00Z",
+            "properties": {"activity": {"sourceUserId": "8:orgid:boris", "sourceUserImDisplayName": "Boris", "sourceThreadId": "19:x",
+                "sourceThreadTopic": "[DEV] General", "activityType": "mention"}}}]});
+        let m = messages(&v, ME).remove(0);
+        assert_eq!(m.author, Author { id: "8:orgid:boris".into(), name: "Boris".into() });
+        assert_eq!(m.source, Some(Source { conversation: "19:x".into(), title: "[DEV] General".into(), what: "mention".into() }));
     }
 
     #[test]

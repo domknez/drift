@@ -46,4 +46,10 @@ pub trait Backend: Send + Sync {
     /// Send a plain-text message to a conversation. For a channel reply, `conversation`
     /// is `<channel id>;messageid=<post id>`; for a new post, the channel id.
     fn send(&self, conversation: &str, text: &str) -> Result<()>;
+
+    /// Add (or with `add` false, take back) the user's reaction `key` to a message.
+    fn react(&self, conversation: &str, message: &str, key: &str, add: bool) -> Result<()>;
+
+    /// Tell the service the conversation is read up to `message` (Teams shows it read too).
+    fn mark_read(&self, conversation: &str, message: &str) -> Result<()>;
 }

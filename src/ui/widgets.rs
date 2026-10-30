@@ -196,28 +196,26 @@ fn table(ui: &mut Ui, rows: &[Vec<Vec<Inline>>], header: bool) {
 pub fn card(ui: &mut Ui, card: &Card) {
     let p = colors();
     ui.add_space(2.0);
-    let width = ui.available_width().min(560.0);
     let response = Frame::new()
-        .fill(p.surface)
-        .stroke(Stroke::new(1.0, p.line))
-        .corner_radius(CornerRadius::same(metrics::RADIUS))
-        .inner_margin(Margin { left: 15, right: 12, top: 9, bottom: 9 })
+        .fill(p.panel)
+        .corner_radius(CornerRadius::same(12))
+        .inner_margin(Margin::symmetric(12, 10))
         .show(ui, |ui| {
-            ui.set_width(width - 27.0);
-            ui.spacing_mut().item_spacing.y = 3.0;
             ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 8.0;
-                icon(ui, Icon::Card, 16.0, p.accent);
-                ui.add(egui::Label::new(RichText::new(&card.title).font(ty::item_strong()).color(p.text)).truncate());
+                ui.spacing_mut().item_spacing.x = 12.0;
+                let (tile, _) = ui.allocate_exact_size(vec2(34.0, 34.0), Sense::hover());
+                ui.painter().rect_filled(tile, CornerRadius::same(10), p.selected);
+                icons::paint(ui.painter(), Rect::from_center_size(tile.center(), vec2(18.0, 18.0)), Icon::Card, p.accent);
+                ui.vertical(|ui| {
+                    ui.spacing_mut().item_spacing.y = 2.0;
+                    ui.add(egui::Label::new(RichText::new(&card.title).font(ty::small_strong()).color(p.text)).truncate());
+                    if !card.detail.is_empty() {
+                        ui.add(egui::Label::new(RichText::new(&card.detail).font(ty::mono_small()).color(p.faint)).truncate());
+                    }
+                });
             });
-            if !card.detail.is_empty() {
-                ui.add(egui::Label::new(RichText::new(&card.detail).font(ty::mono_small()).color(p.dim)).truncate());
-            }
         })
         .response;
-    // The accent edge on the left.
-    let edge = Rect::from_min_size(response.rect.min, vec2(3.0, response.rect.height()));
-    ui.painter().rect_filled(edge, CornerRadius { nw: metrics::RADIUS, sw: metrics::RADIUS, ne: 0, se: 0 }, p.accent);
     if let Some(url) = &card.link {
         let response = response.interact(Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
         if response.clicked() {
@@ -227,32 +225,36 @@ pub fn card(ui: &mut Ui, card: &Card) {
 }
 
 /// Reactions under a message, as small pills; the user's own ones in the accent.
-pub fn reactions(ui: &mut Ui, reactions: &[Reaction]) {
+/// Clicking one returns its key (to add it, or take it back).
+pub fn reactions(ui: &mut Ui, reactions: &[Reaction], right: bool) -> Option<String> {
     if reactions.is_empty() {
-        return;
+        return None;
     }
     let p = colors();
-    ui.add_space(2.0);
-    ui.horizontal_wrapped(|ui| {
+    let mut clicked = None;
+    ui.add_space(4.0);
+    let layout = if right { egui::Layout::right_to_left(egui::Align::Min) } else { egui::Layout::left_to_right(egui::Align::Min) };
+    ui.with_layout(layout.with_main_wrap(!right), |ui| {
         ui.spacing_mut().item_spacing.x = 6.0;
         for r in reactions {
-            let (fill, stroke, text) = if r.mine { (p.selected, p.accent, p.accent) } else { (Color32::TRANSPARENT, p.line, p.dim) };
-            Frame::new()
+            let (fill, text) = if r.mine { (p.selected, p.accent) } else { (p.surface, p.dim) };
+            let response = Frame::new()
                 .fill(fill)
-                .stroke(Stroke::new(1.0, stroke))
+                .stroke(if r.mine { Stroke::new(1.0, p.accent.gamma_multiply(0.6)) } else { Stroke::NONE })
                 .corner_radius(CornerRadius::same(255))
-                .inner_margin(Margin::symmetric(8, 2))
+                .inner_margin(Margin::symmetric(9, 3))
                 .show(ui, |ui| {
-                    ui.label(RichText::new(format!("{} {}", r.emoji(), r.count)).font(ty::small()).color(text));
-                });
+                    ui.label(RichText::new(format!("{} {}", r.emoji(), r.count)).font(ty::small_strong()).color(text));
+                })
+                .response
+                .interact(Sense::click())
+                .on_hover_cursor(egui::CursorIcon::PointingHand);
+            if response.clicked() {
+                clicked = Some(r.key.clone());
+            }
         }
     });
-}
-
-/// A count in the accent (unread messages); a dot for "something new".
-pub fn unread_dot(ui: &mut Ui) {
-    let (rect, _) = ui.allocate_exact_size(vec2(8.0, 8.0), Sense::hover());
-    ui.painter().circle_filled(rect.center(), 3.5, colors().accent);
+    clicked
 }
 
 #[cfg(test)]

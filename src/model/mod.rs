@@ -110,6 +110,17 @@ pub struct Message {
     pub card: Option<Card>,
     pub edited: bool,
     pub reactions: Vec<Reaction>,
+    /// For items of the activity feed: where the mention or reply happened.
+    pub source: Option<Source>,
+}
+
+/// Where an activity happened: the conversation, its name, and what it was.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Source {
+    pub conversation: ConversationId,
+    pub title: String,
+    /// `mention`, `reply`, `reaction`, … as the service names it.
+    pub what: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -189,11 +200,6 @@ pub struct Directory {
 impl Directory {
     pub fn conversation(&self, id: &str) -> Option<&Conversation> {
         self.conversations.iter().find(|c| c.id == id)
-    }
-
-    /// Chats with people, newest first.
-    pub fn chats(&self) -> impl Iterator<Item = &Conversation> {
-        self.conversations.iter().filter(|c| c.kind == Kind::Chat)
     }
 
     /// The mentions/activity feed, if the service lists one.

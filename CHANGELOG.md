@@ -9,13 +9,19 @@ The first version of drift:
 
 - Sign in with Microsoft (work or school account) in a small window; the sign-in
   is kept in the system keychain and renewed on its own
-- A rail (Activity, Chats, Teams, Meetings) with unread counts, and a list beside it:
-  teams with their channels, or direct messages and meeting chats; search to narrow
-  it down; today's meeting on top with *Join*
-- Channels show posts with a link to their thread, which opens beside the channel
-  for reading and replying; chats show messages grouped by author
+- Tabs in the top bar (Activity, Chats, Teams, Meetings) with unread counts, today's
+  meeting with *Join*, and search
+- One list of chats and channels, newest first, with previews and times; chips for
+  unread, channels and people
+- Chats as bubbles (yours on the right), grouped by author, with day pills; channel
+  posts link to their thread, which opens beside the channel for replying
+- Right-click a message to react, reply in its thread, copy it or open its link;
+  click a reaction to add or take back yours
+- Activity: mentions and replies with who, what and where
+- Opening a conversation marks it read in Teams too
 - Messages keep their formatting: bold, italics, code, links, mentions and emoji;
   reactions under them; cards from bots and connectors (pull requests, alerts) as one
   compact row that opens its link
-- The "Tide" look: a dark and a light theme (or follow the system), teal accent
+- Panels floating on a canvas, a dark and a warm light theme (or follow the system),
+  violet accent, Plus Jakarta Sans
 - ⌘R / Ctrl+R fetches everything again

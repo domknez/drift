@@ -3,7 +3,7 @@
 
 use crate::backend::{Backend, Error, Result};
 use crate::model::text::{self, Block};
-use crate::model::{Author, Card, Channel, Conversation, Directory, Kind, Message, Picture, Preview, Reaction, Team, time};
+use crate::model::{Author, Card, Channel, Conversation, Directory, Kind, Message, Picture, Preview, Reaction, Source, Team, time};
 
 pub struct Demo;
 
@@ -48,6 +48,18 @@ fn chat(id: &str, kind: Kind, title: &str, last: (&str, &str, i64), unread: bool
         join_url: None,
         picture,
     }
+}
+
+fn channel_preview(id: &str) -> Preview {
+    let (author, text, at) = match id {
+        OPEN => ("Maya Lindqvist", "Small one, mostly gestures. Happy to pair on it after stand-up 🙂", today(10, 44)),
+        "19:alerts@thread.tacv2" => ("Grafana", "p95 latency above 800 ms on api-gateway", today(9, 58)),
+        "19:nightly@thread.tacv2" => ("Pipeline", "2 failed, 418 passed", today(5, 13)),
+        "19:design@thread.tacv2" => ("Jonas Weber", "New icons are in Figma", today(11, 0) - 4 * 86_400_000),
+        "19:side@thread.tacv2" => ("Priya Nair", "Build 0.4 is up for testing", today(11, 0) - 30 * 86_400_000),
+        _ => ("Lea Novak", "Welcome to Halcyon!", today(11, 0) - 20 * 86_400_000),
+    };
+    Preview { author: author.into(), text: text.into(), at }
 }
 
 fn channel(id: &str, name: &str, general: bool, unread: bool, pinned: bool) -> Channel {
@@ -138,7 +150,7 @@ impl Backend for Demo {
                     id: c.id.clone(),
                     kind: Kind::Channel,
                     title: c.name.clone(),
-                    last: Some(Preview { author: String::new(), text: String::new(), at: today(8, 0) }),
+                    last: Some(channel_preview(&c.id)),
                     unread: c.unread,
                     pinned: c.pinned,
                     muted: false,
@@ -151,9 +163,71 @@ impl Backend for Demo {
     }
 
     fn messages(&self, conversation: &str) -> Result<Vec<Message>> {
+        if conversation == "48:mentions" {
+            return Ok(activity());
+        }
+        if conversation == "19:maya" {
+            let like = |mine| vec![Reaction { key: "like".into(), count: 1, mine }];
+            return Ok(vec![
+                message(
+                    "3001",
+                    None,
+                    "maya",
+                    today(9, 2) - 86_400_000,
+                    "<p>Did the timeline gestures land in the nightly?</p>",
+                    None,
+                    vec![],
+                ),
+                message(
+                    "3002",
+                    None,
+                    ME,
+                    today(9, 6) - 86_400_000,
+                    "<p>Not yet, the review is still open. Should be in tomorrow's.</p>",
+                    None,
+                    like(false),
+                ),
+                message(
+                    "3003",
+                    None,
+                    "maya",
+                    today(10, 21),
+                    "<p>Morning! Pan by dragging works great, zoom feels a bit fast with a trackpad though.</p>",
+                    None,
+                    vec![],
+                ),
+                message(
+                    "3004",
+                    None,
+                    "maya",
+                    today(10, 22),
+                    "<p>Maybe scale it by <code>deltaY</code> instead of a fixed step?</p>",
+                    None,
+                    vec![],
+                ),
+                message(
+                    "3005",
+                    None,
+                    ME,
+                    today(10, 25),
+                    "<p>Good catch, I'll try that after stand-up.</p>",
+                    None,
+                    vec![Reaction { key: "pray".into(), count: 1, mine: false }],
+                ),
+                message(
+                    "3006",
+                    None,
+                    ME,
+                    today(10, 25),
+                    "<p>Also: <b>release cut at 15:00</b>, so anything after that goes in next week.</p>",
+                    None,
+                    vec![],
+                ),
+                message("3007", None, "maya", today(10, 31), "<p>lunch at 1? the new place on the corner 🍜</p>", None, like(true)),
+            ]);
+        }
         if conversation != OPEN {
             let (who, line) = match conversation {
-                "19:maya" => ("maya", "lunch at 1? the new place on the corner"),
                 "19:tomas" => (ME, "rebased, should be green now"),
                 _ => ("priya", "cut is at 15:00 today"),
             };
@@ -234,6 +308,41 @@ impl Backend for Demo {
     fn send(&self, _conversation: &str, _text: &str) -> Result<()> {
         Ok(())
     }
+
+    fn react(&self, _conversation: &str, _message: &str, _key: &str, _add: bool) -> Result<()> {
+        Ok(())
+    }
+
+    fn mark_read(&self, _conversation: &str, _message: &str) -> Result<()> {
+        Ok(())
+    }
+}
+
+/// The activity feed: mentions and replies, oldest first.
+fn activity() -> Vec<Message> {
+    let item = |id: &str, who: &str, at: i64, text: &str, place: (&str, &str), what: &str| Message {
+        source: Some(Source { conversation: place.0.into(), title: place.1.into(), what: what.into() }),
+        ..message(id, None, who, at, &format!("<p>{text}</p>"), None, vec![])
+    };
+    vec![
+        item(
+            "4001",
+            "priya",
+            today(16, 40) - 86_400_000,
+            "@Alex can you double-check the release notes?",
+            ("19:release", "Release crew"),
+            "mention",
+        ),
+        item(
+            "4002",
+            "lea",
+            today(10, 14),
+            "On it. Is the form data still sent twice when the rule has no schedule?",
+            (OPEN, "PR Reviews"),
+            "reply",
+        ),
+        item("4003", "maya", today(10, 44), "@Alex happy to pair on it after stand-up", (OPEN, "PR Reviews"), "mention"),
+    ]
 }
 
 fn pr(n: u32, title: &str, from: &str, to: &str) -> Card {
@@ -246,5 +355,5 @@ fn pr(n: u32, title: &str, from: &str, to: &str) -> Card {
 
 fn message(id: &str, root: Option<&str>, who: &str, at: i64, html: &str, card: Option<Card>, reactions: Vec<Reaction>) -> Message {
     let body: Vec<Block> = text::from_html(html);
-    Message { id: id.into(), root: root.map(str::to_string), author: author(who), at, body, card, edited: false, reactions }
+    Message { id: id.into(), root: root.map(str::to_string), author: author(who), at, body, card, edited: false, reactions, source: None }
 }

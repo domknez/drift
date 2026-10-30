@@ -28,12 +28,10 @@ pub enum Icon {
     Search,
     /// A speech bubble: chats.
     Chat,
-    /// A pencil: a new message.
-    Edit,
+    /// A bell: activity.
+    Bell,
     /// A cross: close.
     Close,
-    /// A "B": bold.
-    Bold,
     /// A smiling face: emoji.
     Smile,
     /// A paperclip: attach.
@@ -103,23 +101,17 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             circle(11.0, 11.0, 6.5);
             line(&[(16.0, 16.0), (20.5, 20.5)]);
         }
+        Icon::Bell => {
+            arc(12.0, 10.0, 6.0, PI, TAU);
+            line(&[(6.0, 10.0), (6.0, 15.0), (4.0, 17.5), (20.0, 17.5), (18.0, 15.0), (18.0, 10.0)]);
+            arc(12.0, 19.5, 2.0, 0.0, PI);
+        }
         Icon::Chat => {
             line(&[(4.0, 5.0), (20.0, 5.0), (20.0, 16.0), (8.0, 16.0), (4.0, 20.0), (4.0, 5.0)]);
-        }
-        Icon::Edit => {
-            line(&[(12.0, 20.0), (21.0, 20.0)]);
-            line(&[(16.5, 3.5), (19.5, 6.5), (7.0, 19.0), (3.5, 20.0), (4.5, 16.5), (16.5, 3.5)]);
         }
         Icon::Close => {
             line(&[(6.0, 6.0), (18.0, 18.0)]);
             line(&[(18.0, 6.0), (6.0, 18.0)]);
-        }
-        Icon::Bold => {
-            line(&[(7.0, 4.0), (7.0, 20.0), (14.0, 20.0)]);
-            arc(14.0, 16.0, 4.0, -0.5 * PI, 0.5 * PI);
-            line(&[(7.0, 12.0), (13.0, 12.0)]);
-            arc(13.0, 8.0, 4.0, -0.5 * PI, 0.5 * PI);
-            line(&[(7.0, 4.0), (13.0, 4.0)]);
         }
         Icon::Smile => {
             circle(12.0, 12.0, 9.0);

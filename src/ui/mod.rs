@@ -1,9 +1,9 @@
-//! egui front-end in the "Tide" look: an icon rail, a list beside it, the open
-//! conversation, and its thread on the right.
+//! egui front-end: a top bar with tabs, and panels floating on a canvas — the list,
+//! the open conversation as bubbles, and its thread on the right.
 //!
 //! - [`app`]: state, what happens each frame, signing in and out, the demo and screenshots
 //! - [`workspace`]: the signed-in state: the section, the open conversation and thread, refreshes
-//! - [`views`]: the rail, the list, the conversation, the thread, the sign-in page
+//! - [`views`]: the top bar, the list, the conversation, the thread, the sign-in page
 //! - [`widgets`]: avatars, rich text, cards, reactions
 //! - [`pictures`]: people's and teams' pictures
 //! - [`style`]: palette, type, metrics and icons
