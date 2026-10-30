@@ -21,6 +21,9 @@ const PUSHED_EVERY: Duration = Duration::from_secs(60);
 const MESSAGES_EVERY: Duration = Duration::from_secs(20);
 /// How often the open conversation is fetched again while drift is in front.
 const MESSAGES_FRONT_EVERY: Duration = Duration::from_secs(5);
+/// How many of a conversation's newest messages are shown at first, and how many
+/// more each "Show earlier" adds.
+pub const NEWEST: usize = 40;
 /// How often the calendar is fetched again.
 const CALENDAR_EVERY: Duration = Duration::from_secs(5 * 60);
 /// Searching messages starts once typing has paused this long.
@@ -99,6 +102,12 @@ pub struct Workspace {
     seen_once: bool,
     /// Conversations whose notification was clicked.
     clicked: (Sender<String>, Receiver<String>),
+    /// How many of the open conversation's newest messages are shown.
+    pub newest: usize,
+    /// The list's height when earlier messages were asked for (to stay in place once they're in).
+    pub earlier_from: Option<f32>,
+    /// A scroll position for the message list's next drawing.
+    pub scroll_to: Option<f32>,
     /// The picture shown over the window, by its URL.
     pub viewing: Option<String>,
     /// The conversation last drawn (its first drawing is laid out once unseen, so it
@@ -215,6 +224,9 @@ impl Workspace {
             seen: HashMap::new(),
             seen_once: false,
             clicked: std::sync::mpsc::channel(),
+            newest: NEWEST,
+            earlier_from: None,
+            scroll_to: None,
             viewing: None,
             drawn: None,
             list_height: None,
@@ -768,6 +780,7 @@ impl Workspace {
             return;
         }
         self.open = Some(id.to_string());
+        self.newest = NEWEST;
         self.messages = None;
         self.read_by.clear();
         self.read_at = None;

@@ -31,6 +31,8 @@ pub enum Action {
     Delete(String),
     /// Bring a message into view and mark it (a reply's quote was clicked).
     Show(String),
+    /// Show older messages too.
+    Earlier,
     /// See a picture big.
     View(String),
 }
@@ -57,6 +59,10 @@ pub fn apply(ui: &Ui, ws: &mut Workspace, action: Action, reply: bool) {
             ws.focus_scrolled = false;
         }
         Action::View(url) => ws.viewing = Some(url),
+        Action::Earlier => {
+            ws.newest += crate::ui::workspace::NEWEST;
+            ws.earlier_from = ws.list_height.as_ref().map(|(_, h)| *h);
+        }
     }
 }
 
@@ -123,8 +129,13 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace) {
                 open: open_thread.as_deref(),
                 focus: focus.as_deref(),
                 scrolled: ws.focus_scrolled,
+                newest: ws.newest,
             };
-            let scrolled = egui::ScrollArea::vertical().id_salt(("messages", &id)).stick_to_bottom(true).auto_shrink([false, false]).show(
+            let mut area = egui::ScrollArea::vertical().id_salt(("messages", &id)).stick_to_bottom(true).auto_shrink([false, false]);
+            if let Some(y) = ws.scroll_to.take() {
+                area = area.vertical_scroll_offset(y);
+            }
+            let scrolled = area.show(
                 &mut page,
                 |ui| {
                     Frame::new().inner_margin(Margin::symmetric(metrics::PAGE_PAD as i8, 10)).show(ui, |ui| {
@@ -144,6 +155,11 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace) {
             // at the old scroll position, so it's laid out again at the new one rather
             // than shown a frame off.
             let height = scrolled.content_size.y;
+            // Earlier messages came in above: stay on what was in view.
+            if let Some(before) = ws.earlier_from.filter(|before| *before != height) {
+                ws.earlier_from = None;
+                ws.scroll_to = Some(scrolled.state.clamped_offset().y + height - before);
+            }
             if ws.list_height.as_ref().is_some_and(|(of, h)| *of == id && *h != height) {
                 ui.ctx().request_discard("the message list changed height");
             }
@@ -345,6 +361,13 @@ pub struct View<'a> {
     pub focus: Option<&'a str>,
     /// Set once the focused message has been scrolled to.
     pub scrolled: bool,
+    /// How many of the newest messages are shown (the rest behind "Show earlier").
+    pub newest: usize,
+}
+
+/// Whether `focus` is one of the replies to `m`.
+fn thread_has(replies: &HashMap<&str, Vec<&Message>>, m: &Message, focus: &str) -> bool {
+    replies.get(m.id.as_str()).is_some_and(|r| r.iter().any(|reply| reply.id == focus))
 }
 
 pub fn list(ui: &mut Ui, pictures: &mut Pictures, messages: &[Message], view: &mut View) -> Option<Action> {
@@ -361,6 +384,22 @@ pub fn list(ui: &mut Ui, pictures: &mut Pictures, messages: &[Message], view: &m
     // "Seen" goes under the user's newest message.
     let newest_mine = shown.iter().rev().find(|m| !view.me.is_empty() && m.author.id == view.me).map(|m| m.id.clone());
     let mut action = None;
+    // Only the newest are laid out (fewer pictures loading above them, and a short list
+    // to scroll), back far enough to include a message to bring into view.
+    let mut start = shown.len().saturating_sub(view.newest);
+    if let Some(at) = view.focus.and_then(|f| shown.iter().position(|m| m.id == f || thread_has(&replies, m, f))) {
+        start = start.min(at);
+    }
+    if start > 0 {
+        ui.vertical_centered(|ui| {
+            let label = RichText::new("Show earlier messages").font(ty::small_strong()).color(colors().accent);
+            if ui.add(egui::Button::new(label).frame(false)).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                action = Some(Action::Earlier);
+            }
+        });
+        ui.add_space(6.0);
+    }
+    let shown = &shown[start..];
     for (i, m) in shown.iter().enumerate() {
         let prev = i.checked_sub(1).map(|j| shown[j]);
         let next = shown.get(i + 1).copied();

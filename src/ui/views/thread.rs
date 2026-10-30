@@ -54,6 +54,7 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace) {
                 open: None,
                 focus: focus.as_deref(),
                 scrolled: ws.focus_scrolled,
+                newest: usize::MAX,
             };
             action = conversation::list(ui, &mut ws.pictures, &thread, &mut view);
             ws.focus_scrolled |= view.scrolled;
