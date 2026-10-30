@@ -15,6 +15,7 @@ mod notify;
 mod settings;
 mod teams;
 mod ui;
+mod update;
 
 fn main() -> eframe::Result {
     log::install_panic_hook();

@@ -265,6 +265,22 @@ fn truncate(s: &str, max: usize) -> String {
 }
 
 /// The user's avatar, with a menu: who's signed in, the theme, signing out.
+/// A hairline across the menu, with room around it.
+fn divider(ui: &mut Ui) {
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 9.0), Sense::hover());
+    ui.painter().hline(rect.x_range(), rect.center().y, Stroke::new(1.0, colors().line));
+}
+
+/// A small heading in the menu.
+fn menu_label(ui: &mut Ui, text: &str) {
+    ui.add_space(4.0);
+    ui.horizontal(|ui| {
+        ui.add_space(8.0);
+        ui.label(RichText::new(text.to_uppercase()).font(ty::section()).color(colors().faint));
+    });
+    ui.add_space(8.0);
+}
+
 fn user_menu(ui: &mut Ui, ws: &mut Workspace, rect: Rect, theme: Appearance) -> Option<Request> {
     let p = colors();
     let me = Picture::Person { id: ws.me_id.clone(), name: ws.me.clone() };
@@ -274,25 +290,132 @@ fn user_menu(ui: &mut Ui, ws: &mut Workspace, rect: Rect, theme: Appearance) -> 
         .interact(Sense::click())
         .on_hover_cursor(egui::CursorIcon::PointingHand);
     let mut request = None;
-    egui::Popup::menu(&response).align(egui::RectAlign::BOTTOM_END).gap(8.0).width(220.0).show(|ui| {
-        ui.label(RichText::new(&ws.me).font(ty::item()).color(p.text));
-        ui.add_space(2.0);
-        ui.separator();
-        ui.label(RichText::new("Appearance").font(ty::meta()).color(p.faint));
-        for (option, label) in [(Appearance::System, "Follow the system"), (Appearance::Light, "Light"), (Appearance::Dark, "Dark")] {
-            if ui.selectable_label(theme == option, label).clicked() {
-                request = Some(Request::Theme(option));
+    egui::Popup::menu(&response)
+        .align(egui::RectAlign::BOTTOM_END)
+        .gap(8.0)
+        .width(290.0)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+        // DRIFT_DEMO_MENU: the menu open.
+        .open_memory(std::env::var_os("DRIFT_DEMO_MENU").is_some().then_some(egui::SetOpenCommand::Bool(true)))
+        .show(|ui| {
+            ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+            // Who's signed in.
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                ui.add_space(6.0);
+                let picture = if ws.me_id.is_empty() { None } else { ws.pictures.get(&me) };
+                widgets::avatar(ui, &ws.me_id, &ws.me, 40.0, picture);
+                ui.add_space(12.0);
+                ui.vertical(|ui| {
+                    ui.add_space(3.0);
+                    ui.label(RichText::new(&ws.me).font(ty::item()).color(p.text));
+                    ui.add_space(2.0);
+                    ui.label(RichText::new("Signed in to Microsoft Teams").font(ty::meta()).color(p.faint));
+                });
+            });
+            ui.add_space(12.0);
+            divider(ui);
+
+            // Appearance, as three segments.
+            menu_label(ui, "Appearance");
+            let options = [(Appearance::System, "System"), (Appearance::Light, "Light"), (Appearance::Dark, "Dark")];
+            let (track, _) = ui.allocate_exact_size(vec2(ui.available_width(), 34.0), Sense::hover());
+            let track = track.shrink2(vec2(6.0, 0.0));
+            ui.painter().rect_filled(track, CornerRadius::same(10), p.surface);
+            let w = track.width() / options.len() as f32;
+            for (i, (option, label)) in options.into_iter().enumerate() {
+                let cell = Rect::from_min_size(pos2(track.left() + w * i as f32, track.top()), vec2(w, track.height())).shrink(3.0);
+                let response = ui.interact(cell, ui.scope_id().with(("appearance", i)), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
+                let on = theme == option;
+                if on {
+                    ui.painter().rect(cell, CornerRadius::same(8), p.panel, Stroke::new(1.0, p.border), egui::StrokeKind::Inside);
+                } else if response.hovered() {
+                    ui.painter().rect_filled(cell, CornerRadius::same(8), p.hover);
+                }
+                let font = if on { ty::small_strong() } else { ty::small() };
+                ui.painter().text(cell.center(), egui::Align2::CENTER_CENTER, label, font, if on { p.text } else { p.dim });
+                if response.clicked() {
+                    request = Some(Request::Theme(option));
+                }
             }
-        }
-        ui.separator();
-        let mut on = ws.notifications;
-        if ui.checkbox(&mut on, "Notifications for new messages").changed() {
-            request = Some(Request::Notifications(on));
-        }
-        ui.separator();
-        if ui.button("Sign out").clicked() {
-            request = Some(Request::SignOut);
-        }
-    });
+            ui.add_space(12.0);
+            divider(ui);
+
+            // Notifications, as a switch.
+            let (row, response) = ui.allocate_exact_size(vec2(ui.available_width(), 46.0), Sense::click());
+            let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
+            if response.hovered() {
+                ui.painter().rect_filled(row.shrink2(vec2(2.0, 2.0)), CornerRadius::same(8), p.hover);
+            }
+            ui.painter().text(pos2(row.left() + 10.0, row.top() + 15.0), egui::Align2::LEFT_CENTER, "Notifications", ty::small_strong(), p.text);
+            ui.painter().text(
+                pos2(row.left() + 10.0, row.top() + 32.0),
+                egui::Align2::LEFT_CENTER,
+                "For new messages, when drift is behind",
+                ty::meta(),
+                p.faint,
+            );
+            let switch = Rect::from_min_size(pos2(row.right() - 10.0 - 34.0, row.center().y - 10.0), vec2(34.0, 20.0));
+            let t = ui.ctx().animate_bool_responsive(ui.scope_id().with("notifications-switch"), ws.notifications);
+            ui.painter().rect_filled(switch, CornerRadius::same(10), p.border.lerp_to_gamma(p.accent_fill, t));
+            let knob = pos2(egui::lerp(switch.left() + 10.0..=switch.right() - 10.0, t), switch.center().y);
+            ui.painter().circle_filled(knob, 7.5, egui::Color32::WHITE);
+            if response.clicked() {
+                request = Some(Request::Notifications(!ws.notifications));
+            }
+            ui.add_space(4.0);
+            divider(ui);
+
+            // This version, and whether there's a newer one.
+            let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), 46.0), Sense::hover());
+            ui.painter().text(
+                pos2(row.left() + 10.0, row.top() + 15.0),
+                egui::Align2::LEFT_CENTER,
+                format!("drift {}", crate::update::current()),
+                ty::small_strong(),
+                p.text,
+            );
+            let (status, color) = match &ws.update_found {
+                _ if ws.update.is_running() => ("Checking…".to_string(), p.faint),
+                Some(Ok(crate::update::Found::Current)) => ("You have the latest version".into(), p.faint),
+                Some(Ok(crate::update::Found::NoReleases)) => ("No releases published yet".into(), p.faint),
+                Some(Ok(crate::update::Found::Newer { version, .. })) => (format!("Version {version} is available"), p.accent),
+                Some(Err(_)) => ("Couldn't check for updates".into(), p.danger),
+                None => ("Free and open source".into(), p.faint),
+            };
+            ui.painter().text(pos2(row.left() + 10.0, row.top() + 32.0), egui::Align2::LEFT_CENTER, status, ty::meta(), color);
+            let (label, newer) = match &ws.update_found {
+                Some(Ok(crate::update::Found::Newer { page, .. })) => ("Download", Some(page.clone())),
+                _ => ("Check", None),
+            };
+            let text_color = if newer.is_some() { p.on_accent } else { p.text };
+            let galley = ui.painter().layout_no_wrap(label.into(), ty::small_strong(), text_color);
+            let button = Rect::from_min_size(pos2(row.right() - 10.0 - galley.size().x - 24.0, row.center().y - 14.0), vec2(galley.size().x + 24.0, 28.0));
+            let click = ui.interact(button, ui.scope_id().with("update"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
+            let fill = if newer.is_some() { p.accent_fill } else { p.surface };
+            ui.painter().rect_filled(button, CornerRadius::same(8), if click.hovered() { p.hover.lerp_to_gamma(fill, 0.5) } else { fill });
+            ui.painter().galley(button.center() - galley.size() / 2.0, galley, text_color);
+            if click.clicked() {
+                match newer {
+                    Some(page) => ui.ctx().open_url(egui::OpenUrl::new_tab(page)),
+                    None if !ws.update.is_running() => ws.check_for_update(ui.ctx()),
+                    None => {}
+                }
+            }
+            ui.add_space(4.0);
+            divider(ui);
+
+            // Signing out.
+            let (row, response) = ui.allocate_exact_size(vec2(ui.available_width(), 36.0), Sense::click());
+            let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
+            if response.hovered() {
+                ui.painter().rect_filled(row.shrink2(vec2(2.0, 2.0)), CornerRadius::same(8), p.hover);
+            }
+            ui.painter().text(pos2(row.left() + 10.0, row.center().y), egui::Align2::LEFT_CENTER, "Sign out", ty::small_strong(), p.danger);
+            if response.clicked() {
+                request = Some(Request::SignOut);
+            }
+            ui.add_space(2.0);
+        });
     request
 }
