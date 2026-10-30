@@ -412,7 +412,8 @@ pub fn reactions(ui: &mut Ui, pictures: &mut Pictures, reactions: &[Reaction], r
             let emoji = Picture::Emoji(r.key.clone());
             let picture = pictures.get(&emoji);
             // The emoji takes the same place whether it's a picture, still loading, or the character.
-            let glyph = (picture.is_none() && !pictures.loading(&emoji)).then(|| ui.painter().layout_no_wrap(r.emoji(), ty::small_strong(), text));
+            let glyph =
+                (picture.is_none() && !pictures.loading(&emoji)).then(|| ui.painter().layout_no_wrap(r.emoji(), ty::small_strong(), text));
             let emoji_w = 17.0;
             let size = vec2(9.0 + emoji_w + 4.0 + count.size().x + 9.0, 24.0);
             let (rect, response) = ui.allocate_exact_size(size, Sense::click());

@@ -114,7 +114,13 @@ pub fn show(ctx: &egui::Context, ws: &mut Workspace) {
                     });
                     ui.painter().hline(ui.min_rect().x_range(), ui.min_rect().bottom(), Stroke::new(1.0, p.line));
                     ui.add_space(6.0);
-                    let label = if query.is_empty() { "Recent" } else if rows.is_empty() { "Nothing matches" } else { "Results" };
+                    let label = if query.is_empty() {
+                        "Recent"
+                    } else if rows.is_empty() {
+                        "Nothing matches"
+                    } else {
+                        "Results"
+                    };
                     Frame::new().inner_margin(Margin { left: 18, right: 18, top: 6, bottom: 6 }).show(ui, |ui| {
                         ui.label(RichText::new(label).font(ty::small()).color(p.faint));
                     });
@@ -182,7 +188,10 @@ fn draw_row(ui: &mut egui::Ui, ws: &mut Workspace, row: &Row, rect: Rect, on: bo
     }
     if on {
         let enter = ui.painter().layout_no_wrap("Enter".into(), ty::meta(), p.dim);
-        let pill = Rect::from_min_size(pos2(rect.right() - 14.0 - enter.size().x - 14.0, rect.center().y - 11.0), vec2(enter.size().x + 14.0, 22.0));
+        let pill = Rect::from_min_size(
+            pos2(rect.right() - 14.0 - enter.size().x - 14.0, rect.center().y - 11.0),
+            vec2(enter.size().x + 14.0, 22.0),
+        );
         ui.painter().rect_stroke(pill, CornerRadius::same(6), Stroke::new(1.0, p.border), egui::StrokeKind::Inside);
         ui.painter().galley(pill.center() - enter.size() / 2.0, enter, p.dim);
     }
@@ -193,14 +202,47 @@ fn draw_row(ui: &mut egui::Ui, ws: &mut Workspace, row: &Row, rect: Rect, on: bo
 fn rows(ws: &Workspace, query: &str) -> Vec<Row> {
     let Some(d) = ws.directory.as_ref() else { return Vec::new() };
     let mut places = vec![
-        Row { target: Target::Section(Section::Activity), title: "Activity".into(), detail: "Mentions and replies".into(), icon: Some(Icon::Bell), conversation: None },
-        Row { target: Target::Unread, title: "Unreads".into(), detail: "Chats with something new".into(), icon: Some(Icon::Chat), conversation: None },
-        Row { target: Target::Section(Section::Chats), title: "Chats".into(), detail: String::new(), icon: Some(Icon::Chat), conversation: None },
-        Row { target: Target::Section(Section::Teams), title: "Teams".into(), detail: "Teams and channels".into(), icon: Some(Icon::Members), conversation: None },
-        Row { target: Target::Section(Section::Meetings), title: "Calendar".into(), detail: "Today's meetings".into(), icon: Some(Icon::Calendar), conversation: None },
+        Row {
+            target: Target::Section(Section::Activity),
+            title: "Activity".into(),
+            detail: "Mentions and replies".into(),
+            icon: Some(Icon::Bell),
+            conversation: None,
+        },
+        Row {
+            target: Target::Unread,
+            title: "Unreads".into(),
+            detail: "Chats with something new".into(),
+            icon: Some(Icon::Chat),
+            conversation: None,
+        },
+        Row {
+            target: Target::Section(Section::Chats),
+            title: "Chats".into(),
+            detail: String::new(),
+            icon: Some(Icon::Chat),
+            conversation: None,
+        },
+        Row {
+            target: Target::Section(Section::Teams),
+            title: "Teams".into(),
+            detail: "Teams and channels".into(),
+            icon: Some(Icon::Members),
+            conversation: None,
+        },
+        Row {
+            target: Target::Section(Section::Meetings),
+            title: "Calendar".into(),
+            detail: "Today's meetings".into(),
+            icon: Some(Icon::Calendar),
+            conversation: None,
+        },
     ];
     if let Some((subject, when, url)) = super::topbar::meeting_to_join(ws) {
-        places.insert(0, Row { target: Target::Join(url), title: format!("Join {subject}"), detail: when, icon: Some(Icon::Video), conversation: None });
+        places.insert(
+            0,
+            Row { target: Target::Join(url), title: format!("Join {subject}"), detail: when, icon: Some(Icon::Video), conversation: None },
+        );
     }
     if query.is_empty() {
         // The conversations opened last; at first, the latest active.

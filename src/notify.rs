@@ -114,7 +114,12 @@ mod center {
             }
 
             #[unsafe(method(userNotificationCenter:didReceiveNotificationResponse:withCompletionHandler:))]
-            fn did_receive(&self, _center: &UNUserNotificationCenter, response: &UNNotificationResponse, handler: &block2::DynBlock<dyn Fn()>) {
+            fn did_receive(
+                &self,
+                _center: &UNUserNotificationCenter,
+                response: &UNNotificationResponse,
+                handler: &block2::DynBlock<dyn Fn()>,
+            ) {
                 let id = response.notification().request().identifier().to_string();
                 let on_click = CLICKS.lock().ok().and_then(|mut clicks| clicks.as_mut()?.remove(&id));
                 if let Some(on_click) = on_click {

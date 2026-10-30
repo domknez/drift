@@ -42,9 +42,8 @@ pub fn check() -> Result<Found, String> {
 
 /// Whether version `a` (`v1.2.3` or `1.2.3`) is newer than `b`.
 fn newer(a: &str, b: &str) -> bool {
-    let parts = |v: &str| -> Vec<u64> {
-        v.trim_start_matches('v').split(['.', '-', '+']).take(3).map(|p| p.parse().unwrap_or(0)).collect()
-    };
+    let parts =
+        |v: &str| -> Vec<u64> { v.trim_start_matches('v').split(['.', '-', '+']).take(3).map(|p| p.parse().unwrap_or(0)).collect() };
     parts(a) > parts(b)
 }
 

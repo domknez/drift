@@ -108,7 +108,8 @@ fn session(teams: &Teams, endpoint: &str, connections: &mut u64, to: &dyn Fn(Pus
                 }]});
                 send(&mut socket, format!("5:::{authenticate}"))?;
                 sequence += 1;
-                let activity = json!({"name": "user.activity", "args": [{"state": "active", "cv": format!("{}.0.1", correlation_vector())}]});
+                let activity =
+                    json!({"name": "user.activity", "args": [{"state": "active", "cv": format!("{}.0.1", correlation_vector())}]});
                 send(&mut socket, format!("5:{sequence}+::{activity}"))?;
                 register(teams, &info.surl, endpoint)?;
                 registered = Some(Instant::now());
@@ -278,7 +279,6 @@ fn request_body(request: &Value) -> Value {
         .unwrap_or_default()
 }
 
-
 /// What follows a socket.io frame's third `:`.
 fn payload(frame: &str) -> Option<&str> {
     let mut at = 0;
@@ -298,8 +298,7 @@ fn ack_id(frame: &str) -> Option<&str> {
 /// Teams refuses more.
 fn endpoint_id() -> String {
     let path = crate::settings::dir().map(|d| d.join("endpoint"));
-    if let Some(id) = path.as_ref().and_then(|p| std::fs::read_to_string(p).ok()).map(|s| s.trim().to_string()).filter(|s| s.len() == 36)
-    {
+    if let Some(id) = path.as_ref().and_then(|p| std::fs::read_to_string(p).ok()).map(|s| s.trim().to_string()).filter(|s| s.len() == 36) {
         return id;
     }
     let id = uuid();

@@ -690,7 +690,11 @@ pub fn conversation_menu(ui: &mut Ui, ws: &mut Workspace, c: &Conversation) {
         ui.close();
     }
     let hidden = ws.is_hidden(c);
-    if ui.button(if hidden { "Show in the list" } else { "Hide from the list" }).on_hover_text("It comes back when something new is written").clicked() {
+    if ui
+        .button(if hidden { "Show in the list" } else { "Hide from the list" })
+        .on_hover_text("It comes back when something new is written")
+        .clicked()
+    {
         ws.set_hidden(&c.id, !hidden);
         ui.close();
     }

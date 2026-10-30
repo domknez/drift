@@ -74,7 +74,12 @@ impl Prefs {
             conversation: get("conversation").map(str::to_string),
             notifications: get("notifications") != Some("false"),
             hidden: get("hidden")
-                .map(|v| v.split(',').filter_map(|e| e.rsplit_once('|')).filter_map(|(id, at)| Some((id.to_string(), at.parse().ok()?))).collect())
+                .map(|v| {
+                    v.split(',')
+                        .filter_map(|e| e.rsplit_once('|'))
+                        .filter_map(|(id, at)| Some((id.to_string(), at.parse().ok()?)))
+                        .collect()
+                })
                 .unwrap_or_default(),
             muted: get("muted").map(|v| v.split(',').filter(|s| !s.is_empty()).map(str::to_string).collect()).unwrap_or_default(),
             file: None,

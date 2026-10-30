@@ -231,7 +231,9 @@ mod tests {
         let mut out = Vec::new();
         {
             let mut encoder = gif::Encoder::new(&mut out, 2, 1, &[255, 0, 0, 0, 255, 0]).unwrap();
-            encoder.write_frame(&gif::Frame { width: 2, height: 1, buffer: std::borrow::Cow::Borrowed(&[0, 1]), ..Default::default() }).unwrap();
+            encoder
+                .write_frame(&gif::Frame { width: 2, height: 1, buffer: std::borrow::Cow::Borrowed(&[0, 1]), ..Default::default() })
+                .unwrap();
         }
         let image = decode(&out).unwrap();
         assert_eq!(image.size, [2, 1]);

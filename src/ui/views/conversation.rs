@@ -151,22 +151,17 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace) {
             if let Some(y) = ws.scroll_to.take() {
                 area = area.vertical_scroll_offset(y);
             }
-            let scrolled = area.show(
-                &mut page,
-                |ui| {
-                    Frame::new().inner_margin(Margin::symmetric(metrics::PAGE_PAD as i8, 10)).show(ui, |ui| {
-                        ui.set_width(ui.available_width());
-                        if messages.is_empty() {
-                            ui.add_space(30.0);
-                            ui.vertical_centered(|ui| {
-                                ui.label(RichText::new("No messages yet. Say hello.").font(ty::body()).color(p.faint))
-                            });
-                        } else {
-                            action = list(ui, &mut ws.pictures, &messages, &mut view);
-                        }
-                    });
-                },
-            );
+            let scrolled = area.show(&mut page, |ui| {
+                Frame::new().inner_margin(Margin::symmetric(metrics::PAGE_PAD as i8, 10)).show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    if messages.is_empty() {
+                        ui.add_space(30.0);
+                        ui.vertical_centered(|ui| ui.label(RichText::new("No messages yet. Say hello.").font(ty::body()).color(p.faint)));
+                    } else {
+                        action = list(ui, &mut ws.pictures, &messages, &mut view);
+                    }
+                });
+            });
             // The list grew or shrank (a picture came, "Seen" moved): this frame was drawn
             // at the old scroll position, so it's laid out again at the new one rather
             // than shown a frame off.
@@ -446,7 +441,15 @@ fn continues(prev: &Message, m: &Message) -> bool {
 
 /// The bar over a message while the pointer's on it: quick reactions, quote, and a
 /// menu of the rest. It stays while its menu is open.
-fn hover_bar(ui: &mut Ui, pictures: &mut Pictures, m: &Message, mine: bool, thread: bool, conversation: &str, bubble: Rect) -> Option<Action> {
+fn hover_bar(
+    ui: &mut Ui,
+    pictures: &mut Pictures,
+    m: &Message,
+    mine: bool,
+    thread: bool,
+    conversation: &str,
+    bubble: Rect,
+) -> Option<Action> {
     const CELL: f32 = 32.0;
     let p = colors();
     let more_id = egui::Id::unique(("message-more", conversation, &m.id));
@@ -461,7 +464,10 @@ fn hover_bar(ui: &mut Ui, pictures: &mut Pictures, m: &Message, mine: bool, thre
     if !(over || menu_open) || ui.is_sizing_pass() {
         return None;
     }
-    ui.painter().add(egui::Shadow { offset: [0, 3], blur: 10, spread: 0, color: egui::Color32::from_black_alpha(30) }.as_shape(bar, CornerRadius::same(10)));
+    ui.painter().add(
+        egui::Shadow { offset: [0, 3], blur: 10, spread: 0, color: egui::Color32::from_black_alpha(30) }
+            .as_shape(bar, CornerRadius::same(10)),
+    );
     ui.painter().rect(bar, CornerRadius::same(10), p.panel, Stroke::new(1.0, p.border), egui::StrokeKind::Inside);
     let mut action = None;
     let cell = |i: usize| Rect::from_min_size(pos2(bar.left() + 4.0 + CELL * i as f32, bar.top() + 3.0), vec2(CELL, CELL));
@@ -527,11 +533,7 @@ fn message_menu(ui: &mut Ui, m: &Message, mine: bool, thread: bool, conversation
         ui.close();
     }
     if ui.button("Copy link").clicked() {
-        let link = format!(
-            "https://teams.microsoft.com/l/message/{}/{}",
-            crate::teams::encode(conversation),
-            crate::teams::encode(&m.id)
-        );
+        let link = format!("https://teams.microsoft.com/l/message/{}/{}", crate::teams::encode(conversation), crate::teams::encode(&m.id));
         ui.ctx().copy_text(link);
         ui.close();
     }
@@ -977,7 +979,8 @@ pub fn composer(ui: &mut Ui, ws: &mut Workspace, rect: Rect, hint: &str, reply: 
         response.request_focus();
     }
 
-    let tools = Rect::from_min_max(pos2(send_rect.left() - tools_w - 6.0, send_rect.top()), pos2(send_rect.left() - 6.0, send_rect.bottom()));
+    let tools =
+        Rect::from_min_max(pos2(send_rect.left() - tools_w - 6.0, send_rect.top()), pos2(send_rect.left() - 6.0, send_rect.bottom()));
     let mut row = ui.new_child(egui::UiBuilder::new().max_rect(tools).layout(Layout::left_to_right(Align::Center)));
     row.spacing_mut().item_spacing.x = 2.0;
     if widgets::icon_button(&mut row, Icon::Clip, "Attach pictures (or drop them on the window)").clicked()
@@ -995,28 +998,29 @@ pub fn composer(ui: &mut Ui, ws: &mut Workspace, rect: Rect, hint: &str, reply: 
     }
     let smile = widgets::icon_button(&mut row, Icon::Smile, "Emoji");
     let mut emoji = None;
-    egui::Popup::menu(&smile)
-        .align(egui::RectAlign::TOP_END)
-        .gap(10.0)
-        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-        .open_memory((std::env::var_os("DRIFT_DEMO_EMOJI").is_some() && !reply).then_some(egui::SetOpenCommand::Bool(true)))
-        .show(|ui| {
-            ui.spacing_mut().item_spacing = vec2(2.0, 2.0);
-            egui::Grid::new("emoji-picker").spacing(vec2(2.0, 2.0)).show(ui, |ui| {
-                for (i, (key, ch)) in crate::model::emoji::PICKER.iter().enumerate() {
-                    let button = match ws.pictures.get(&Picture::Emoji(key.to_string())) {
-                        Some(texture) => egui::Button::image(egui::Image::new((texture, vec2(26.0, 26.0)))),
-                        None => egui::Button::new(RichText::new(*ch).size(20.0)),
-                    };
-                    if ui.add(button.frame(false).min_size(vec2(36.0, 36.0))).on_hover_text(*key).clicked() {
-                        emoji = Some(*ch);
-                    }
-                    if i % 8 == 7 {
-                        ui.end_row();
-                    }
+    let mut picker =
+        egui::Popup::menu(&smile).align(egui::RectAlign::TOP_END).gap(10.0).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
+    // DRIFT_DEMO_EMOJI: the picker open. (Only then: setting it replaces the click that opens it.)
+    if std::env::var_os("DRIFT_DEMO_EMOJI").is_some() && !reply {
+        picker = picker.open_memory(egui::SetOpenCommand::Bool(true));
+    }
+    picker.show(|ui| {
+        ui.spacing_mut().item_spacing = vec2(2.0, 2.0);
+        egui::Grid::new("emoji-picker").spacing(vec2(2.0, 2.0)).show(ui, |ui| {
+            for (i, (key, ch)) in crate::model::emoji::PICKER.iter().enumerate() {
+                let button = match ws.pictures.get(&Picture::Emoji(key.to_string())) {
+                    Some(texture) => egui::Button::image(egui::Image::new((texture, vec2(26.0, 26.0)))),
+                    None => egui::Button::new(RichText::new(*ch).size(20.0)),
+                };
+                if ui.add(button.frame(false).min_size(vec2(36.0, 36.0))).on_hover_text(*key).clicked() {
+                    emoji = Some(*ch);
                 }
-            });
+                if i % 8 == 7 {
+                    ui.end_row();
+                }
+            }
         });
+    });
     if let Some(ch) = emoji {
         ws.draft_mut(reply).push_str(ch);
         set_cursor_to_end(ui, id, ws.draft(reply));
@@ -1033,7 +1037,13 @@ pub fn composer(ui: &mut Ui, ws: &mut Workspace, rect: Rect, hint: &str, reply: 
     }
     if response.has_focus() || has_text {
         let tip = "**bold**  *italic*  ~~strike~~  `code`  > quote  - list";
-        ui.painter().text(pos2(inner.left() + 16.0, inner.bottom() + BELOW / 2.0 + 1.0), egui::Align2::LEFT_CENTER, tip, ty::meta(), p.faint);
+        ui.painter().text(
+            pos2(inner.left() + 16.0, inner.bottom() + BELOW / 2.0 + 1.0),
+            egui::Align2::LEFT_CENTER,
+            tip,
+            ty::meta(),
+            p.faint,
+        );
     }
     let click = ui.interact(send_rect, ui.scope_id().with(("send", reply)), Sense::click());
     let fill = if has_text && !sending { p.accent_fill } else { p.border };
