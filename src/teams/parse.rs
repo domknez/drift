@@ -54,33 +54,33 @@ pub fn teams(roster: &Value) -> Vec<Team> {
 
 /// The chats from the aggregator's roster: hidden ones left out, newest first.
 /// Chats without a title are named by `name_of(member ids)` later.
-pub fn chats(roster: &Value) -> Vec<(Conversation, Vec<String>)> {
-    let mut chats: Vec<(Conversation, Vec<String>)> = roster["chats"]
+/// Per-chat extras the chat service doesn't give: who's in it (for naming 1:1s and
+/// drawing their pictures), a group's title, whether it's a favourite or muted.
+pub struct RosterChat {
+    pub members: Vec<String>,
+    pub title: String,
+    pub favorite: bool,
+    pub muted: bool,
+}
+
+/// The roster's chats by id (the chat service lists the chats; this names them).
+pub fn roster_chats(roster: &Value) -> std::collections::HashMap<String, RosterChat> {
+    roster["chats"]
         .as_array()
         .into_iter()
         .flatten()
-        .filter(|c| !c["hidden"].as_bool().unwrap_or(false))
         .filter_map(|c| {
             let id = str_of(c, &["id"])?.to_string();
-            // Recurring chats carry meeting details too; only the type tells a meeting's chat.
-            let meeting = [c["chatType"].as_str(), c["threadType"].as_str()].contains(&Some("meeting"));
             let members = c["members"].as_array().into_iter().flatten().filter_map(|m| m["mri"].as_str().map(str::to_string)).collect();
-            let conversation = Conversation {
-                id,
-                kind: if meeting { Kind::Meeting } else { Kind::Chat },
+            let extra = RosterChat {
+                members,
                 title: str_of(c, &["title"]).unwrap_or("").to_string(),
-                last: preview(&c["lastMessage"]),
-                unread: !c["isRead"].as_bool().unwrap_or(true),
-                pinned: c["isSticky"].as_bool().unwrap_or(false),
+                favorite: c["isFavorite"].as_bool().unwrap_or(false) || c["isSticky"].as_bool().unwrap_or(false),
                 muted: c["isMuted"].as_bool().unwrap_or(false),
-                join_url: str_of(&c["meetingInformation"], &["meetingJoinUrl"]).map(str::to_string),
-                picture: None,
             };
-            Some((conversation, members))
+            Some((id, extra))
         })
-        .collect();
-    chats.sort_by_key(|(c, _)| std::cmp::Reverse(c.last.as_ref().map_or(0, |p| p.at)));
-    chats
+        .collect()
 }
 
 /// The chat service's conversation list: what's unread and the newest message, by id.
@@ -92,26 +92,40 @@ pub fn conversations(v: &Value) -> Vec<Conversation> {
         .filter_map(|c| {
             let id = str_of(c, &["id"])?.to_string();
             let props = &c["threadProperties"];
-            let kind = match props["threadType"].as_str() {
-                Some("topic" | "space") => Kind::Channel,
-                Some("meeting") => Kind::Meeting,
-                Some(t) if t.starts_with("streamof") => Kind::Feed,
-                _ if id.starts_with("48:") => Kind::Feed,
-                _ => Kind::Chat,
+            let cprops = &c["properties"];
+            // productThreadType is the clearest signal; fall back to threadType.
+            let kind = match props["productThreadType"].as_str() {
+                Some("OneToOneChat" | "Chat") => Kind::Chat,
+                Some("Meeting") => Kind::Meeting,
+                Some(t) if t.starts_with("Teams") => Kind::Channel,
+                Some(t) if t.starts_with("StreamOf") => Kind::Feed,
+                _ => match props["threadType"].as_str() {
+                    Some("topic" | "space") => Kind::Channel,
+                    Some("meeting") => Kind::Meeting,
+                    Some(t) if t.starts_with("streamof") => Kind::Feed,
+                    _ if id.starts_with("48:") => Kind::Feed,
+                    _ => Kind::Chat,
+                },
             };
             let last = preview(&c["lastMessage"]);
-            let read_up_to = c["properties"]["consumptionhorizon"].as_str().and_then(|h| h.split(';').next()?.parse::<i64>().ok());
+            let read_up_to = cprops["consumptionhorizon"].as_str().and_then(|h| h.split(';').next()?.parse::<i64>().ok());
             let last_id = c["lastMessage"]["id"].as_str().and_then(|i| i.parse::<i64>().ok());
             let unread = matches!((last_id, read_up_to), (Some(l), Some(r)) if l > r);
+            // properties come as strings in this view ("true"/"false").
+            let flag = |v: &Value, k: &str| v[k].as_str() == Some("true") || v[k].as_bool() == Some(true);
+            let join_url = embedded(&props["meetingInfo"])["meetingJoinUrl"]
+                .as_str()
+                .or(embedded(&cprops["meetingInfo"])["meetingJoinUrl"].as_str())
+                .map(str::to_string);
             Some(Conversation {
                 id,
                 kind,
                 title: str_of(props, &["topic"]).unwrap_or("").to_string(),
                 last,
                 unread,
-                pinned: false,
-                muted: false,
-                join_url: None,
+                pinned: flag(cprops, "favorite"),
+                muted: cprops["alerts"].as_str().is_some_and(|a| a.eq_ignore_ascii_case("mute")),
+                join_url,
                 picture: None,
             })
         })
@@ -271,30 +285,28 @@ mod tests {
     }
 
     #[test]
-    fn reads_chats_newest_first() {
+    fn roster_names_and_members() {
         let roster = json!({"chats": [
-            {"id": "19:old", "title": "Release crew", "isRead": true, "lastMessage": {"composeTime": "2026-10-28T09:00:00Z", "content": "cut at 15:00", "imDisplayName": "Priya"}},
-            {"id": "19:new", "isRead": false, "members": [{"mri": ME}, {"mri": "8:orgid:maya"}], "lastMessage": {"composeTime": "2026-10-30T09:00:00Z", "messageType": "RichText/Html", "content": "<p>lunch?</p>"}},
-            {"id": "19:meet", "chatType": "meeting", "title": "Stand-up"},
-            {"id": "19:hidden", "hidden": true}]});
-        let chats = chats(&roster);
-        assert_eq!(chats.iter().map(|(c, _)| c.id.as_str()).collect::<Vec<_>>(), ["19:new", "19:old", "19:meet"]);
-        assert!(chats[0].0.unread && !chats[1].0.unread);
-        assert_eq!(chats[0].0.last.as_ref().unwrap().text, "lunch?");
-        assert_eq!(chats[0].1, [ME, "8:orgid:maya"]);
-        assert_eq!(chats[2].0.kind, Kind::Meeting);
+            {"id": "19:a", "title": "Release crew", "isFavorite": true, "members": [{"mri": ME}, {"mri": "8:orgid:maya"}]},
+            {"id": "19:b", "isMuted": true, "members": [{"mri": ME}, {"mri": "8:orgid:tom"}]}]});
+        let map = roster_chats(&roster);
+        assert_eq!(map["19:a"].title, "Release crew");
+        assert!(map["19:a"].favorite && map["19:b"].muted);
+        assert_eq!(map["19:b"].members, [ME, "8:orgid:tom"]);
     }
 
     #[test]
-    fn tells_unread_from_the_horizon() {
+    fn classifies_and_tells_unread() {
         let v = json!({"conversations": [
-            {"id": "19:x@thread.tacv2", "threadProperties": {"threadType": "topic", "topic": "PR Reviews"}, "properties": {"consumptionhorizon": "100;100;100"}, "lastMessage": {"id": "200", "composetime": "2026-10-30T09:00:00Z"}},
-            {"id": "19:y@thread.v2", "properties": {"consumptionhorizon": "300;300;300"}, "lastMessage": {"id": "200"}},
-            {"id": "48:mentions", "threadProperties": {"threadType": "streamofmentions"}}]});
+            {"id": "19:x@thread.tacv2", "threadProperties": {"productThreadType": "TeamsStandardChannel", "topic": "PR Reviews"}, "properties": {"consumptionhorizon": "100;100;100", "favorite": "true"}, "lastMessage": {"id": "200", "composetime": "2026-10-30T09:00:00Z"}},
+            {"id": "19:y", "threadProperties": {"productThreadType": "OneToOneChat"}, "properties": {"consumptionhorizon": "300;300;300"}, "lastMessage": {"id": "200"}},
+            {"id": "19:m", "threadProperties": {"productThreadType": "Meeting", "meetingInfo": "{\"meetingJoinUrl\":\"https://teams/x\"}"}},
+            {"id": "48:mentions", "threadProperties": {"productThreadType": "StreamOfMentions"}}]});
         let c = conversations(&v);
-        assert_eq!((c[0].kind, c[0].unread, c[0].title.as_str()), (Kind::Channel, true, "PR Reviews"));
+        assert_eq!((c[0].kind, c[0].unread, c[0].title.as_str(), c[0].pinned), (Kind::Channel, true, "PR Reviews", true));
         assert_eq!((c[1].kind, c[1].unread), (Kind::Chat, false));
-        assert_eq!(c[2].kind, Kind::Feed);
+        assert_eq!((c[2].kind, c[2].join_url.as_deref()), (Kind::Meeting, Some("https://teams/x")));
+        assert_eq!(c[3].kind, Kind::Feed);
     }
 
     #[test]

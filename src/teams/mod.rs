@@ -122,6 +122,48 @@ impl Teams {
         let roster = self.roster()?;
         let list = self.chat_service(&format!("/v1/users/ME/conversations?view=msnp24Equivalent&pageSize=500&startTime=0&{TARGETS}"))?;
         let mut out = format!("== roster\n{}\n== conversations\n{}", shape::describe(&roster, 7), shape::describe(&list, 6));
+        // Counts only, to see how chats and channels divide up (no names or text).
+        {
+            use std::collections::BTreeMap;
+            let count = |v: &serde_json::Value, path: &[&str]| -> BTreeMap<String, usize> {
+                let mut by: BTreeMap<String, usize> = BTreeMap::new();
+                for item in v.as_array().into_iter().flatten() {
+                    let key = path
+                        .iter()
+                        .find_map(|k| item.get(*k).or_else(|| item["threadProperties"].get(*k)).and_then(|x| x.as_str()))
+                        .unwrap_or("(none)");
+                    *by.entry(key.to_string()).or_default() += 1;
+                }
+                by
+            };
+            out.push_str(&format!(
+                "== roster has chats array: {}, {} entries\n",
+                roster.get("chats").is_some_and(|c| c.is_array()),
+                roster["chats"].as_array().map_or(0, |a| a.len())
+            ));
+            out.push_str(&format!("== roster chats by threadType: {:?}\n", count(&roster["chats"], &["threadType"])));
+            out.push_str(&format!("== listed by productThreadType: {:?}\n", count(&list["conversations"], &["productThreadType"])));
+            let with_members =
+                roster["chats"].as_array().map_or(0, |a| a.iter().filter(|c| c["members"].as_array().map_or(0, |m| m.len()) > 0).count());
+            out.push_str(&format!("== roster chats with members: {with_members}\n"));
+            let listed_ids: std::collections::HashSet<&str> =
+                list["conversations"].as_array().into_iter().flatten().filter_map(|c| c["id"].as_str()).collect();
+            let roster_ids: std::collections::HashSet<&str> =
+                roster["chats"].as_array().into_iter().flatten().filter_map(|c| c["id"].as_str()).collect();
+            out.push_str(&format!("== listed only (not in roster chats): {}\n", listed_ids.difference(&roster_ids).count()));
+        }
+        if let Ok(dir) = self.directory() {
+            use std::collections::BTreeMap;
+            let mut by: BTreeMap<String, usize> = BTreeMap::new();
+            let mut untitled = 0;
+            for c in &dir.conversations {
+                *by.entry(format!("{:?}", c.kind)).or_default() += 1;
+                if c.title.trim().is_empty() {
+                    untitled += 1;
+                }
+            }
+            out.push_str(&format!("== directory: {} teams, conversations by kind {by:?}, untitled {untitled}\n", dir.teams.len()));
+        }
         let me = Picture::Person { id: self.my_id(), name: Backend::me(self) };
         match self.picture(&me) {
             Ok(bytes) => out.push_str(&format!("== own picture: {} bytes, starts {:02x?}\n", bytes.len(), &bytes[..bytes.len().min(4)])),
@@ -165,47 +207,59 @@ impl Backend for Teams {
         );
         let teams = parse::teams(&roster);
         let me = self.my_id();
+        let channel_ids: std::collections::HashSet<&str> = teams.iter().flat_map(|t| t.channels.iter().map(|c| c.id.as_str())).collect();
 
-        // Chats from the aggregator, which knows their members; what the chat service
-        // knows (unread, newest message) on top.
-        let by_id: HashMap<&str, &Conversation> = listed.iter().map(|c| (c.id.as_str(), c)).collect();
-        let mut chats = parse::chats(&roster);
-        if chats.is_empty() {
-            chats = listed.iter().filter(|c| matches!(c.kind, Kind::Chat | Kind::Meeting)).map(|c| (c.clone(), Vec::new())).collect();
-        }
-        let others: Vec<String> = chats.iter().flat_map(|(_, m)| m.iter()).filter(|m| **m != me).cloned().collect();
-        let names = self.names_of(&others);
-        let mut conversations: Vec<Conversation> = chats
+        // The chat service lists every conversation, newest first, as Teams itself
+        // shows them. The roster names the chats and says who's in them.
+        let roster_chats = parse::roster_chats(&roster);
+        let member_ids: Vec<String> = roster_chats
+            .values()
+            .flat_map(|c| c.members.iter())
+            .filter(|m| **m != me)
+            .cloned()
+            .collect::<std::collections::HashSet<_>>()
             .into_iter()
-            .map(|(mut c, members)| {
-                if let Some(known) = by_id.get(c.id.as_str()) {
-                    c.unread |= known.unread;
-                    if known.last.as_ref().map(|l| l.at) > c.last.as_ref().map(|l| l.at) {
-                        c.last = known.last.clone();
+            .collect();
+        let names = self.names_of(&member_ids);
+
+        // Channels' fresh state (newest message, unread) from the chat service, by id.
+        let channel_state: std::collections::HashMap<String, (Option<crate::model::Preview>, bool)> = listed
+            .iter()
+            .filter(|c| c.kind == Kind::Channel || channel_ids.contains(c.id.as_str()))
+            .map(|c| (c.id.clone(), (c.last.clone(), c.unread)))
+            .collect();
+
+        let mut conversations: Vec<Conversation> = listed
+            .into_iter()
+            .filter(|c| matches!(c.kind, Kind::Chat | Kind::Meeting) && !channel_ids.contains(c.id.as_str()))
+            .map(|mut c| {
+                let roster = roster_chats.get(&c.id);
+                let members: &[String] = roster.map(|r| r.members.as_slice()).unwrap_or(&[]);
+                if let Some(r) = roster {
+                    c.pinned |= r.favorite;
+                    c.muted |= r.muted;
+                    if c.title.is_empty() {
+                        c.title = r.title.clone();
                     }
                 }
                 if c.title.is_empty() {
-                    c.title = chat_title(&members, &me, &names, &c);
+                    c.title = chat_title(members, &me, &names, &c);
                 }
-                c.picture = chat_picture(&members, &me, &names);
+                c.picture = chat_picture(members, &me, &names);
                 c
             })
             .collect();
 
-        // Channels: what the roster says, the chat service's newest message if newer.
+        // Channels come from the roster's teams; the chat service says what's new.
         for team in &teams {
             for channel in &team.channels {
-                let known = by_id.get(channel.id.as_str());
-                let last = match (channel.last.clone(), known.and_then(|k| k.last.clone())) {
-                    (Some(a), Some(b)) => Some(if b.at > a.at { b } else { a }),
-                    (a, b) => a.or(b),
-                };
+                let (last, unread) = channel_state.get(&channel.id).cloned().unwrap_or((channel.last.clone(), channel.unread));
                 conversations.push(Conversation {
                     id: channel.id.clone(),
                     kind: Kind::Channel,
                     title: channel.name.clone(),
-                    last,
-                    unread: channel.unread || known.is_some_and(|k| k.unread),
+                    last: last.or_else(|| channel.last.clone()),
+                    unread: unread || channel.unread,
                     pinned: channel.pinned,
                     muted: channel.muted,
                     join_url: None,
@@ -216,7 +270,6 @@ impl Backend for Teams {
         conversations.sort_by_key(|c| std::cmp::Reverse(c.last.as_ref().map_or(0, |l| l.at)));
         Ok(Directory { teams, conversations })
     }
-
     fn messages(&self, conversation: &str) -> Result<Vec<Message>> {
         let path = format!(
             "/v1/users/ME/conversations/{}/messages?view=msnp24Equivalent|supportsMessageProperties&pageSize={PAGE}&startTime=1",

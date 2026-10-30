@@ -20,12 +20,14 @@ pub fn install_fonts(ctx: &egui::Context) {
         ("GeistMono", include_bytes!("../../../assets/fonts/GeistMono-Regular.ttf")),
         // Wider coverage (accents, symbols) where Geist has no glyph.
         ("Inter", include_bytes!("../../../assets/fonts/Inter-Regular.ttf")),
+        // Monochrome emoji (egui can't paint colour fonts): reactions, message emoji.
+        ("Emoji", include_bytes!("../../../assets/fonts/NotoEmoji-Regular.ttf")),
     ] {
         fonts.font_data.insert(name.into(), Arc::new(FontData::from_static(bytes)));
     }
-    // egui's own fonts stay last in every chain: they carry the emoji.
+    // egui's own fonts stay last in every chain as a final fallback.
     let fallbacks = fonts.families.get(&FontFamily::Proportional).cloned().unwrap_or_default();
-    let chain = |first: &str| [vec![first.to_string(), "Inter".to_string()], fallbacks.clone()].concat();
+    let chain = |first: &str| [vec![first.to_string(), "Inter".to_string(), "Emoji".to_string()], fallbacks.clone()].concat();
     fonts.families.insert(FontFamily::Proportional, chain("Geist"));
     fonts.families.insert(typography::medium(), chain("Geist-Medium"));
     fonts.families.insert(typography::semibold(), chain("Geist-SemiBold"));
