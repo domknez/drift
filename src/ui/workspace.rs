@@ -56,6 +56,9 @@ pub struct Workspace {
     pub error: Option<String>,
     /// Finding in the open conversation: what's typed (None while not finding).
     pub find: Option<String>,
+    /// Which of the found messages is shown (0 = the newest).
+    pub find_index: usize,
+    pub side: Side,
     /// What the search field holds: it narrows the list, and finds messages.
     pub filter: String,
     /// Messages found for a query, and the query.
@@ -91,6 +94,15 @@ pub enum Section {
     Chats,
     Teams,
     Meetings,
+}
+
+/// What the list panel shows: the list, what's found in the open conversation, or
+/// the people in it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Side {
+    List,
+    Found,
+    People,
 }
 
 /// The chip picked above the list of chats.
@@ -136,6 +148,8 @@ impl Workspace {
             messages_at: None,
             error: None,
             find: None,
+            find_index: 0,
+            side: Side::List,
             filter: String::new(),
             hits: None,
             hits_load: Load::Idle,
@@ -322,6 +336,50 @@ impl Workspace {
         self.focus_scrolled = false;
     }
 
+    /// The open conversation's messages that match what's being found, newest first.
+    pub fn found(&self) -> Vec<Message> {
+        let Some(query) = self.find.as_deref().map(str::trim).filter(|q| !q.is_empty()).map(str::to_lowercase) else { return Vec::new() };
+        self.messages
+            .iter()
+            .flatten()
+            .rev()
+            .filter(|m| text::flatten(&m.body).to_lowercase().contains(&query) || m.author.name.to_lowercase().contains(&query))
+            .cloned()
+            .collect()
+    }
+
+    /// Start finding in the open conversation; the list panel shows what's found.
+    pub fn start_find(&mut self) {
+        self.find = Some(String::new());
+        self.find_index = 0;
+        self.side = Side::Found;
+    }
+
+    pub fn stop_find(&mut self) {
+        self.find = None;
+        self.focus = None;
+        if self.side == Side::Found {
+            self.side = Side::List;
+        }
+    }
+
+    /// Show the found message `index` (wrapping around): marked and scrolled to.
+    pub fn show_found(&mut self, index: usize) {
+        let found = self.found();
+        if found.is_empty() {
+            self.focus = None;
+            return;
+        }
+        self.find_index = index % found.len();
+        let m = &found[self.find_index];
+        // A reply in a channel shows in its thread.
+        if m.root.is_some() && self.thread.as_ref() != m.root.as_ref() {
+            self.thread = m.root.clone();
+        }
+        self.focus = Some(m.id.clone());
+        self.focus_scrolled = false;
+    }
+
     /// Search messages for what's in the search field now.
     pub fn search(&mut self, ctx: &egui::Context) {
         let query = self.filter.trim().to_string();
@@ -436,6 +494,10 @@ impl Workspace {
                     self.messages = Some(messages);
                     self.error = None;
                     self.mark_read(ctx);
+                    // Finding while the messages came in: show the newest match.
+                    if self.side == Side::Found && self.focus.is_none() && self.find.as_deref().is_some_and(|q| !q.trim().is_empty()) {
+                        self.show_found(0);
+                    }
                 }
                 Ok(_) => {}
                 Err(Error::SignedOut) => return Some(Outcome::SignedOut),
@@ -488,6 +550,7 @@ impl Workspace {
         self.thread = None;
         self.focus = None;
         self.find = None;
+        self.side = Side::List;
         self.draft.clear();
         self.reply_draft.clear();
         self.quoting = None;

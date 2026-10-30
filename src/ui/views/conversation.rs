@@ -7,7 +7,7 @@ use crate::ui::pictures::Pictures;
 use crate::ui::style::icons::{self, Icon};
 use crate::ui::style::{colors, metrics, typography as ty};
 use crate::ui::widgets;
-use crate::ui::workspace::Workspace;
+use crate::ui::workspace::{Side, Workspace};
 use eframe::egui::{self, Align, CornerRadius, Frame, Layout, Margin, Rect, RichText, Sense, Stroke, Ui, pos2, vec2};
 use std::collections::HashMap;
 
@@ -100,20 +100,9 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace) {
             page.vertical_centered(|ui| ui.spinner());
         }
         Some(messages) => {
-            // Finding: only the messages that match (replies too, one under another).
-            let query = ws.find.as_deref().map(str::trim).filter(|q| !q.is_empty()).map(str::to_lowercase);
-            let (messages, is_channel) = match &query {
-                Some(q) => (
-                    messages
-                        .into_iter()
-                        .filter(|m| {
-                            text::flatten(&m.body).to_lowercase().contains(q.as_str()) || m.author.name.to_lowercase().contains(q.as_str())
-                        })
-                        .collect::<Vec<_>>(),
-                    false,
-                ),
-                None => (messages, is_channel),
-            };
+            // Finding: the matches are marked in the text (the list panel lists them).
+            let query = ws.find.as_deref().map(str::trim).filter(|q| !q.is_empty()).map(str::to_string);
+            widgets::set_highlight(query.clone());
             let me = ws.me_id.clone();
             let open_thread = ws.thread.clone();
             let focus = ws.focus.clone();
@@ -124,16 +113,7 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace) {
                 |ui| {
                     Frame::new().inner_margin(Margin::symmetric(metrics::PAGE_PAD as i8, 10)).show(ui, |ui| {
                         ui.set_width(ui.available_width());
-                        if let Some(q) = &query {
-                            let label = match messages.len() {
-                                0 => format!("Nothing matches “{q}” in the loaded messages."),
-                                1 => "1 message matches.".to_string(),
-                                n => format!("{n} messages match."),
-                            };
-                            ui.add_space(6.0);
-                            ui.vertical_centered(|ui| ui.label(RichText::new(label).font(ty::small()).color(p.faint)));
-                        }
-                        if messages.is_empty() && query.is_none() {
+                        if messages.is_empty() {
                             ui.add_space(30.0);
                             ui.vertical_centered(|ui| {
                                 ui.label(RichText::new("No messages yet. Say hello.").font(ty::body()).color(p.faint))
@@ -220,22 +200,23 @@ fn head(ui: &mut Ui, ws: &mut Workspace, rect: Rect, directory: &Directory, id: 
     {
         ui.ctx().open_url(egui::OpenUrl::new_tab(url));
     }
-    let members = square(ui, Icon::Members, "People here");
-    people_menu(ws, &members, directory, id);
-    let finding = ws.find.is_some();
+    if square(ui, Icon::Members, "People here").clicked() {
+        ws.side = if ws.side == Side::People { Side::List } else { Side::People };
+    }
     if square(ui, Icon::Search, "Find in this conversation (⌘F)").clicked()
         || ui.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::F)))
     {
-        if finding {
-            ws.find = None;
+        if ws.find.is_some() {
+            ws.stop_find();
         } else {
-            ws.find = Some(String::new());
+            ws.start_find();
             ui.memory_mut(|m| m.request_focus(find_id()));
         }
     }
-    // The find field, left of the buttons, while finding.
-    if let Some(query) = ws.find.as_mut() {
-        let field = Rect::from_min_size(pos2(x - 250.0, rect.center().y - 17.0), vec2(250.0, 34.0));
+    // The find field, left of the buttons, while finding: what's typed, which match
+    // is shown of how many, and ↑ ↓ to go between them (also Shift+Enter / Enter).
+    if ws.find.is_some() {
+        let field = Rect::from_min_size(pos2(x - 300.0, rect.center().y - 17.0), vec2(300.0, 34.0));
         x = field.left() - 8.0;
         ui.painter().rect(field, CornerRadius::same(10), p.surface, Stroke::new(1.5, p.accent_fill), egui::StrokeKind::Inside);
         icons::paint(
@@ -244,12 +225,33 @@ fn head(ui: &mut Ui, ws: &mut Workspace, rect: Rect, directory: &Directory, id: 
             Icon::Search,
             p.accent,
         );
+        let count = ws.found().len();
+        let typed = ws.find.as_deref().is_some_and(|q| !q.trim().is_empty());
+        // ↑ ↓ on the right, the count left of them.
+        let mut step = 0i32;
+        for (k, icon, tip) in [(0, Icon::ChevronDown, "Older match (Enter)"), (1, Icon::ChevronUp, "Newer match (Shift+Enter)")] {
+            let r = Rect::from_center_size(pos2(field.right() - 16.0 - 26.0 * k as f32, field.center().y), vec2(24.0, 24.0));
+            let b = ui.interact(r, ui.scope_id().with(("find-step", k)), Sense::click()).on_hover_text(tip);
+            if b.hovered() && count > 0 {
+                ui.painter().rect_filled(r, CornerRadius::same(6), p.hover);
+            }
+            icons::paint(ui.painter(), Rect::from_center_size(r.center(), vec2(13.0, 13.0)), icon, if count > 0 { p.dim } else { p.faint });
+            if b.clicked() && count > 0 {
+                step = if k == 0 { 1 } else { -1 };
+            }
+        }
+        if typed {
+            let label = if count == 0 { "No matches".to_string() } else { format!("{} of {count}", ws.find_index + 1) };
+            let color = if count == 0 { p.danger } else { p.faint };
+            ui.painter().text(pos2(field.right() - 62.0, field.center().y), egui::Align2::RIGHT_CENTER, label, ty::meta(), color);
+        }
         let line = ui.painter().layout_no_wrap("Ag".into(), ty::small(), p.text).size().y;
         let text = Rect::from_min_max(
             pos2(field.left() + 32.0, field.center().y - line / 2.0),
-            pos2(field.right() - 10.0, field.center().y + line / 2.0),
+            pos2(field.right() - 130.0, field.center().y + line / 2.0),
         );
         let mut c = ui.new_child(egui::UiBuilder::new().max_rect(text));
+        let query = ws.find.get_or_insert_default();
         let response = c.add(
             egui::TextEdit::singleline(query)
                 .id(find_id())
@@ -259,8 +261,18 @@ fn head(ui: &mut Ui, ws: &mut Workspace, rect: Rect, directory: &Directory, id: 
                 .margin(Margin::ZERO)
                 .desired_width(f32::INFINITY),
         );
+        if response.changed() {
+            ws.show_found(0);
+        }
+        if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+            step = if ui.input(|i| i.modifiers.shift) { -1 } else { 1 };
+            response.request_focus();
+        }
+        if step != 0 && count > 0 {
+            ws.show_found((ws.find_index as i64 + i64::from(step)).rem_euclid(count as i64) as usize);
+        }
         if response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-            ws.find = None;
+            ws.stop_find();
         }
     }
     if let Some(error) = &ws.error {
@@ -272,63 +284,6 @@ fn head(ui: &mut Ui, ws: &mut Workspace, rect: Rect, directory: &Directory, id: 
 
 fn find_id() -> egui::Id {
     egui::Id::unique("find")
-}
-
-/// The people in the conversation (a chat's members; in a channel, who wrote in it);
-/// clicking one opens your chat with them.
-fn people_menu(ws: &mut Workspace, button: &egui::Response, directory: &Directory, id: &str) {
-    let p = colors();
-    let mut people: Vec<crate::model::Mention> = directory.conversation(id).map(|c| c.members.clone()).unwrap_or_default();
-    if people.is_empty() {
-        for m in ws.messages.iter().flatten().rev() {
-            if m.author.id.starts_with("8:") && m.author.id != ws.me_id && !people.iter().any(|x| x.id == m.author.id) {
-                people.push(crate::model::Mention { id: m.author.id.clone(), name: m.author.name.clone() });
-            }
-        }
-    }
-    let mut open = None;
-    let demo = std::env::var_os("DRIFT_DEMO_PEOPLE").is_some().then_some(egui::SetOpenCommand::Bool(true));
-    egui::Popup::menu(button).align(egui::RectAlign::BOTTOM_END).gap(8.0).width(260.0).open_memory(demo).show(|ui| {
-        ui.set_min_width(240.0);
-        let title = if directory.channel(id).is_some() { "Who's written here" } else { "In this chat" };
-        ui.label(RichText::new(title).font(ty::meta()).color(p.faint));
-        if people.is_empty() {
-            ui.label(RichText::new("Nobody yet.").font(ty::small()).color(p.dim));
-        }
-        let mut rows = |ui: &mut Ui| {
-            for person in &people {
-                let chat = directory
-                    .conversations
-                    .iter()
-                    .find(|c| matches!(&c.picture, Some(crate::model::Picture::Person { id, .. }) if *id == person.id));
-                let (r, click) = ui.allocate_exact_size(vec2(ui.available_width(), 34.0), Sense::click());
-                if click.hovered() && chat.is_some() {
-                    ui.painter().rect_filled(r, CornerRadius::same(8), p.hover);
-                }
-                let picture = ws.pictures.get(&Picture::Person { id: person.id.clone(), name: person.name.clone() });
-                let mut c =
-                    ui.new_child(egui::UiBuilder::new().max_rect(r.shrink2(vec2(6.0, 0.0))).layout(Layout::left_to_right(Align::Center)));
-                widgets::avatar(&mut c, &person.id, &person.name, 24.0, picture);
-                c.add_space(4.0);
-                c.label(RichText::new(&person.name).font(ty::small_strong()).color(p.text));
-                if let Some(chat) = chat {
-                    let click = click.on_hover_text("Open your chat").on_hover_cursor(egui::CursorIcon::PointingHand);
-                    if click.clicked() {
-                        open = Some(chat.id.clone());
-                    }
-                }
-            }
-        };
-        // A long list scrolls; a short one is shown whole.
-        if people.len() > 8 {
-            egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| rows(ui));
-        } else {
-            rows(ui);
-        }
-    });
-    if let Some(chat) = open {
-        ws.open(&chat);
-    }
 }
 
 fn empty(ui: &mut Ui, loaded: bool) {

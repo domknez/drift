@@ -42,8 +42,11 @@ Sibling of [dust](https://github.com/domknez/dust) (music) and
 - **Search:** typing in the search field narrows the list to names, and after a moment
   finds messages too (in all your chats and channels, as Teams' search does), with
   what you typed marked; a click opens that message. ⌘K jumps to it
-- **In a conversation:** find in its messages (⌘F), see who's in it (or who wrote in a
-  channel) and open your chat with them, pick an emoji from Teams' own set
+- **In a conversation:** find in its messages (⌘F): every match marked, the list of
+  them beside the conversation, ↑ ↓ (or Enter, Shift+Enter) to go from one to the
+  next; see who's in it (or who wrote in a channel) and open your chat with them; pick
+  an emoji from Teams' own set; attach pictures (or drop them on the window)
+- **Pictures** in messages, and a tenant's own emoji in reactions
 - **Activity:** who mentioned you or replied, what they wrote and where; a click
   opens that very message, marked (in its thread if it's a reply)
 - **Pin and unpin** chats and channels from their right-click menu

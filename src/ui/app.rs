@@ -88,7 +88,11 @@ impl App {
                 workspace.attach(false, path.rsplit('/').next().unwrap_or("picture.png"), bytes);
             }
             if let Ok(find) = std::env::var("DRIFT_DEMO_FIND") {
+                workspace.start_find();
                 workspace.find = Some(find);
+            }
+            if std::env::var_os("DRIFT_DEMO_PEOPLE").is_some() {
+                workspace.side = crate::ui::workspace::Side::People;
             }
             if let Ok(filter) = std::env::var("DRIFT_DEMO_FILTER") {
                 workspace.filter = filter;

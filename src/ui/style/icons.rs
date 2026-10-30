@@ -9,6 +9,7 @@ pub enum Icon {
     /// A channel.
     Hash,
     ChevronDown,
+    ChevronUp,
     ChevronRight,
     /// A calendar page: meetings.
     Calendar,
@@ -59,6 +60,9 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
         }
         Icon::ChevronDown => {
             line(&[(7.0, 10.0), (12.0, 15.0), (17.0, 10.0)]);
+        }
+        Icon::ChevronUp => {
+            line(&[(7.0, 14.0), (12.0, 9.0), (17.0, 14.0)]);
         }
         Icon::ChevronRight => {
             line(&[(10.0, 7.0), (15.0, 12.0), (10.0, 17.0)]);

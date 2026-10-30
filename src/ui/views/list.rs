@@ -6,7 +6,7 @@ use crate::model::{Conversation, Directory, Kind, Message, Picture, time};
 use crate::ui::style::icons::{self, Icon};
 use crate::ui::style::{colors, metrics, typography as ty};
 use crate::ui::widgets;
-use crate::ui::workspace::{Chip, Section, Workspace};
+use crate::ui::workspace::{Chip, Section, Side, Workspace};
 use eframe::egui::{self, Align, Align2, CornerRadius, Layout, Rect, RichText, Sense, TextureId, Ui, pos2, vec2};
 
 /// Meeting chats listed under Recent (the newest); the Meetings tab has them all.
@@ -24,6 +24,11 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace) {
         });
         return;
     };
+    match ws.side {
+        Side::Found => return found_panel(ui, ws, &directory, full),
+        Side::People => return people_panel(ui, ws, &directory, full),
+        Side::List => {}
+    }
     let mut top = full.top() + 14.0;
     if ws.section == Section::Chats {
         chips(ui, ws, pos2(full.left() + 14.0, top));
@@ -50,6 +55,122 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace) {
             Section::Teams => teams(ui, ws, &directory),
             Section::Meetings => meetings(ui, ws, &directory),
             Section::Activity => activity(ui, ws, &directory),
+        }
+        ui.add_space(10.0);
+    });
+}
+
+/// A panel's title with a × that goes back to the list.
+fn panel_head(ui: &mut Ui, ws: &mut Workspace, full: Rect, title: &str, subtitle: &str) -> f32 {
+    let p = colors();
+    let head = Rect::from_min_size(pos2(full.left() + 18.0, full.top() + 12.0), vec2(full.width() - 30.0, 40.0));
+    let mut h = ui.new_child(egui::UiBuilder::new().max_rect(head).layout(Layout::top_down(Align::Min)));
+    h.spacing_mut().item_spacing.y = 1.0;
+    h.label(RichText::new(title).font(ty::item()).color(p.text));
+    h.add(egui::Label::new(RichText::new(subtitle).font(ty::meta()).color(p.faint)).truncate());
+    let close = Rect::from_center_size(pos2(full.right() - 26.0, head.top() + 14.0), vec2(26.0, 26.0));
+    let response = ui.interact(close, ui.scope_id().with("panel-close"), Sense::click()).on_hover_text("Back to the list");
+    if response.hovered() {
+        ui.painter().rect_filled(close, CornerRadius::same(8), p.hover);
+    }
+    icons::paint(ui.painter(), Rect::from_center_size(close.center(), vec2(13.0, 13.0)), Icon::Close, p.dim);
+    if response.clicked() {
+        if ws.side == Side::Found {
+            ws.stop_find();
+        }
+        ws.side = Side::List;
+    }
+    head.bottom() + 10.0
+}
+
+/// What's found in the open conversation: each match with who, the text with the
+/// match marked, and when. A click shows it; the one shown is highlighted.
+fn found_panel(ui: &mut Ui, ws: &mut Workspace, d: &Directory, full: Rect) {
+    let p = colors();
+    let name = ws.open.as_deref().and_then(|id| d.conversation(id)).map_or(String::new(), |c| c.title.clone());
+    let found = ws.found();
+    let query = ws.find.clone().unwrap_or_default().trim().to_string();
+    let subtitle = match (query.is_empty(), found.len()) {
+        (true, _) => format!("in {name}"),
+        (false, 0) => format!("nothing for “{query}” in {name}"),
+        (false, 1) => format!("1 message in {name}"),
+        (false, n) => format!("{n} messages in {name}"),
+    };
+    let top = panel_head(ui, ws, full, "Found", &subtitle);
+    let area = Rect::from_min_max(pos2(full.left(), top), pos2(full.right(), full.bottom() - 6.0));
+    let mut body = ui.new_child(egui::UiBuilder::new().max_rect(area).layout(Layout::top_down(Align::Min)));
+    egui::ScrollArea::vertical().id_salt("found").auto_shrink([false, false]).show(&mut body, |ui| {
+        if query.is_empty() {
+            empty(ui, "Type above to find in this conversation.");
+        }
+        let mut show = None;
+        for (i, m) in found.iter().enumerate() {
+            let hit = crate::model::SearchHit {
+                conversation: String::new(),
+                message: m.id.clone(),
+                author: m.author.name.clone(),
+                at: m.at,
+                text: crate::model::text::flatten(&m.body),
+                place: String::new(),
+            };
+            if result_row(ui, &hit, &query, i == ws.find_index && ws.focus.as_deref() == Some(m.id.as_str())) {
+                show = Some(i);
+            }
+        }
+        if let Some(i) = show {
+            ws.show_found(i);
+        }
+        ui.add_space(10.0);
+    });
+    let _ = p;
+}
+
+/// The people in the open conversation (a chat's members; in a channel, who wrote in
+/// it). A click opens your chat with them.
+fn people_panel(ui: &mut Ui, ws: &mut Workspace, d: &Directory, full: Rect) {
+    let p = colors();
+    let id = ws.open.clone().unwrap_or_default();
+    let name = d.conversation(&id).map_or(String::new(), |c| c.title.clone());
+    let mut people: Vec<crate::model::Mention> = d.conversation(&id).map(|c| c.members.clone()).unwrap_or_default();
+    let channel = d.channel(&id).is_some();
+    if people.is_empty() {
+        for m in ws.messages.iter().flatten().rev() {
+            if m.author.id.starts_with("8:") && m.author.id != ws.me_id && !people.iter().any(|x| x.id == m.author.id) {
+                people.push(crate::model::Mention { id: m.author.id.clone(), name: m.author.name.clone() });
+            }
+        }
+    }
+    let subtitle = if channel { format!("who's written in {name}") } else { format!("in {name}") };
+    let top = panel_head(ui, ws, full, &format!("People · {}", people.len()), &subtitle);
+    let area = Rect::from_min_max(pos2(full.left(), top), pos2(full.right(), full.bottom() - 6.0));
+    let mut body = ui.new_child(egui::UiBuilder::new().max_rect(area).layout(Layout::top_down(Align::Min)));
+    egui::ScrollArea::vertical().id_salt("people").auto_shrink([false, false]).show(&mut body, |ui| {
+        if people.is_empty() {
+            empty(ui, "Nobody yet.");
+        }
+        for person in &people {
+            let chat = d
+                .conversations
+                .iter()
+                .find(|c| matches!(&c.picture, Some(Picture::Person { id, .. }) if *id == person.id))
+                .map(|c| c.id.clone());
+            let (outer, response) = ui.allocate_exact_size(vec2(ui.available_width(), 48.0), Sense::click());
+            let rect = Rect::from_min_size(outer.min + vec2(8.0, 1.0), vec2(outer.width() - 16.0, 46.0));
+            if response.hovered() && chat.is_some() {
+                ui.painter().rect_filled(rect, CornerRadius::same(12), p.hover);
+            }
+            let pic = Rect::from_min_size(pos2(rect.left() + 10.0, rect.center().y - 16.0), vec2(32.0, 32.0));
+            let picture = ws.pictures.get(&Picture::Person { id: person.id.clone(), name: person.name.clone() });
+            let mut c = ui.new_child(egui::UiBuilder::new().max_rect(pic));
+            widgets::avatar(&mut c, &person.id, &person.name, 32.0, picture);
+            ui.painter().text(pos2(pic.right() + 11.0, rect.center().y - 8.0), Align2::LEFT_CENTER, &person.name, ty::item(), p.text);
+            let hint = if chat.is_some() { "Open your chat" } else { "No chat with them yet" };
+            ui.painter().text(pos2(pic.right() + 11.0, rect.center().y + 9.0), Align2::LEFT_CENTER, hint, ty::meta(), p.faint);
+            if let Some(chat) = chat
+                && response.on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
+            {
+                ws.open(&chat);
+            }
         }
         ui.add_space(10.0);
     });
@@ -203,10 +324,18 @@ fn hits(ui: &mut Ui, ws: &mut Workspace) {
     ui.add_space(6.0);
 }
 
-/// A message found: who wrote it, the text with the query marked, where and when.
+/// A message found across conversations: a click opens it.
 fn hit_row(ui: &mut Ui, ws: &mut Workspace, hit: &crate::model::SearchHit, query: &str) {
-    let p = colors();
     let selected = ws.focus.as_deref() == Some(hit.message.as_str());
+    if result_row(ui, hit, query, selected) {
+        ws.open_message(&hit.conversation, Some(hit.message.clone()), None);
+    }
+}
+
+/// A found message: who wrote it, the text with the query marked, where and when.
+/// True when clicked.
+fn result_row(ui: &mut Ui, hit: &crate::model::SearchHit, query: &str, selected: bool) -> bool {
+    let p = colors();
     let (outer, response) = ui.allocate_exact_size(vec2(ui.available_width(), 66.0), Sense::click());
     let rect = Rect::from_min_size(outer.min + vec2(8.0, 1.0), vec2(outer.width() - 16.0, 64.0));
     if selected || response.hovered() {
@@ -240,9 +369,7 @@ fn hit_row(ui: &mut Ui, ws: &mut Workspace, hit: &crate::model::SearchHit, query
     if !hit.place.is_empty() {
         c.add(egui::Label::new(RichText::new(format!("in {}", hit.place)).font(ty::meta()).color(p.faint)).truncate().selectable(false));
     }
-    if response.clicked() {
-        ws.open_message(&hit.conversation, Some(hit.message.clone()), None);
-    }
+    response.on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
 }
 
 /// The activity feed: who mentioned or answered you, and where.

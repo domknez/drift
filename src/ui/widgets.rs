@@ -68,6 +68,45 @@ pub fn icon_button(ui: &mut Ui, icon: Icon, hint: &str) -> Response {
     response.on_hover_text(hint)
 }
 
+/// Found text: an amber mark with dark text, legible in both themes.
+const MARK: Color32 = Color32::from_rgb(0xff, 0xd2, 0x5e);
+const MARK_TEXT: Color32 = Color32::from_rgb(0x1d, 0x1b, 0x19);
+
+thread_local! {
+    /// What's being found in the open conversation: marked wherever it shows.
+    static HIGHLIGHT: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Mark `query` in message text drawn from now on (None: mark nothing).
+pub fn set_highlight(query: Option<String>) {
+    HIGHLIGHT.with(|h| *h.borrow_mut() = query.map(|q| q.to_lowercase()));
+}
+
+/// `text` cut where `query` occurs: (part, is a match).
+fn split_matches<'a>(text: &'a str, query: &str) -> Vec<(&'a str, bool)> {
+    if query.is_empty() {
+        return vec![(text, false)];
+    }
+    let lower = text.to_lowercase();
+    // Lowercasing can change byte lengths; mark only when it doesn't.
+    if lower.len() != text.len() {
+        return vec![(text, false)];
+    }
+    let mut parts = Vec::new();
+    let mut at = 0;
+    while let Some(found) = lower[at..].find(query).map(|f| f + at) {
+        if found > at {
+            parts.push((&text[at..found], false));
+        }
+        parts.push((&text[found..found + query.len()], true));
+        at = found + query.len();
+    }
+    if at < text.len() {
+        parts.push((&text[at..], false));
+    }
+    parts
+}
+
 /// A message's text: styled runs, wrapped to the width there is; links open.
 pub fn rich_text(ui: &mut Ui, pictures: &mut Pictures, body: &[Inline], color: Color32) {
     let p = colors();
@@ -108,7 +147,7 @@ pub fn rich_text(ui: &mut Ui, pictures: &mut Pictures, body: &[Inline], color: C
                     } else {
                         ty::body()
                     };
-                    let mut rich = RichText::new(text).font(font).color(if s.mention { p.accent } else { color });
+                    let mut rich = RichText::new(text).font(font.clone()).color(if s.mention { p.accent } else { color });
                     if s.italic {
                         rich = rich.italics();
                     }
@@ -121,11 +160,22 @@ pub fn rich_text(ui: &mut Ui, pictures: &mut Pictures, body: &[Inline], color: C
                     if s.code {
                         rich = rich.background_color(p.code);
                     }
-                    match &s.link {
-                        Some(url) => {
+                    let highlight = HIGHLIGHT.with(|h| h.borrow().clone());
+                    match (&s.link, highlight) {
+                        (Some(url), _) => {
                             ui.add(egui::Hyperlink::from_label_and_url(rich.color(p.accent), url));
                         }
-                        None => {
+                        (None, Some(query)) if text.to_lowercase().contains(&query) => {
+                            // The found text, marked; the rest as it is.
+                            for (part, hit) in split_matches(text, &query) {
+                                let mut piece = RichText::new(part).font(font.clone()).color(if hit { MARK_TEXT } else { color });
+                                if hit {
+                                    piece = piece.background_color(MARK);
+                                }
+                                ui.label(piece);
+                            }
+                        }
+                        (None, _) => {
                             ui.label(rich);
                         }
                     }
@@ -339,7 +389,16 @@ pub fn reactions(ui: &mut Ui, pictures: &mut Pictures, reactions: &[Reaction], r
 
 #[cfg(test)]
 mod tests {
-    use super::initials;
+    use super::{initials, split_matches};
+
+    #[test]
+    fn finds_matches_to_mark() {
+        assert_eq!(
+            split_matches("Release cut at 15:00, release!", "release"),
+            [("Release", true), (" cut at 15:00, ", false), ("release", true), ("!", false)]
+        );
+        assert_eq!(split_matches("nothing here", "zzz"), [("nothing here", false)]);
+    }
 
     #[test]
     fn makes_initials() {
