@@ -121,6 +121,9 @@ pub struct Message {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Source {
     pub conversation: ConversationId,
+    /// The message itself, and in a channel the post whose thread it's in.
+    pub message: Option<String>,
+    pub root: Option<String>,
     pub title: String,
     /// `mention`, `reply`, `reaction`, … as the service names it.
     pub what: String,

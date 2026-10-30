@@ -327,6 +327,12 @@ impl Backend for Teams {
         self.chat_write(Method::Put, &path, &serde_json::json!({"consumptionhorizon": format!("{message};{now};{message}")}))
     }
 
+    fn pin(&self, conversation: &str, pinned: bool) -> Result<()> {
+        // The same property the conversation list reports as `favorite`.
+        let path = format!("/v1/users/ME/conversations/{}/properties?name=favorite", http::encode(conversation));
+        self.chat_write(Method::Put, &path, &serde_json::json!({"favorite": if pinned { "true" } else { "false" }}))
+    }
+
     fn messages(&self, conversation: &str) -> Result<Vec<Message>> {
         let path = format!(
             "/v1/users/ME/conversations/{}/messages?view=msnp24Equivalent|supportsMessageProperties&pageSize={PAGE}&startTime=1",

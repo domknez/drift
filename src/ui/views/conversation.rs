@@ -53,6 +53,8 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace) {
         Some(messages) => {
             let me = ws.me_id.clone();
             let open_thread = ws.thread.clone();
+            let focus = ws.focus.clone();
+            let mut view = View { me: &me, channel: is_channel, open: open_thread.as_deref(), focus: focus.as_deref(), scrolled: ws.focus_scrolled };
             egui::ScrollArea::vertical().id_salt(("messages", &id)).stick_to_bottom(true).auto_shrink([false, false]).show(
                 &mut page,
                 |ui| {
@@ -64,11 +66,15 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace) {
                                 ui.label(RichText::new("No messages yet. Say hello.").font(ty::body()).color(p.faint))
                             });
                         } else {
-                            action = list(ui, &mut ws.pictures, &messages, &me, is_channel, open_thread.as_deref());
+                            action = list(ui, &mut ws.pictures, &messages, &mut view);
                         }
                     });
                 },
             );
+            // The focused message is in the main list unless it's a reply (then the thread scrolls).
+            if ws.thread.is_none() || !is_channel {
+                ws.focus_scrolled |= view.scrolled;
+            }
         }
     }
     match action {
@@ -179,7 +185,19 @@ pub fn day_pill(ui: &mut Ui, at: i64) {
 
 /// The messages: in a channel its posts (replies are in their threads), in a chat
 /// all of them; grouped by author into runs of bubbles.
-pub fn list(ui: &mut Ui, pictures: &mut Pictures, messages: &[Message], me: &str, channel: bool, open: Option<&str>) -> Option<Action> {
+/// How a list of messages is shown: whose they are, whether it's a channel, the post
+/// whose thread is open, and a message to bring into view and mark.
+pub struct View<'a> {
+    pub me: &'a str,
+    pub channel: bool,
+    pub open: Option<&'a str>,
+    pub focus: Option<&'a str>,
+    /// Set once the focused message has been scrolled to.
+    pub scrolled: bool,
+}
+
+pub fn list(ui: &mut Ui, pictures: &mut Pictures, messages: &[Message], view: &mut View) -> Option<Action> {
+    let channel = view.channel;
     let ids: std::collections::HashSet<&str> = messages.iter().map(|m| m.id.as_str()).collect();
     let mut replies: HashMap<&str, Vec<&Message>> = HashMap::new();
     let mut shown = Vec::new();
@@ -202,7 +220,7 @@ pub fn list(ui: &mut Ui, pictures: &mut Pictures, messages: &[Message], me: &str
         let first = new_day || prev_thread || !prev.is_some_and(|prev| continues(prev, m));
         let last = !thread.is_empty() || !next.is_some_and(|n| continues(m, n) && time::day_number(n.at) == time::day_number(m.at));
         let threaded = channel.then_some(thread);
-        if let Some(a) = bubble(ui, pictures, m, me, first, last, threaded, open == Some(m.id.as_str())) {
+        if let Some(a) = bubble(ui, pictures, m, view, first, last, threaded) {
             action = Some(a);
         }
     }
@@ -216,16 +234,10 @@ fn continues(prev: &Message, m: &Message) -> bool {
 /// One message as a bubble. `first` shows who and when inside it; `last` puts the
 /// picture beside it and leaves a gap after. Right-click opens its menu.
 #[allow(clippy::too_many_arguments)]
-pub fn bubble(
-    ui: &mut Ui,
-    pictures: &mut Pictures,
-    m: &Message,
-    me: &str,
-    first: bool,
-    last: bool,
-    thread: Option<&[&Message]>,
-    open: bool,
-) -> Option<Action> {
+pub fn bubble(ui: &mut Ui, pictures: &mut Pictures, m: &Message, view: &mut View, first: bool, last: bool, thread: Option<&[&Message]>) -> Option<Action> {
+    let me = view.me;
+    let open = view.open == Some(m.id.as_str());
+    let focused = view.focus == Some(m.id.as_str());
     let p = colors();
     let mine = !me.is_empty() && m.author.id == me;
     let avatar = metrics::AVATAR;
@@ -276,7 +288,8 @@ pub fn bubble(
         }
         ui.allocate_ui_with_layout(vec2(width, 0.0), Layout::top_down(Align::Min), |ui| {
             Frame::new()
-                .fill(fill)
+                .fill(if focused { p.selected } else { fill })
+                .stroke(if focused { Stroke::new(1.5, p.accent) } else { Stroke::NONE })
                 .corner_radius(radius)
                 .inner_margin(Margin::symmetric(PAD_X as i8, 10))
                 .show(ui, |ui| {
@@ -288,6 +301,10 @@ pub fn bubble(
         .inner
     });
     let response = row.inner.interact(Sense::click());
+    if focused && !view.scrolled {
+        response.scroll_to_me(Some(Align::Center));
+        view.scrolled = true;
+    }
     // The author's picture beside the last bubble of a run, level with its bottom.
     if !mine && last {
         let at = Rect::from_min_size(pos2(response.rect.left() - indent, response.rect.bottom() - avatar), vec2(avatar, avatar));

@@ -25,6 +25,9 @@ pub struct Workspace {
     activity_at: Option<Instant>,
     /// The post whose thread is open beside the conversation.
     pub thread: Option<String>,
+    /// A message to show and mark (opened from Activity), until it has been scrolled to.
+    pub focus: Option<String>,
+    pub focus_scrolled: bool,
     /// The reply being typed in the open thread.
     pub reply_draft: String,
     pub me: String,
@@ -93,6 +96,8 @@ impl Workspace {
             activity_load: Load::Idle,
             activity_at: None,
             thread: None,
+            focus: None,
+            focus_scrolled: false,
             reply_draft: String::new(),
             directory: None,
             directory_load: Load::Idle,
@@ -152,6 +157,24 @@ impl Workspace {
         m.reactions.retain(|r| r.count > 0);
         let (backend, message, key) = (self.backend.clone(), message.to_string(), key.to_string());
         self.chores.push(Load::start(ctx, move || backend.react(&open, &message, &key, add).map(|()| true)));
+    }
+
+    /// Open the message an activity item is about: its conversation, its thread if it's
+    /// a reply, and the message itself marked.
+    pub fn open_message(&mut self, conversation: &str, message: Option<String>, root: Option<String>) {
+        self.open(conversation);
+        self.thread = root;
+        self.focus = message;
+        self.focus_scrolled = false;
+    }
+
+    /// Pin or unpin a conversation: shown at once, sent behind.
+    pub fn set_pinned(&mut self, ctx: &egui::Context, id: &str, pinned: bool) {
+        if let Some(c) = self.directory.as_mut().and_then(|d| d.conversations.iter_mut().find(|c| c.id == id)) {
+            c.pinned = pinned;
+        }
+        let (backend, id) = (self.backend.clone(), id.to_string());
+        self.chores.push(Load::start(ctx, move || backend.pin(&id, pinned).map(|()| false)));
     }
 
     /// Mark the open conversation read up to its newest message, once per message.
@@ -270,6 +293,7 @@ impl Workspace {
         self.messages_load = Load::Idle;
         self.messages_at = None;
         self.thread = None;
+        self.focus = None;
         self.draft.clear();
         self.reply_draft.clear();
         // Read here; Teams itself still counts it until it's read there.

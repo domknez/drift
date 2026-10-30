@@ -76,6 +76,12 @@ impl App {
             if open == demo::OPEN {
                 workspace.thread = Some(demo::THREAD.to_string());
             }
+            // DRIFT_DEMO_FOCUS=<message>[,<post>]: open on a message, as a click in Activity does.
+            if let Ok(focus) = std::env::var("DRIFT_DEMO_FOCUS") {
+                let mut parts = focus.split(',').map(str::to_string);
+                let (message, root) = (parts.next(), parts.next());
+                workspace.open_message(&open, message, root);
+            }
             workspace.section = match std::env::var("DRIFT_DEMO_TAB").as_deref() {
                 Ok("activity") => Section::Activity,
                 Ok("teams") => Section::Teams,

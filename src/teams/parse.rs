@@ -184,8 +184,12 @@ fn message(m: &Value, me: &str) -> Option<Message> {
             name: str_of(m, &["imdisplayname", "fromDisplayNameInToken"]).unwrap_or("Someone").to_string(),
         },
     };
+    let number = |k: &str| activity[k].as_i64().map(|n| n.to_string()).or_else(|| str_of(activity, &[k]).map(str::to_string));
+    let source_message = number("sourceMessageId");
     let source = str_of(activity, &["sourceThreadId"]).map(|conversation| Source {
         conversation: conversation.to_string(),
+        root: number("sourceReplyChainId").filter(|r| Some(r) != source_message.as_ref() && r != "0"),
+        message: source_message.clone(),
         title: str_of(activity, &["sourceThreadTopic"]).unwrap_or("").to_string(),
         what: str_of(activity, &["activityType"]).unwrap_or("").to_string(),
     });
@@ -351,7 +355,10 @@ mod tests {
                 "sourceThreadTopic": "[DEV] General", "activityType": "mention"}}}]});
         let m = messages(&v, ME).remove(0);
         assert_eq!(m.author, Author { id: "8:orgid:boris".into(), name: "Boris".into() });
-        assert_eq!(m.source, Some(Source { conversation: "19:x".into(), title: "[DEV] General".into(), what: "mention".into() }));
+        assert_eq!(
+            m.source,
+            Some(Source { conversation: "19:x".into(), message: None, root: None, title: "[DEV] General".into(), what: "mention".into() })
+        );
     }
 
     #[test]

@@ -46,7 +46,10 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace) {
     egui::ScrollArea::vertical().id_salt(("thread", &root)).stick_to_bottom(true).auto_shrink([false, false]).show(&mut page, |ui| {
         Frame::new().inner_margin(Margin::symmetric(metrics::PAGE_PAD as i8, 10)).show(ui, |ui| {
             ui.set_width(ui.available_width());
-            action = conversation::list(ui, &mut ws.pictures, &thread, &me, false, None);
+            let focus = ws.focus.clone();
+            let mut view = conversation::View { me: &me, channel: false, open: None, focus: focus.as_deref(), scrolled: ws.focus_scrolled };
+            action = conversation::list(ui, &mut ws.pictures, &thread, &mut view);
+            ws.focus_scrolled |= view.scrolled;
         });
     });
     if let Some(Action::React { message, key }) = action {

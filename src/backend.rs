@@ -52,4 +52,7 @@ pub trait Backend: Send + Sync {
 
     /// Tell the service the conversation is read up to `message` (Teams shows it read too).
     fn mark_read(&self, conversation: &str, message: &str) -> Result<()>;
+
+    /// Pin a conversation to the top of the list, or unpin it.
+    fn pin(&self, conversation: &str, pinned: bool) -> Result<()>;
 }

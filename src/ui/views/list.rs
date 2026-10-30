@@ -290,13 +290,20 @@ fn row(ui: &mut Ui, ws: &mut Workspace, d: &Directory, c: &Conversation) {
     if response.clicked() {
         ws.open(&c.id);
     }
+    response.context_menu(|ui| {
+        let label = if c.pinned { "Unpin" } else { "Pin to the top" };
+        if ui.button(label).clicked() {
+            ws.set_pinned(ui.ctx(), &c.id, !c.pinned);
+            ui.close();
+        }
+    });
 }
 
 /// An activity item: who, what they did, where, what they wrote, and when.
 fn activity_row(ui: &mut Ui, ws: &mut Workspace, d: &Directory, m: &Message) {
     let p = colors();
     let Some(source) = &m.source else { return };
-    let selected = ws.open.as_deref() == Some(source.conversation.as_str());
+    let selected = ws.open.as_deref() == Some(source.conversation.as_str()) && ws.focus.is_some() && ws.focus == source.message;
     let (outer, response) = ui.allocate_exact_size(vec2(ui.available_width(), 74.0), Sense::click());
     let rect = Rect::from_min_size(outer.min + vec2(8.0, 1.0), vec2(outer.width() - 16.0, 72.0));
     if selected || response.hovered() {
@@ -344,7 +351,7 @@ fn activity_row(ui: &mut Ui, ws: &mut Workspace, d: &Directory, m: &Message) {
         c.add(egui::Label::new(RichText::new(format!("in {place}")).font(ty::meta()).color(p.faint)).truncate().selectable(false));
     }
     if response.clicked() {
-        ws.open(&source.conversation);
+        ws.open_message(&source.conversation, source.message.clone(), source.root.clone());
     }
 }
 

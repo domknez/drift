@@ -331,12 +331,16 @@ impl Backend for Demo {
     fn mark_read(&self, _conversation: &str, _message: &str) -> Result<()> {
         Ok(())
     }
+
+    fn pin(&self, _conversation: &str, _pinned: bool) -> Result<()> {
+        Ok(())
+    }
 }
 
 /// The activity feed: mentions and replies, oldest first.
 fn activity() -> Vec<Message> {
-    let item = |id: &str, who: &str, at: i64, text: &str, place: (&str, &str), what: &str| Message {
-        source: Some(Source { conversation: place.0.into(), title: place.1.into(), what: what.into() }),
+    let item = |id: &str, who: &str, at: i64, text: &str, place: (&str, &str, &str, Option<&str>), what: &str| Message {
+        source: Some(Source { conversation: place.0.into(), message: Some(place.2.into()), root: place.3.map(str::to_string), title: place.1.into(), what: what.into() }),
         ..message(id, None, who, at, &format!("<p>{text}</p>"), None, vec![])
     };
     vec![
@@ -345,7 +349,7 @@ fn activity() -> Vec<Message> {
             "priya",
             today(16, 40) - 86_400_000,
             "@Alex can you double-check the release notes?",
-            ("19:release", "Release crew"),
+            ("19:release", "Release crew", "2001", None),
             "mention",
         ),
         item(
@@ -353,10 +357,10 @@ fn activity() -> Vec<Message> {
             "lea",
             today(10, 14),
             "On it. Is the form data still sent twice when the rule has no schedule?",
-            (OPEN, "PR Reviews"),
+            (OPEN, "PR Reviews", "1002", Some(THREAD)),
             "reply",
         ),
-        item("4003", "maya", today(10, 44), "@Alex happy to pair on it after stand-up", (OPEN, "PR Reviews"), "mention"),
+        item("4003", "maya", today(10, 44), "@Alex happy to pair on it after stand-up", (OPEN, "PR Reviews", "1006", None), "mention"),
     ]
 }
 
