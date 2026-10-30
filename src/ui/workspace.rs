@@ -4,7 +4,8 @@
 use super::load::Load;
 use super::pictures::Pictures;
 use crate::backend::{Backend, Error};
-use crate::model::{ConversationId, Directory, Message};
+use crate::model::markdown::{self, Mention};
+use crate::model::{ConversationId, Directory, Message, Picture, text};
 use eframe::egui;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -30,6 +31,10 @@ pub struct Workspace {
     pub focus_scrolled: bool,
     /// The reply being typed in the open thread.
     pub reply_draft: String,
+    /// A message quoted in the reply being written (true: in the thread's composer).
+    pub quoting: Option<(bool, Message)>,
+    /// One of the user's messages being edited (true: in the thread's composer).
+    pub editing: Option<(bool, String)>,
     pub me: String,
     /// The signed-in user's id (for their picture).
     pub me_id: String,
@@ -99,6 +104,8 @@ impl Workspace {
             focus: None,
             focus_scrolled: false,
             reply_draft: String::new(),
+            quoting: None,
+            editing: None,
             directory: None,
             directory_load: Load::Idle,
             directory_at: None,
@@ -122,23 +129,119 @@ impl Workspace {
         self.sending.is_running()
     }
 
-    /// Send the draft to the open conversation, or the reply to the open thread; it's
-    /// cleared and the view refreshes.
+    /// Send the draft to the open conversation, or the reply to the open thread (or
+    /// save the edit being made); it's cleared and the view refreshes. The draft is
+    /// Markdown; `@Name` of someone picked becomes a mention; a quote goes on top.
     pub fn send(&mut self, ctx: &egui::Context, reply: bool) {
         let Some(open) = self.open.clone() else { return };
-        let (draft, to) = if reply {
+        let to = if reply {
             let Some(root) = self.thread.clone() else { return };
-            (&mut self.reply_draft, format!("{open};messageid={root}"))
+            format!("{open};messageid={root}")
         } else {
-            (&mut self.draft, open)
+            open.clone()
         };
-        let text = draft.trim().to_string();
+        let text = self.draft(reply).trim().to_string();
         if text.is_empty() || self.sending.is_running() {
             return;
         }
-        draft.clear();
+        let mut message = markdown::to_html(&text, &self.people());
+        if let Some(quoted) = self.quoting.take_if(|(r, _)| *r == reply).map(|(_, m)| m) {
+            message.html = quote_html(&quoted) + &message.html;
+        }
+        let editing = self.editing.take_if(|(r, _)| *r == reply).map(|(_, id)| id);
+        self.draft_mut(reply).clear();
         let backend = self.backend.clone();
-        self.sending = Load::start(ctx, move || backend.send(&to, &text));
+        self.sending = Load::start(ctx, move || match editing {
+            // An edit of a reply in a thread still lives in the channel's conversation.
+            Some(id) => backend.edit(&open, &id, &message),
+            None => backend.send(&to, &message),
+        });
+    }
+
+    pub fn draft(&self, reply: bool) -> &String {
+        if reply { &self.reply_draft } else { &self.draft }
+    }
+
+    pub fn draft_mut(&mut self, reply: bool) -> &mut String {
+        if reply { &mut self.reply_draft } else { &mut self.draft }
+    }
+
+    /// Quote a message in the reply being written (in the thread when `reply`).
+    pub fn quote(&mut self, message: Message, reply: bool) {
+        self.editing = None;
+        self.quoting = Some((reply, message));
+    }
+
+    /// Edit one of the user's messages in the composer (the thread's when `reply`).
+    pub fn edit(&mut self, message: &Message, reply: bool) {
+        self.quoting = None;
+        self.editing = Some((reply, message.id.clone()));
+        *self.draft_mut(reply) = text::to_markdown(&message.body);
+    }
+
+    /// ↑ in an empty composer: edit the user's last message there. False if there's none.
+    pub fn edit_last(&mut self, reply: bool) -> bool {
+        let me = self.me_id.clone();
+        let thread = self.thread.clone();
+        let last = self.messages.as_ref().and_then(|messages| {
+            messages
+                .iter()
+                .rev()
+                .find(|m| {
+                    let here =
+                        if reply { m.root == thread || Some(&m.id) == thread.as_ref() } else { m.root.is_none() || self.thread.is_none() };
+                    here && m.author.id == me
+                })
+                .cloned()
+        });
+        match last {
+            Some(m) => {
+                self.edit(&m, reply);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Stop editing or quoting (Esc).
+    pub fn cancel_compose(&mut self, reply: bool) {
+        if self.editing.as_ref().is_some_and(|(r, _)| *r == reply) {
+            self.editing = None;
+            self.draft_mut(reply).clear();
+        }
+        if self.quoting.as_ref().is_some_and(|(r, _)| *r == reply) {
+            self.quoting = None;
+        }
+    }
+
+    /// Delete one of the user's messages: gone at once, deleted behind.
+    pub fn delete(&mut self, ctx: &egui::Context, message: &str) {
+        let Some(open) = self.open.clone() else { return };
+        if let Some(messages) = self.messages.as_mut() {
+            messages.retain(|m| m.id != message);
+        }
+        let (backend, message) = (self.backend.clone(), message.to_string());
+        self.chores.push(Load::start(ctx, move || backend.delete(&open, &message).map(|()| true)));
+    }
+
+    /// The people who can be mentioned: those the user chats with, and everyone who
+    /// wrote in the open conversation.
+    pub fn people(&self) -> Vec<Mention> {
+        let mut people: Vec<Mention> = Vec::new();
+        let mut add = |id: &str, name: &str| {
+            if !id.is_empty() && !name.is_empty() && id != self.me_id && id.starts_with("8:") && !people.iter().any(|p| p.id == id) {
+                people.push(Mention { id: id.to_string(), name: name.to_string() });
+            }
+        };
+        for m in self.messages.iter().flatten().rev() {
+            add(&m.author.id, &m.author.name);
+        }
+        for c in self.directory.iter().flat_map(|d| &d.conversations) {
+            if let Some(Picture::Person { id, name }) = &c.picture {
+                add(id, name);
+            }
+        }
+        people
     }
 
     /// React to a message (or take the reaction back): shown at once, sent behind.
@@ -296,6 +399,8 @@ impl Workspace {
         self.focus = None;
         self.draft.clear();
         self.reply_draft.clear();
+        self.quoting = None;
+        self.editing = None;
         // Read here; Teams itself still counts it until it's read there.
         if let Some(c) = self.directory.as_mut().and_then(|d| d.conversations.iter_mut().find(|c| c.id == id)) {
             c.unread = false;
@@ -308,4 +413,17 @@ impl Workspace {
         self.messages_at = None;
         self.activity_at = None;
     }
+}
+
+/// The Teams markup of a quoted message, put above the reply.
+fn quote_html(m: &Message) -> String {
+    let esc = |s: &str| s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
+    let preview: String = text::flatten(&m.body).chars().take(240).collect();
+    format!(
+        "<blockquote itemscope=\"\" itemtype=\"http://schema.skype.com/Reply\" itemid=\"{id}\"><strong itemprop=\"mri\" itemid=\"{mri}\">{name}</strong><span itemprop=\"time\" itemid=\"{id}\"></span><p itemprop=\"preview\">{preview}</p></blockquote>",
+        id = m.id,
+        mri = esc(&m.author.id),
+        name = esc(&m.author.name),
+        preview = esc(&preview),
+    )
 }

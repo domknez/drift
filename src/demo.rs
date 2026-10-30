@@ -2,6 +2,7 @@
 //! account (`DRIFT_DEMO=1`): the mockups' team, channels, people and messages.
 
 use crate::backend::{Backend, Error, Result};
+use crate::model::markdown::Outgoing;
 use crate::model::text::{self, Block};
 use crate::model::{Author, Card, Channel, Conversation, Directory, Kind, Message, Picture, Preview, Reaction, Source, Team, time};
 
@@ -320,7 +321,15 @@ impl Backend for Demo {
         }
     }
 
-    fn send(&self, _conversation: &str, _text: &str) -> Result<()> {
+    fn send(&self, _conversation: &str, _message: &Outgoing) -> Result<()> {
+        Ok(())
+    }
+
+    fn edit(&self, _conversation: &str, _message: &str, _with: &Outgoing) -> Result<()> {
+        Ok(())
+    }
+
+    fn delete(&self, _conversation: &str, _message: &str) -> Result<()> {
         Ok(())
     }
 
@@ -340,7 +349,13 @@ impl Backend for Demo {
 /// The activity feed: mentions and replies, oldest first.
 fn activity() -> Vec<Message> {
     let item = |id: &str, who: &str, at: i64, text: &str, place: (&str, &str, &str, Option<&str>), what: &str| Message {
-        source: Some(Source { conversation: place.0.into(), message: Some(place.2.into()), root: place.3.map(str::to_string), title: place.1.into(), what: what.into() }),
+        source: Some(Source {
+            conversation: place.0.into(),
+            message: Some(place.2.into()),
+            root: place.3.map(str::to_string),
+            title: place.1.into(),
+            what: what.into(),
+        }),
         ..message(id, None, who, at, &format!("<p>{text}</p>"), None, vec![])
     };
     vec![

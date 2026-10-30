@@ -12,6 +12,7 @@ mod parse;
 pub mod shape;
 
 use crate::backend::{Backend, Error, Result};
+use crate::model::markdown::Outgoing;
 use crate::model::{Conversation, Directory, Kind, Message, Picture};
 use auth::{CHAT_AGGREGATOR, SPACES, Session};
 use http::{Body, Method};
@@ -78,6 +79,29 @@ impl Teams {
             }
         }
         Err(Error::SignedOut)
+    }
+
+    /// The body of a send or an edit: the HTML, and who it mentions.
+    fn message_body(&self, message: &Outgoing) -> Value {
+        let mut body = serde_json::json!({
+            "clientmessageid": client_message_id(),
+            "content": message.html,
+            "messagetype": "RichText/Html",
+            "contenttype": "text",
+            "imdisplayname": Backend::me(self),
+        });
+        if !message.mentions.is_empty() {
+            let mentions: Vec<Value> = message
+                .mentions
+                .iter()
+                .enumerate()
+                .map(|(i, m)| {
+                    serde_json::json!({"@type": "http://schema.skype.com/Mention", "itemid": i, "mri": m.id, "mentionType": "person", "displayName": m.name})
+                })
+                .collect();
+            body["properties"] = serde_json::json!({"mentions": Value::Array(mentions).to_string()});
+        }
+        body
     }
 
     /// The aggregator's roster: teams with their channels, and the chats.
@@ -296,19 +320,22 @@ impl Backend for Teams {
         conversations.sort_by_key(|c| std::cmp::Reverse(c.last.as_ref().map_or(0, |l| l.at)));
         Ok(Directory { teams, conversations })
     }
-    fn send(&self, conversation: &str, text: &str) -> Result<()> {
-        let text = text.trim();
-        if text.is_empty() {
+    fn send(&self, conversation: &str, message: &Outgoing) -> Result<()> {
+        if message.html.trim().is_empty() {
             return Err(Error::Service("empty message".into()));
         }
-        let body = serde_json::json!({
-            "clientmessageid": client_message_id(),
-            "content": text,
-            "messagetype": "Text",
-            "contenttype": "text",
-            "imdisplayname": Backend::me(self),
-        });
-        self.chat_write(Method::Post, &format!("/v1/users/ME/conversations/{}/messages", http::encode(conversation)), &body)
+        let path = format!("/v1/users/ME/conversations/{}/messages", http::encode(conversation));
+        self.chat_write(Method::Post, &path, &self.message_body(message))
+    }
+
+    fn edit(&self, conversation: &str, message: &str, with: &Outgoing) -> Result<()> {
+        let path = format!("/v1/users/ME/conversations/{}/messages/{message}", http::encode(conversation));
+        self.chat_write(Method::Put, &path, &self.message_body(with))
+    }
+
+    fn delete(&self, conversation: &str, message: &str) -> Result<()> {
+        let path = format!("/v1/users/ME/conversations/{}/messages/{message}?behavior=softDelete", http::encode(conversation));
+        self.chat_write(Method::Delete, &path, &Value::Object(Default::default()))
     }
 
     fn react(&self, conversation: &str, message: &str, key: &str, add: bool) -> Result<()> {

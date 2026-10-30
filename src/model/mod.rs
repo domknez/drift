@@ -1,6 +1,7 @@
 //! The types a backend fills and the UI reads: conversations, teams and their
 //! channels, messages and the people who wrote them.
 
+pub mod markdown;
 pub mod text;
 pub mod time;
 

@@ -32,6 +32,8 @@ pub enum Icon {
     Bell,
     /// A cross: close.
     Close,
+    /// A tick: save.
+    Check,
     /// A smiling face: emoji.
     Smile,
     /// A paperclip: attach.
@@ -108,6 +110,9 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
         }
         Icon::Chat => {
             line(&[(4.0, 5.0), (20.0, 5.0), (20.0, 16.0), (8.0, 16.0), (4.0, 20.0), (4.0, 5.0)]);
+        }
+        Icon::Check => {
+            line(&[(5.0, 12.5), (10.0, 17.5), (19.0, 7.0)]);
         }
         Icon::Close => {
             line(&[(6.0, 6.0), (18.0, 18.0)]);

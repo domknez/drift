@@ -1,6 +1,6 @@
 //! The thread beside the conversation: the post, its replies, and a box to reply.
 
-use super::conversation::{self, Action, COMPOSER_HEIGHT};
+use super::conversation;
 use crate::ui::style::icons::{self, Icon};
 use crate::ui::style::{colors, metrics, typography as ty};
 use crate::ui::workspace::Workspace;
@@ -38,7 +38,7 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace) {
     // The post, then its replies, as one conversation.
     let mut thread = vec![post];
     thread.extend(messages.iter().filter(|m| m.root.as_deref() == Some(root.as_str())).cloned());
-    let bottom = full.bottom() - COMPOSER_HEIGHT;
+    let bottom = full.bottom() - conversation::composer_height(ws, true);
     let body = Rect::from_min_max(pos2(full.left(), header.bottom()), pos2(full.right(), bottom));
     let mut page = ui.new_child(egui::UiBuilder::new().max_rect(body).layout(Layout::top_down(Align::Min)));
     let me = ws.me_id.clone();
@@ -52,8 +52,8 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace) {
             ws.focus_scrolled |= view.scrolled;
         });
     });
-    if let Some(Action::React { message, key }) = action {
-        ws.react(ui.ctx(), &message, &key);
+    if let Some(action) = action {
+        conversation::apply(ui, ws, action, true);
     }
     conversation::composer(ui, ws, Rect::from_min_max(pos2(full.left(), bottom), full.max), "Reply…", true);
 }

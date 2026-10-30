@@ -13,14 +13,53 @@ use std::collections::HashMap;
 
 /// The composer's height, reserved at the bottom.
 pub const COMPOSER_HEIGHT: f32 = 80.0;
+/// The "replying to" / "editing" line above the composer.
+const BANNER: f32 = 44.0;
 /// The reactions offered on right-click.
 const QUICK_REACTIONS: [(&str, &str); 6] =
-    [("like", "👍"), ("heart", "❤"), ("laugh", "😆"), ("surprised", "😮"), ("sad", "😢"), ("pray", "🙏")];
+    [("like", "👍"), ("heart", "❤"), ("laugh", "😆"), ("surprised", "😮"), ("sad", "😢"), ("praying", "🙏")];
 
 /// What a click on a message asks for.
 pub enum Action {
     OpenThread(String),
     React { message: String, key: String },
+    Quote(Message),
+    Edit(Message),
+    Delete(String),
+}
+
+/// Do what a click on a message asked for; `reply` when it came from the thread.
+pub fn apply(ui: &Ui, ws: &mut Workspace, action: Action, reply: bool) {
+    match action {
+        Action::OpenThread(root) => {
+            ws.thread = Some(root);
+            ws.reply_draft.clear();
+        }
+        Action::React { message, key } => ws.react(ui.ctx(), &message, &key),
+        Action::Quote(message) => {
+            ws.quote(message, reply);
+            focus_composer(ui, reply);
+        }
+        Action::Edit(message) => {
+            ws.edit(&message, reply);
+            focus_composer(ui, reply);
+        }
+        Action::Delete(id) => ws.delete(ui.ctx(), &id),
+    }
+}
+
+fn composer_id(reply: bool) -> egui::Id {
+    egui::Id::unique(if reply { "reply-composer" } else { "composer" })
+}
+
+fn focus_composer(ui: &Ui, reply: bool) {
+    ui.memory_mut(|m| m.request_focus(composer_id(reply)));
+}
+
+/// The composer's height: taller with a "replying to" or "editing" line on top.
+pub fn composer_height(ws: &Workspace, reply: bool) -> f32 {
+    let banner = ws.quoting.as_ref().is_some_and(|(r, _)| *r == reply) || ws.editing.as_ref().is_some_and(|(r, _)| *r == reply);
+    if banner { COMPOSER_HEIGHT + BANNER } else { COMPOSER_HEIGHT }
 }
 
 pub fn show(ui: &mut Ui, ws: &mut Workspace) {
@@ -41,7 +80,7 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace) {
     head(ui, ws, header, &directory, &id);
     ui.painter().hline(full.x_range(), header.bottom() - 0.5, Stroke::new(1.0, p.line));
 
-    let bottom = if can_write { full.bottom() - COMPOSER_HEIGHT } else { full.bottom() };
+    let bottom = if can_write { full.bottom() - composer_height(ws, false) } else { full.bottom() };
     let body = Rect::from_min_max(pos2(full.left(), header.bottom()), pos2(full.right(), bottom));
     let mut page = ui.new_child(egui::UiBuilder::new().max_rect(body).layout(Layout::top_down(Align::Min)));
     let mut action = None;
@@ -54,7 +93,8 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace) {
             let me = ws.me_id.clone();
             let open_thread = ws.thread.clone();
             let focus = ws.focus.clone();
-            let mut view = View { me: &me, channel: is_channel, open: open_thread.as_deref(), focus: focus.as_deref(), scrolled: ws.focus_scrolled };
+            let mut view =
+                View { me: &me, channel: is_channel, open: open_thread.as_deref(), focus: focus.as_deref(), scrolled: ws.focus_scrolled };
             egui::ScrollArea::vertical().id_salt(("messages", &id)).stick_to_bottom(true).auto_shrink([false, false]).show(
                 &mut page,
                 |ui| {
@@ -77,13 +117,8 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace) {
             }
         }
     }
-    match action {
-        Some(Action::OpenThread(root)) => {
-            ws.thread = Some(root);
-            ws.reply_draft.clear();
-        }
-        Some(Action::React { message, key }) => ws.react(ui.ctx(), &message, &key),
-        None => {}
+    if let Some(action) = action {
+        apply(ui, ws, action, false);
     }
     if can_write {
         let rect = Rect::from_min_max(pos2(full.left(), bottom), full.max);
@@ -234,7 +269,15 @@ fn continues(prev: &Message, m: &Message) -> bool {
 /// One message as a bubble. `first` shows who and when inside it; `last` puts the
 /// picture beside it and leaves a gap after. Right-click opens its menu.
 #[allow(clippy::too_many_arguments)]
-pub fn bubble(ui: &mut Ui, pictures: &mut Pictures, m: &Message, view: &mut View, first: bool, last: bool, thread: Option<&[&Message]>) -> Option<Action> {
+pub fn bubble(
+    ui: &mut Ui,
+    pictures: &mut Pictures,
+    m: &Message,
+    view: &mut View,
+    first: bool,
+    last: bool,
+    thread: Option<&[&Message]>,
+) -> Option<Action> {
     let me = view.me;
     let open = view.open == Some(m.id.as_str());
     let focused = view.focus == Some(m.id.as_str());
@@ -330,6 +373,10 @@ pub fn bubble(ui: &mut Ui, pictures: &mut Pictures, m: &Message, view: &mut View
             }
         });
         ui.separator();
+        if ui.button("Reply with quote").clicked() {
+            action = Some(Action::Quote(m.clone()));
+            ui.close();
+        }
         if thread.is_some() && ui.button("Reply in thread").clicked() {
             action = Some(Action::OpenThread(m.id.clone()));
             ui.close();
@@ -343,6 +390,17 @@ pub fn bubble(ui: &mut Ui, pictures: &mut Pictures, m: &Message, view: &mut View
         {
             ui.ctx().open_url(egui::OpenUrl::new_tab(url));
             ui.close();
+        }
+        if mine {
+            ui.separator();
+            if ui.button("Edit").clicked() {
+                action = Some(Action::Edit(m.clone()));
+                ui.close();
+            }
+            if ui.button(RichText::new("Delete").color(p.danger)).clicked() {
+                action = Some(Action::Delete(m.id.clone()));
+                ui.close();
+            }
         }
     });
 
@@ -421,10 +479,49 @@ fn ago(at: i64) -> String {
     }
 }
 
-/// The composer: the text, a few tools and the send button in one rounded box.
-/// `reply` sends to the open thread.
+/// The composer: the text, a few tools and the send button in one rounded box, with
+/// a "replying to" or "editing" line above when there's one. Enter sends, Shift+Enter
+/// breaks the line, ↑ in an empty box edits the last message, Esc cancels, `@` offers
+/// people to mention. `reply` is the thread's composer.
 pub fn composer(ui: &mut Ui, ws: &mut Workspace, rect: Rect, hint: &str, reply: bool) {
     let p = colors();
+    let mut rect = rect;
+    // The line above: what's quoted, or that a message is being edited.
+    let quoted = ws.quoting.as_ref().filter(|(r, _)| *r == reply).map(|(_, m)| m.clone());
+    let editing = ws.editing.as_ref().is_some_and(|(r, _)| *r == reply);
+    if quoted.is_some() || editing {
+        let line = Rect::from_min_max(
+            pos2(rect.left() + metrics::PAGE_PAD, rect.top() + 6.0),
+            pos2(rect.right() - metrics::PAGE_PAD, rect.top() + BANNER),
+        );
+        ui.painter().rect_filled(line, CornerRadius::same(12), p.accent_fill.gamma_multiply(0.13));
+        let bar = Rect::from_min_size(line.min, vec2(3.0, line.height()));
+        ui.painter().rect_filled(bar, CornerRadius { nw: 12, sw: 12, ne: 0, se: 0 }, p.accent);
+        let mut b =
+            ui.new_child(egui::UiBuilder::new().max_rect(line.shrink2(vec2(14.0, 0.0))).layout(Layout::left_to_right(Align::Center)));
+        let mut job = egui::text::LayoutJob::default();
+        match &quoted {
+            Some(m) => {
+                job.append("Replying to ", 0.0, egui::TextFormat::simple(ty::small(), p.dim));
+                job.append(&m.author.name, 0.0, egui::TextFormat::simple(ty::small_strong(), p.accent));
+                job.append(&format!("  {}", text::flatten(&m.body)), 0.0, egui::TextFormat::simple(ty::small(), p.faint));
+            }
+            None => {
+                job.append("Editing your message", 0.0, egui::TextFormat::simple(ty::small_strong(), p.accent));
+                job.append("  Esc to cancel", 0.0, egui::TextFormat::simple(ty::small(), p.faint));
+            }
+        }
+        b.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            if widgets::icon_button(ui, Icon::Close, "Cancel (Esc)").clicked() {
+                ws.cancel_compose(reply);
+            }
+            ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                ui.add(egui::Label::new(job).truncate().selectable(false));
+            });
+        });
+        rect.min.y += BANNER - 4.0;
+    }
+
     let inner = Rect::from_min_max(
         pos2(rect.left() + metrics::PAGE_PAD, rect.top() + 8.0),
         pos2(rect.right() - metrics::PAGE_PAD, rect.bottom() - 16.0),
@@ -435,10 +532,35 @@ pub fn composer(ui: &mut Ui, ws: &mut Workspace, rect: Rect, hint: &str, reply: 
     let tools_w = 3.0 * 32.0;
     let text_rect =
         Rect::from_min_max(pos2(inner.left() + 16.0, inner.top() + 6.0), pos2(send_rect.left() - tools_w - 10.0, inner.bottom() - 6.0));
+
+    // Keys the box shouldn't see: ↑ to edit, Esc to cancel, Tab/Enter to pick a person.
+    let id = composer_id(reply);
+    let focused = ui.memory(|m| m.has_focus(id));
+    let people = mention_matches(ws, reply);
+    let mut pick = None;
+    if focused {
+        let empty = ws.draft(reply).trim().is_empty();
+        if empty
+            && !people.as_ref().is_some_and(|p| !p.is_empty())
+            && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp))
+        {
+            ws.edit_last(reply);
+        }
+        if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+            ws.cancel_compose(reply);
+        }
+        if let Some(first) = people.as_ref().and_then(|p| p.first())
+            && ui.input_mut(|i| {
+                i.consume_key(egui::Modifiers::NONE, egui::Key::Tab) || i.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
+            })
+        {
+            pick = Some(first.clone());
+        }
+    }
+
     let mut t = ui.new_child(egui::UiBuilder::new().max_rect(text_rect).layout(Layout::left_to_right(Align::Center)));
-    let draft = if reply { &mut ws.reply_draft } else { &mut ws.draft };
-    let edit = egui::TextEdit::multiline(draft)
-        .id_salt(if reply { "reply" } else { "compose" })
+    let edit = egui::TextEdit::multiline(ws.draft_mut(reply))
+        .id(id)
         .hint_text(RichText::new(hint).color(p.faint))
         .font(ty::body())
         .frame(Frame::NONE)
@@ -448,20 +570,118 @@ pub fn composer(ui: &mut Ui, ws: &mut Workspace, rect: Rect, hint: &str, reply: 
         .return_key(Some(egui::KeyboardShortcut::new(egui::Modifiers::SHIFT, egui::Key::Enter)));
     let response = t.add_enabled(!sending, edit);
     let enter = response.has_focus() && t.input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.shift);
-    let has_text = !draft.trim().is_empty();
+    let has_text = !ws.draft(reply).trim().is_empty();
+
+    // People to mention, above the box, while an @word is being typed.
+    if let Some(people) = people.filter(|p| !p.is_empty())
+        && response.has_focus()
+    {
+        let row_h = 34.0;
+        let h = row_h * people.len() as f32 + 12.0;
+        let popup = Rect::from_min_size(pos2(inner.left(), inner.top() - h - 6.0), vec2(280.0, h));
+        egui::Area::new(egui::Id::unique(if reply { "mentions-reply" } else { "mentions" }))
+            .order(egui::Order::Foreground)
+            .fixed_pos(popup.min)
+            .show(ui.ctx(), |ui| {
+                Frame::new()
+                    .fill(p.panel)
+                    .stroke(Stroke::new(1.0, p.line))
+                    .corner_radius(CornerRadius::same(12))
+                    .inner_margin(Margin::same(6))
+                    .show(ui, |ui| {
+                        ui.set_width(popup.width() - 12.0);
+                        for (i, person) in people.iter().enumerate() {
+                            let (r, click) = ui.allocate_exact_size(vec2(ui.available_width(), row_h), Sense::click());
+                            if i == 0 || click.hovered() {
+                                ui.painter().rect_filled(r, CornerRadius::same(8), p.hover);
+                            }
+                            let picture =
+                                ws.pictures.get(&crate::model::Picture::Person { id: person.id.clone(), name: person.name.clone() });
+                            let mut c = ui.new_child(
+                                egui::UiBuilder::new().max_rect(r.shrink2(vec2(8.0, 0.0))).layout(Layout::left_to_right(Align::Center)),
+                            );
+                            widgets::avatar(&mut c, &person.id, &person.name, 24.0, picture);
+                            c.add_space(4.0);
+                            c.label(RichText::new(&person.name).font(ty::small_strong()).color(p.text));
+                            if click.clicked() {
+                                pick = Some(person.clone());
+                            }
+                        }
+                    });
+            });
+    }
+    let picked = pick.is_some();
+    if let Some(person) = pick {
+        insert_mention(ws.draft_mut(reply), &person.name);
+        set_cursor_to_end(ui, id, ws.draft(reply));
+        response.request_focus();
+    }
 
     let tools = Rect::from_min_max(pos2(send_rect.left() - tools_w - 6.0, inner.top()), pos2(send_rect.left() - 6.0, inner.bottom()));
     let mut row = ui.new_child(egui::UiBuilder::new().max_rect(tools).layout(Layout::left_to_right(Align::Center)));
     row.spacing_mut().item_spacing.x = 2.0;
-    for (icon, tip) in [(Icon::Smile, "Emoji (coming soon)"), (Icon::Clip, "Attach (coming soon)"), (Icon::At, "Mention (coming soon)")] {
-        let _ = widgets::icon_button(&mut row, icon, tip);
+    let _ = widgets::icon_button(&mut row, Icon::Smile, "Emoji (coming soon)");
+    let _ = widgets::icon_button(&mut row, Icon::Clip, "Attach (coming soon)");
+    if widgets::icon_button(&mut row, Icon::At, "Mention someone").clicked() {
+        let draft = ws.draft_mut(reply);
+        if !draft.is_empty() && !draft.ends_with(' ') {
+            draft.push(' ');
+        }
+        draft.push('@');
+        set_cursor_to_end(ui, id, ws.draft(reply));
+        response.request_focus();
+    }
+    if response.has_focus() || has_text {
+        let tip = "**bold**  *italic*  ~~strike~~  `code`  > quote  - list";
+        ui.painter().text(pos2(inner.left() + 16.0, inner.bottom() + 8.0), egui::Align2::LEFT_CENTER, tip, ty::meta(), p.faint);
     }
     let click = ui.interact(send_rect, ui.scope_id().with(("send", reply)), Sense::click());
     let fill = if has_text && !sending { p.accent_fill } else { p.border };
     ui.painter().rect_filled(send_rect, CornerRadius::same(12), fill);
-    icons::paint(ui.painter(), Rect::from_center_size(send_rect.center(), vec2(17.0, 17.0)), Icon::Send, p.on_accent);
-    if (click.clicked() || enter) && has_text && !sending {
+    let icon = if editing { Icon::Check } else { Icon::Send };
+    icons::paint(ui.painter(), Rect::from_center_size(send_rect.center(), vec2(17.0, 17.0)), icon, p.on_accent);
+    if (click.clicked() || (enter && !picked)) && has_text && !sending {
         ws.send(ui.ctx(), reply);
         response.request_focus();
+    }
+}
+
+/// The people whose names start like the `@word` at the end of the draft; None
+/// when the draft doesn't end in one.
+fn mention_matches(ws: &Workspace, reply: bool) -> Option<Vec<crate::model::markdown::Mention>> {
+    let draft = ws.draft(reply);
+    let at = draft.rfind('@')?;
+    if draft[..at].chars().last().is_some_and(|c| !c.is_whitespace()) {
+        return None;
+    }
+    let typed = &draft[at + 1..];
+    if typed.contains('\n') || typed.chars().count() > 30 || typed.contains("  ") {
+        return None;
+    }
+    let typed = typed.to_lowercase();
+    let people: Vec<_> = ws
+        .people()
+        .into_iter()
+        .filter(|p| p.name.to_lowercase().starts_with(&typed) || p.name.to_lowercase().split_whitespace().any(|w| w.starts_with(&typed)))
+        .take(6)
+        .collect();
+    Some(people)
+}
+
+/// Swap the `@word` at the end of the draft for `@Full Name `.
+fn insert_mention(draft: &mut String, name: &str) {
+    if let Some(at) = draft.rfind('@') {
+        draft.truncate(at);
+    }
+    draft.push('@');
+    draft.push_str(name);
+    draft.push(' ');
+}
+
+fn set_cursor_to_end(ui: &Ui, id: egui::Id, text: &str) {
+    if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), id) {
+        let end = egui::text::CCursor::new(text.chars().count());
+        state.cursor.set_char_range(Some(egui::text::CCursorRange::one(end)));
+        state.store(ui.ctx(), id);
     }
 }

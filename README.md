@@ -33,12 +33,16 @@ Sibling of [dust](https://github.com/domknez/dust) (music) and
   runs of messages share one bubble group, with a day pill between days
 - **Channels with threads:** posts as bubbles with a link to their thread, which
   opens beside the channel for reading and replying
-- **Right-click a message** to react, reply in its thread, copy it or open its link;
-  click a reaction to add yours (or take it back)
+- **Right-click a message** to react, reply with a quote, reply in its thread, copy
+  it or open its link; your own also to edit or delete; click a reaction to add
+  yours (or take it back). Reactions and emoji are Teams' own, in colour
+- **Write like in Teams:** Markdown (`**bold**`, `*italic*`, `~~strike~~`, `` `code` ``,
+  code blocks, lists, `>` quotes, links), `@` to mention a colleague, ↑ in an empty box
+  to edit your last message, Esc to cancel a quote or an edit
 - **Activity:** who mentioned you or replied, what they wrote and where; a click
-  opens it
+  opens that very message, marked (in its thread if it's a reply)
+- **Pin and unpin** chats and channels from their right-click menu
 - **Read here, read in Teams:** opening a conversation marks it read for Teams too
-- **Write and send** in any chat or channel, or reply in a thread
 - **Messages as written:** bold, italics, strikethrough, code, tables, quotes, links,
   mentions and emoji; reactions under them; cards from bots and connectors (pull
   requests, alerts) as one compact row that opens its link

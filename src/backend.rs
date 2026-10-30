@@ -1,6 +1,7 @@
 //! What the UI asks of a chat service. Teams is the one there is (`crate::teams`);
 //! the UI only sees this trait and the `model` types.
 
+use crate::model::markdown::Outgoing;
 use crate::model::{Directory, Message, Picture};
 use std::fmt;
 
@@ -43,9 +44,15 @@ pub trait Backend: Send + Sync {
     /// A picture's image file (JPEG or PNG).
     fn picture(&self, picture: &Picture) -> Result<Vec<u8>>;
 
-    /// Send a plain-text message to a conversation. For a channel reply, `conversation`
-    /// is `<channel id>;messageid=<post id>`; for a new post, the channel id.
-    fn send(&self, conversation: &str, text: &str) -> Result<()>;
+    /// Send a message to a conversation. For a channel reply, `conversation` is
+    /// `<channel id>;messageid=<post id>`; for a new post, the channel id.
+    fn send(&self, conversation: &str, message: &Outgoing) -> Result<()>;
+
+    /// Replace the text of one of the user's messages.
+    fn edit(&self, conversation: &str, message: &str, with: &Outgoing) -> Result<()>;
+
+    /// Delete one of the user's messages.
+    fn delete(&self, conversation: &str, message: &str) -> Result<()>;
 
     /// Add (or with `add` false, take back) the user's reaction `key` to a message.
     fn react(&self, conversation: &str, message: &str, key: &str, add: bool) -> Result<()>;

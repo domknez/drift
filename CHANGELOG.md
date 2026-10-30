@@ -17,7 +17,11 @@ The first version of drift:
   posts link to their thread, which opens beside the channel for replying
 - Right-click a message to react, reply in its thread, copy it or open its link;
   click a reaction to add or take back yours
-- Activity: mentions and replies with who, what and where
+- Activity: mentions and replies with who, what and where; a click opens that message
+- Reply with a quote, edit (↑ in an empty box edits your last message) and delete your
+  messages; Markdown and @mentions when writing
+- Teams' own colour emoji in reactions and messages
+- Pin and unpin from the list's right-click menu
 - Opening a conversation marks it read in Teams too
 - Messages keep their formatting: bold, italics, code, links, mentions and emoji;
   reactions under them; cards from bots and connectors (pull requests, alerts) as one

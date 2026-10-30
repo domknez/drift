@@ -60,6 +60,50 @@ pub fn flatten(body: &[Block]) -> String {
     words.join(" ").split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+/// A message as Markdown again, for editing it: what `markdown::to_html` reads.
+pub fn to_markdown(body: &[Block]) -> String {
+    let runs = |runs: &[Inline]| -> String {
+        runs.iter()
+            .map(|r| {
+                let s = &r.span;
+                let t = r.text.as_str();
+                if s.mention || s.emoji.is_some() {
+                    return if s.mention { format!("@{t}") } else { t.to_string() };
+                }
+                if s.code {
+                    return format!("`{t}`");
+                }
+                let mut out = match &s.link {
+                    Some(url) if url != t => format!("[{t}]({url})"),
+                    _ => t.to_string(),
+                };
+                if s.strike {
+                    out = format!("~~{out}~~");
+                }
+                if s.italic {
+                    out = format!("*{out}*");
+                }
+                if s.bold {
+                    out = format!("**{out}**");
+                }
+                out
+            })
+            .collect()
+    };
+    let mut parts = Vec::new();
+    for block in body {
+        parts.push(match block {
+            Block::Text(r) => runs(r),
+            Block::Quote(r) => runs(r).lines().map(|l| format!("> {l}")).collect::<Vec<_>>().join("\n"),
+            Block::Code(code) => format!("```\n{code}\n```"),
+            Block::Table { rows, .. } => {
+                rows.iter().map(|row| row.iter().map(|c| runs(c)).collect::<Vec<_>>().join(" | ")).collect::<Vec<_>>().join("\n")
+            }
+        });
+    }
+    parts.join("\n\n")
+}
+
 /// Blocks from a message's HTML.
 pub fn from_html(html: &str) -> Vec<Block> {
     let mut b = Builder::default();
@@ -514,6 +558,14 @@ mod tests {
     #[test]
     fn lists_get_bullets() {
         assert_eq!(texts(&from_html("<ul><li>one</li><li>two</li></ul>")), [["• one\n• two"]]);
+    }
+
+    #[test]
+    fn back_to_markdown() {
+        let blocks = from_html(
+            "<p>Hi <b>all</b>, see <a href=\"https://x.io\">this</a> and <code>run()</code></p><blockquote><p>old</p></blockquote>",
+        );
+        assert_eq!(to_markdown(&blocks), "Hi **all**, see [this](https://x.io) and `run()`\n\n> old");
     }
 
     #[test]

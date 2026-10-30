@@ -82,6 +82,16 @@ impl App {
                 let (message, root) = (parts.next(), parts.next());
                 workspace.open_message(&open, message, root);
             }
+            // DRIFT_DEMO_DRAFT: text in the composer; DRIFT_DEMO_QUOTE: a message quoted in it.
+            if let Ok(draft) = std::env::var("DRIFT_DEMO_DRAFT") {
+                workspace.draft = draft;
+                cc.egui_ctx.memory_mut(|m| m.request_focus(egui::Id::unique("composer")));
+            }
+            if let Ok(id) = std::env::var("DRIFT_DEMO_QUOTE")
+                && let Some(m) = demo::Demo.messages(&open).ok().and_then(|ms| ms.into_iter().find(|m| m.id == id))
+            {
+                workspace.quote(m, false);
+            }
             workspace.section = match std::env::var("DRIFT_DEMO_TAB").as_deref() {
                 Ok("activity") => Section::Activity,
                 Ok("teams") => Section::Teams,
@@ -110,6 +120,10 @@ impl App {
         }
         capture.frames += 1;
         ctx.request_repaint();
+        // A demo draft is shown as being typed (so @-suggestions open).
+        if std::env::var_os("DRIFT_DEMO_DRAFT").is_some() {
+            ctx.memory_mut(|m| m.request_focus(egui::Id::unique("composer")));
+        }
         if capture.frames == 30 && !capture.requested {
             capture.requested = true;
             let path = capture.path.clone();
