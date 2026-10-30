@@ -87,6 +87,8 @@ pub struct Workspace {
     typed: (String, Instant),
     /// Sidebar sections folded away, by key.
     pub folded: HashSet<String>,
+    /// Whether the saved folds are in.
+    pub folded_loaded: bool,
     /// The message being typed in the open conversation.
     pub draft: String,
     sending: Load<(), Error>,
@@ -232,6 +234,7 @@ impl Workspace {
             typed: (String::new(), Instant::now()),
             // Meeting chats pile up; they start folded.
             folded: HashSet::from(["meetings".to_string(), "hidden".to_string()]),
+            folded_loaded: false,
             draft: String::new(),
             sending: Load::Idle,
             chores: Vec::new(),

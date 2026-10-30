@@ -51,6 +51,8 @@ pub struct Prefs {
     pub notifications: bool,
     /// Conversations muted in drift (their ids): no notifications, not counted unread.
     pub muted: Vec<String>,
+    /// The sidebar sections folded away, by key; None for drift's defaults.
+    pub folded: Option<Vec<String>>,
     /// Conversations hidden in drift, each with when (Unix ms): they're listed again
     /// once something newer comes.
     pub hidden: Vec<(String, i64)>,
@@ -81,6 +83,8 @@ impl Prefs {
                         .collect()
                 })
                 .unwrap_or_default(),
+            // "-" for none folded (an empty value reads as not set).
+            folded: saved.get("folded").map(|v| v.split(',').filter(|s| !s.is_empty() && *s != "-").map(str::to_string).collect()),
             muted: get("muted").map(|v| v.split(',').filter(|s| !s.is_empty()).map(str::to_string).collect()).unwrap_or_default(),
             file: None,
         }
@@ -104,9 +108,17 @@ impl Prefs {
         }
     }
 
-    fn values(&self) -> [(&'static str, String); 5] {
+    fn values(&self) -> [(&'static str, String); 6] {
         [
             ("conversation", self.conversation.clone().unwrap_or_default()),
+            (
+                "folded",
+                match &self.folded {
+                    Some(f) if f.is_empty() => "-".into(),
+                    Some(f) => f.join(","),
+                    None => String::new(),
+                },
+            ),
             ("hidden", self.hidden.iter().map(|(id, at)| format!("{id}|{at}")).collect::<Vec<_>>().join(",")),
             ("muted", self.muted.join(",")),
             ("notifications", if self.notifications { "true" } else { "false" }.into()),
@@ -135,7 +147,7 @@ fn merge(text: &str, changes: &[(&str, String)]) -> String {
 mod tests {
     use super::*;
 
-    const SAVED: &str = "conversation=19:abc@thread.v2\nhidden=19:old@thread.v2|1793000000000\nmuted=19:x@thread.v2,19:y\nnotifications=false\ntheme=light\n";
+    const SAVED: &str = "conversation=19:abc@thread.v2\nfolded=meetings,team:19:t@thread.tacv2\nhidden=19:old@thread.v2|1793000000000\nmuted=19:x@thread.v2,19:y\nnotifications=false\ntheme=light\n";
 
     #[test]
     fn reads_a_saved_file() {

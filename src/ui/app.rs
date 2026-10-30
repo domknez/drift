@@ -231,12 +231,24 @@ impl eframe::App for App {
                 if workspace.hidden.is_none() {
                     workspace.hidden = Some(self.prefs.hidden.iter().cloned().collect());
                 }
+                if !workspace.folded_loaded {
+                    workspace.folded_loaded = true;
+                    if let Some(folded) = &self.prefs.folded {
+                        workspace.folded = folded.iter().cloned().collect();
+                    }
+                }
+                let folded_before = workspace.folded.clone();
                 let muted_before = workspace.muted_here.clone();
                 let hidden_before = workspace.hidden.clone();
                 request = views::workspace(ui, workspace, self.prefs.theme);
                 if workspace.open != before {
                     let open = workspace.open.clone();
                     self.prefs.update(|p| p.conversation = open);
+                }
+                if workspace.folded != folded_before {
+                    let mut folded: Vec<String> = workspace.folded.iter().cloned().collect();
+                    folded.sort();
+                    self.prefs.update(|p| p.folded = Some(folded));
                 }
                 if workspace.hidden != hidden_before {
                     let mut hidden: Vec<(String, i64)> = workspace.hidden.iter().flatten().map(|(id, at)| (id.clone(), *at)).collect();
