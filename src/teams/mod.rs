@@ -13,7 +13,7 @@ pub mod shape;
 
 use crate::backend::{Backend, Error, Result};
 use crate::model::markdown::Outgoing;
-use crate::model::{Conversation, Directory, Kind, Message, Picture, SearchHit};
+use crate::model::{Conversation, Directory, Kind, Meeting, Message, Picture, SearchHit};
 use auth::{CHAT_AGGREGATOR, SEARCH, SPACES, Session};
 use http::{Body, Method};
 use serde_json::Value;
@@ -124,6 +124,25 @@ impl Teams {
             body["properties"] = serde_json::json!({"mentions": Value::Array(mentions).to_string()});
         }
         body
+    }
+
+    /// The calendar between two times (Unix ms), as the middle tier gives it.
+    fn calendar_raw(&self, from: i64, to: i64) -> Result<Value> {
+        let (skype, bearer) = {
+            let mut session = self.session();
+            (session.skype()?, format!("Bearer {}", session.access(SPACES)?))
+        };
+        let iso = |ms: i64| {
+            let c = crate::model::time::civil(ms / 1000);
+            format!("{:04}-{:02}-{:02}T{:02}:{:02}:00.000Z", c.year, c.month, c.day, c.hour, c.minute)
+        };
+        let url = format!(
+            "{}/v2.0/me/calendars/default/calendarView?StartDate={}&EndDate={}&shouldDecryptData=true",
+            skype.middle_tier,
+            http::encode(&iso(from)),
+            http::encode(&iso(to))
+        );
+        http::request(Method::Get, &url, &[("Authorization", &bearer), ("X-Skypetoken", &skype.token)], Body::None)
     }
 
     /// Search Teams messages (Microsoft 365 search, as Teams' own search box does).
@@ -542,6 +561,10 @@ impl Backend for Teams {
         self.chat_write(Method::Put, &path, &serde_json::json!({"consumptionhorizon": format!("{message};{now};{message}")}))
     }
 
+    fn calendar(&self, from: i64, to: i64) -> Result<Vec<Meeting>> {
+        Ok(parse::meetings(&self.calendar_raw(from, to)?))
+    }
+
     fn search(&self, query: &str) -> Result<Vec<SearchHit>> {
         Ok(parse::search_hits(&self.search_raw(query)?))
     }
@@ -613,6 +636,15 @@ fn chat_picture(members: &[String], me: &str, names: &HashMap<String, String>) -
     }
 }
 
+/// A meeting's join link as one that opens straight in Teams on the web (the plain
+/// link stops at a page asking which app to use).
+pub fn web_join(url: &str) -> String {
+    match url.strip_prefix("https://teams.microsoft.com/l/") {
+        Some(rest) => format!("https://teams.microsoft.com/_#/l/{rest}"),
+        None => url.to_string(),
+    }
+}
+
 /// An emoji's image from Teams' own set (its key: `like`, `1f440_eyes`; a skin tone
 /// suffix like `-tone2` falls back to the plain one). No sign-in needed.
 pub fn emoji(key: &str) -> Result<Vec<u8>> {
@@ -652,6 +684,15 @@ fn chat_title(members: &[String], me: &str, names: &HashMap<String, String>, cha
 mod tests {
     use super::*;
     use crate::model::Preview;
+
+    #[test]
+    fn joins_on_the_web() {
+        assert_eq!(
+            web_join("https://teams.microsoft.com/l/meetup-join/19%3ameeting_x/0?context=y"),
+            "https://teams.microsoft.com/_#/l/meetup-join/19%3ameeting_x/0?context=y"
+        );
+        assert_eq!(web_join("https://example.com/x"), "https://example.com/x");
+    }
 
     #[test]
     fn names_chats_after_their_members() {

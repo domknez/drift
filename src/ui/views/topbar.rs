@@ -33,7 +33,7 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace, theme: Appearance) -> Option<Reques
         (Section::Activity, Icon::Bell, "Activity", counts.0),
         (Section::Chats, Icon::Chat, "Chats", counts.1),
         (Section::Teams, Icon::Members, "Teams", 0),
-        (Section::Meetings, Icon::Calendar, "Meetings", 0),
+        (Section::Meetings, Icon::Calendar, "Calendar", 0),
     ];
     let widths: Vec<f32> = tabs.iter().map(|t| tab_width(ui, t.2, t.3)).collect();
     let group = Rect::from_min_size(
@@ -57,8 +57,18 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace, theme: Appearance) -> Option<Reques
     let avatar = Rect::from_min_size(pos2(full.right() - 16.0 - size, cy - size / 2.0), vec2(size, size));
     let request = user_menu(ui, ws, avatar, theme);
     let mut right = avatar.left() - 12.0;
-    if let Some(meeting) = ws.directory.as_ref().and_then(live_meeting).cloned() {
-        right = meeting_pill(ui, &meeting, right, cy) - 12.0;
+    // The meeting on now (or next today), from the calendar; a meeting chat active
+    // today until the calendar is in.
+    let pill = match ws.next_meeting() {
+        Some(m) => m.join_url.clone().map(|url| (m.subject.clone(), when(m.start, m.end), url)),
+        None if ws.meetings.is_none() => ws.directory.as_ref().and_then(live_meeting).and_then(|c| {
+            let url = c.join_url.clone()?;
+            Some((c.title.clone(), c.last.as_ref().map(|l| time::clock(l.at)).unwrap_or_default(), url))
+        }),
+        None => None,
+    };
+    if let Some((title, label, url)) = pill {
+        right = meeting_pill(ui, &title, &label, &url, right, cy) - 12.0;
     }
 
     // Search, centred in what's left.
@@ -199,11 +209,15 @@ pub fn live_meeting(d: &Directory) -> Option<&Conversation> {
 }
 
 /// Today's meeting, ending at `right`: its name, when it was active, Join. Returns its left edge.
-fn meeting_pill(ui: &mut Ui, meeting: &Conversation, right: f32, cy: f32) -> f32 {
+fn meeting_pill(ui: &mut Ui, title: &str, label: &str, url: &str, right: f32, cy: f32) -> f32 {
     let p = colors();
-    let name = ui.painter().layout_no_wrap(truncate(&meeting.title, 26), ty::small_strong(), p.text);
-    let when = meeting.last.as_ref().map(|l| time::clock(l.at)).unwrap_or_default();
-    let when = ui.painter().layout_no_wrap(when, ty::small(), p.dim);
+    let name = ui.painter().layout_no_wrap(truncate(title, 26), ty::small_strong(), p.text);
+    let now = label == "now";
+    let when = ui.painter().layout_no_wrap(
+        label.to_string(),
+        if now { ty::small_strong() } else { ty::small() },
+        if now { p.accent } else { p.dim },
+    );
     let join = ui.painter().layout_no_wrap("Join".into(), ty::small_strong(), p.on_accent);
     let button_w = join.size().x + 16.0 + 26.0;
     let width = 12.0 + name.size().x + 8.0 + when.size().x + 10.0 + button_w + 4.0;
@@ -214,19 +228,33 @@ fn meeting_pill(ui: &mut Ui, meeting: &Conversation, right: f32, cy: f32) -> f32
     ui.painter().galley(pos2(x, cy - name.size().y / 2.0), name, p.text);
     x += nw + 8.0;
     let ww = when.size().x;
-    ui.painter().galley(pos2(x, cy - when.size().y / 2.0), when, p.dim);
+    let color = if now { p.accent } else { p.dim };
+    ui.painter().galley(pos2(x, cy - when.size().y / 2.0), when, color);
     x += ww + 10.0;
     let button = Rect::from_min_size(pos2(x, rect.top() + 4.0), vec2(button_w, rect.height() - 8.0));
-    let response = ui.interact(button, ui.scope_id().with("join"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
+    let response = ui
+        .interact(button, ui.scope_id().with("join"), Sense::click())
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .on_hover_text("Join in Teams on the web");
     ui.painter().rect_filled(button, CornerRadius::same(9), if response.hovered() { p.accent } else { p.accent_fill });
     icons::paint(ui.painter(), Rect::from_min_size(pos2(button.left() + 10.0, cy - 7.5), vec2(15.0, 15.0)), Icon::Video, p.on_accent);
     ui.painter().galley(pos2(button.left() + 31.0, cy - join.size().y / 2.0), join, p.on_accent);
-    if response.clicked()
-        && let Some(url) = &meeting.join_url
-    {
-        ui.ctx().open_url(egui::OpenUrl::new_tab(url));
+    if response.clicked() {
+        ui.ctx().open_url(egui::OpenUrl::new_tab(crate::teams::web_join(url)));
     }
     rect.left()
+}
+
+/// When a meeting is, said briefly: "now", "in 12 min", or its time.
+pub fn when(start: i64, end: i64) -> String {
+    let now = time::now_ms();
+    if start <= now && now < end {
+        "now".into()
+    } else if start > now && start - now < 60 * 60_000 {
+        format!("in {} min", ((start - now) / 60_000).max(1))
+    } else {
+        time::clock(start)
+    }
 }
 
 fn truncate(s: &str, max: usize) -> String {

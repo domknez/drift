@@ -24,8 +24,11 @@ Sibling of [dust](https://github.com/domknez/dust) (music) and
   Microsoft's own sign-in page (MFA included). The sign-in is kept in the system
   keychain (macOS Keychain, Windows Credential Manager, Secret Service) and renewed
   on its own
-- **Tabs, not clutter:** Activity, Chats, Teams and Meetings in the top bar, with counts
-  of what's unread; today's meeting sits beside them with *Join*
+- **Tabs, not clutter:** Activity, Chats, Teams and Calendar in the top bar, with counts
+  of what's unread; the meeting on now (or next today) sits beside them with *Join*
+- **Calendar:** your meetings for the next two weeks by day, the one on now marked;
+  *Join* opens the meeting straight in Teams on the web, a click on a meeting opens its
+  chat
 - **One list for what's going on:** chats and channels together, newest first, each
   with its newest message and the time; chips narrow it to unread, channels or
   people, and the search field to a name

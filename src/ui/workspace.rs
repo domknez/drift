@@ -5,7 +5,7 @@ use super::load::Load;
 use super::pictures::Pictures;
 use crate::backend::{Backend, Error};
 use crate::model::markdown::{self, Mention};
-use crate::model::{Conversation, ConversationId, Directory, Kind, Message, Picture, SearchHit, text};
+use crate::model::{Conversation, ConversationId, Directory, Kind, Meeting, Message, Picture, SearchHit, text};
 use eframe::egui;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -16,6 +16,8 @@ use std::time::{Duration, Instant};
 const DIRECTORY_EVERY: Duration = Duration::from_secs(15);
 /// How often the open conversation is fetched again.
 const MESSAGES_EVERY: Duration = Duration::from_secs(20);
+/// How often the calendar is fetched again.
+const CALENDAR_EVERY: Duration = Duration::from_secs(5 * 60);
 /// Searching messages starts once typing has paused this long.
 const SEARCH_PAUSE: Duration = Duration::from_millis(500);
 
@@ -23,6 +25,10 @@ pub struct Workspace {
     pub backend: Arc<dyn Backend>,
     pub section: Section,
     pub chip: Chip,
+    /// The calendar from yesterday to two weeks on; None until loaded.
+    pub meetings: Option<Vec<Meeting>>,
+    meetings_load: Load<Vec<Meeting>, Error>,
+    meetings_at: Option<Instant>,
     /// The activity feed's items (mentions, replies), newest last; None until loaded.
     pub activity: Option<Vec<Message>>,
     activity_load: Load<Vec<Message>, Error>,
@@ -139,6 +145,9 @@ impl Workspace {
             backend,
             section: Section::Chats,
             chip: Chip::All,
+            meetings: None,
+            meetings_load: Load::Idle,
+            meetings_at: None,
             activity: None,
             activity_load: Load::Idle,
             activity_at: None,
@@ -401,6 +410,15 @@ impl Workspace {
         }
     }
 
+    /// The online meeting going on now (or about to start), else the next one today.
+    pub fn next_meeting(&self) -> Option<&Meeting> {
+        let now = crate::model::time::now_ms();
+        let today = crate::model::time::day_number(now);
+        let online = || self.meetings.iter().flatten().filter(|m| !m.cancelled && m.join_url.is_some());
+        let live = online().filter(|m| m.start - 5 * 60_000 <= now && now < m.end).min_by_key(|m| m.start);
+        live.or_else(|| online().filter(|m| m.start > now && crate::model::time::day_number(m.start) == today).min_by_key(|m| m.start))
+    }
+
     /// Open the message an activity item is about: its conversation, its thread if it's
     /// a reply, and the message itself marked.
     pub fn open_message(&mut self, conversation: &str, message: Option<String>, root: Option<String>) {
@@ -568,6 +586,13 @@ impl Workspace {
         } else if query.chars().count() >= 2 && self.typed.1.elapsed() < SEARCH_PAUSE {
             ctx.request_repaint_after(SEARCH_PAUSE);
         }
+        if let Some(result) = self.meetings_load.take() {
+            match result {
+                Ok(meetings) => self.meetings = Some(meetings),
+                Err(Error::SignedOut) => return Some(Outcome::SignedOut),
+                Err(e) => log_warn!("calendar: {e}"),
+            }
+        }
         if let Some(result) = self.activity_load.take() {
             match result {
                 Ok(items) => self.activity = Some(items),
@@ -612,6 +637,12 @@ impl Workspace {
             self.messages_at = Some(Instant::now());
             let backend = self.backend.clone();
             self.messages_load = Load::start(ctx, move || backend.messages(&id).map(|m| (id, m)));
+        }
+        if !self.meetings_load.is_running() && due(self.meetings_at, CALENDAR_EVERY) {
+            self.meetings_at = Some(Instant::now());
+            let backend = self.backend.clone();
+            let now = crate::model::time::now_ms();
+            self.meetings_load = Load::start(ctx, move || backend.calendar(now - 86_400_000, now + 15 * 86_400_000));
         }
         if self.section == Section::Activity
             && !self.activity_load.is_running()
@@ -659,6 +690,7 @@ impl Workspace {
     /// Fetch everything again now.
     pub fn refresh(&mut self) {
         self.directory_at = None;
+        self.meetings_at = None;
         self.messages_at = None;
         self.activity_at = None;
     }

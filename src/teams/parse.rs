@@ -1,7 +1,9 @@
 //! The services' JSON as `model` types. Fields are read leniently: the web client's
 //! API isn't documented, and what's missing gets a default rather than an error.
 
-use crate::model::{Author, Card, Channel, Conversation, Kind, Message, Picture, Preview, Reaction, SearchHit, Source, Team, text, time};
+use crate::model::{
+    Author, Card, Channel, Conversation, Kind, Meeting, Message, Picture, Preview, Reaction, SearchHit, Source, Team, text, time,
+};
 use serde_json::Value;
 
 fn str_of<'a>(v: &'a Value, keys: &[&str]) -> Option<&'a str> {
@@ -327,6 +329,33 @@ fn strip_link(s: &str, link: &mut Option<String>) -> String {
     out.trim().to_string()
 }
 
+/// Meetings from the middle tier's calendar view, earliest first.
+pub fn meetings(v: &Value) -> Vec<Meeting> {
+    let mut list: Vec<Meeting> = v["value"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|e| {
+            let start = str_of(e, &["startTime"]).and_then(time::parse_iso)?;
+            let end = str_of(e, &["endTime"]).and_then(time::parse_iso).unwrap_or(start);
+            Some(Meeting {
+                id: str_of(e, &["objectId", "iCalUID"]).unwrap_or("").to_string(),
+                subject: str_of(e, &["subject"]).unwrap_or("(no subject)").to_string(),
+                start,
+                end,
+                organizer: str_of(e, &["organizerName"]).unwrap_or("").to_string(),
+                location: str_of(e, &["location"]).unwrap_or("").to_string(),
+                join_url: str_of(e, &["skypeTeamsMeetingUrl", "joinOnlineMeetingUrl"]).map(str::to_string),
+                chat: str_of(&e["skypeTeamsDataObject"], &["cid"]).map(str::to_string),
+                cancelled: e["isCancelled"].as_bool().unwrap_or(false),
+                response: str_of(e, &["myResponseType"]).unwrap_or("").to_string(),
+            })
+        })
+        .collect();
+    list.sort_by_key(|m| (m.start, m.end));
+    list
+}
+
 /// Messages found by Microsoft 365 search.
 pub fn search_hits(v: &Value) -> Vec<SearchHit> {
     v["EntitySets"][0]["ResultSets"][0]["Results"]
@@ -499,6 +528,19 @@ mod tests {
         assert_eq!(card.link.as_deref(), Some("https://dev.example.com/pr/10499"));
         assert_eq!(card.detail, "Active | pm-ui");
         assert_eq!(card.facts.len(), 2);
+    }
+
+    #[test]
+    fn reads_the_calendar() {
+        let v = json!({"value": [
+            {"objectId": "b", "subject": "Release review", "startTime": "2026-10-30T14:00:00Z", "endTime": "2026-10-30T14:30:00Z", "organizerName": "Priya Nair"},
+            {"objectId": "a", "subject": "Daily stand-up", "startTime": "2026-10-30T09:00:00Z", "endTime": "2026-10-30T09:15:00Z",
+             "skypeTeamsMeetingUrl": "https://teams.microsoft.com/l/meetup-join/x", "skypeTeamsDataObject": {"cid": "19:meeting_x@thread.v2"}, "myResponseType": "Accepted"}]});
+        let m = meetings(&v);
+        assert_eq!(m.iter().map(|m| m.subject.as_str()).collect::<Vec<_>>(), ["Daily stand-up", "Release review"]);
+        assert_eq!(m[0].join_url.as_deref(), Some("https://teams.microsoft.com/l/meetup-join/x"));
+        assert_eq!(m[0].chat.as_deref(), Some("19:meeting_x@thread.v2"));
+        assert_eq!(m[1].end - m[1].start, 30 * 60 * 1000);
     }
 
     #[test]

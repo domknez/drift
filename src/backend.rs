@@ -2,7 +2,7 @@
 //! the UI only sees this trait and the `model` types.
 
 use crate::model::markdown::Outgoing;
-use crate::model::{Directory, Message, Picture, SearchHit};
+use crate::model::{Directory, Meeting, Message, Picture, SearchHit};
 use std::fmt;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -62,6 +62,9 @@ pub trait Backend: Send + Sync {
 
     /// Tell the service the conversation is read up to `message` (Teams shows it read too).
     fn mark_read(&self, conversation: &str, message: &str) -> Result<()>;
+
+    /// The user's meetings between two times (Unix ms), earliest first.
+    fn calendar(&self, from: i64, to: i64) -> Result<Vec<Meeting>>;
 
     /// Messages matching `query` in all the user's chats and channels, best first.
     fn search(&self, query: &str) -> Result<Vec<SearchHit>>;

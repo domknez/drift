@@ -5,7 +5,7 @@ use crate::backend::{Backend, Error, Result};
 use crate::model::markdown::Outgoing;
 use crate::model::text::{self, Block};
 use crate::model::{
-    Author, Card, Channel, Conversation, Directory, Kind, Message, Picture, Preview, Reaction, SearchHit, Source, Team, time,
+    Author, Card, Channel, Conversation, Directory, Kind, Meeting, Message, Picture, Preview, Reaction, SearchHit, Source, Team, time,
 };
 
 pub struct Demo;
@@ -360,6 +360,30 @@ impl Backend for Demo {
 
     fn mark_read(&self, _conversation: &str, _message: &str) -> Result<()> {
         Ok(())
+    }
+
+    fn calendar(&self, _from: i64, _to: i64) -> Result<Vec<Meeting>> {
+        let day = 86_400_000;
+        let meeting = |id: &str, subject: &str, start: i64, minutes: i64, organizer: &str, online: bool| Meeting {
+            id: id.into(),
+            subject: subject.into(),
+            start,
+            end: start + minutes * 60_000,
+            organizer: organizer.into(),
+            location: if online { "Microsoft Teams Meeting".into() } else { "Room 4.12".into() },
+            join_url: online.then(|| "https://teams.microsoft.com/l/meetup-join/demo".to_string()),
+            chat: (id == "standup").then(|| "19:standup".to_string()),
+            cancelled: false,
+            response: "Accepted".into(),
+        };
+        Ok(vec![
+            meeting("standup", "Daily stand-up", today(10, 0), 15, "Maya Lindqvist", true),
+            meeting("review", "Release review", today(15, 0), 30, "Priya Nair", true),
+            meeting("lunch", "Team lunch", today(13, 0), 60, "Jonas Weber", false),
+            meeting("standup2", "Daily stand-up", today(10, 0) + day, 15, "Maya Lindqvist", true),
+            meeting("design", "Timeline design sync", today(14, 0) + day, 45, "Lea Novak", true),
+            meeting("retro", "Sprint retro", today(11, 0) + 3 * day, 60, "Tomás Rivera", true),
+        ])
     }
 
     fn search(&self, query: &str) -> Result<Vec<SearchHit>> {

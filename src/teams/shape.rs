@@ -27,6 +27,12 @@ const KINDS: &[&str] = &[
     "weight",
     "style",
     "isSubtle",
+    "isCancelled",
+    "isAllDayEvent",
+    "isOnlineMeeting",
+    "eventType",
+    "myResponseType",
+    "showAs",
 ];
 
 #[derive(Default)]

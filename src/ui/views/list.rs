@@ -7,7 +7,7 @@ use crate::ui::style::icons::{self, Icon};
 use crate::ui::style::{colors, metrics, typography as ty};
 use crate::ui::widgets;
 use crate::ui::workspace::{Chip, Section, Side, Workspace};
-use eframe::egui::{self, Align, Align2, CornerRadius, Layout, Rect, RichText, Sense, TextureId, Ui, pos2, vec2};
+use eframe::egui::{self, Align, Align2, CornerRadius, Layout, Rect, RichText, Sense, Stroke, TextureId, Ui, pos2, vec2};
 
 /// Meeting chats listed under Recent (the newest); the Meetings tab has them all.
 const MEETINGS_IN_RECENT: usize = 5;
@@ -288,13 +288,141 @@ fn teams(ui: &mut Ui, ws: &mut Workspace, d: &Directory) {
     }
 }
 
+/// The calendar: meetings from today on, by day; the one on now stands out. A click
+/// opens the meeting's chat; Join opens it in Teams on the web.
 fn meetings(ui: &mut Ui, ws: &mut Workspace, d: &Directory) {
-    let list: Vec<Conversation> = d.conversations.iter().filter(|c| c.kind == Kind::Meeting && matches(ws, &c.title)).cloned().collect();
-    if list.is_empty() {
-        empty(ui, "No meeting chats yet.");
+    let p = colors();
+    let Some(all) = ws.meetings.clone() else {
+        ui.add_space(20.0);
+        ui.vertical_centered(|ui| ui.spinner());
+        return;
+    };
+    let now = time::now_ms();
+    let today = time::day_number(now);
+    let shown: Vec<_> = all
+        .into_iter()
+        .filter(|m| time::day_number(m.start) >= today && (m.end > now || time::day_number(m.start) == today))
+        .filter(|m| matches(ws, &m.subject) || matches(ws, &m.organizer))
+        .collect();
+    let mut shown = shown;
+    shown.sort_by_key(|m| (m.start, m.end));
+    if shown.is_empty() {
+        empty(ui, "No meetings in the next two weeks.");
     }
-    for c in &list {
-        row(ui, ws, d, c);
+    let mut day = None;
+    for m in &shown {
+        let n = time::day_number(m.start);
+        if day != Some(n) {
+            day = Some(n);
+            let label = match n - today {
+                0 => "TODAY".to_string(),
+                1 => "TOMORROW".to_string(),
+                _ => time::day(m.start, now).to_uppercase(),
+            };
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                ui.add_space(20.0);
+                ui.label(RichText::new(label).font(ty::section()).color(p.faint));
+            });
+            ui.add_space(2.0);
+        }
+        meeting_row(ui, ws, d, m, now);
+    }
+    ui.add_space(6.0);
+}
+
+/// One meeting: its time, subject, who set it up and where, and Join.
+fn meeting_row(ui: &mut Ui, ws: &mut Workspace, d: &Directory, m: &crate::model::Meeting, now: i64) {
+    let p = colors();
+    let live = m.start - 5 * 60_000 <= now && now < m.end && !m.cancelled;
+    let past = m.end <= now;
+    let chat = m.chat.as_ref().filter(|c| d.conversation(c).is_some()).cloned();
+    let selected = chat.is_some() && ws.open == chat;
+    let (outer, response) = ui.allocate_exact_size(vec2(ui.available_width(), 60.0), Sense::click());
+    let rect = Rect::from_min_size(outer.min + vec2(8.0, 1.0), vec2(outer.width() - 16.0, 58.0));
+    let fill = if selected {
+        Some(p.selected)
+    } else if live {
+        Some(p.accent_fill.gamma_multiply(0.12))
+    } else if response.hovered() {
+        Some(p.hover)
+    } else {
+        None
+    };
+    if let Some(fill) = fill {
+        ui.painter().rect_filled(rect, CornerRadius::same(12), fill);
+    }
+    // The bar on the left: accent while it's on.
+    let bar = Rect::from_min_size(pos2(rect.left() + 10.0, rect.top() + 10.0), vec2(3.0, rect.height() - 20.0));
+    ui.painter().rect_filled(bar, CornerRadius::same(2), if live { p.accent_fill } else { p.border });
+
+    let fade = if past || m.cancelled { 0.55 } else { 1.0 };
+    let times = format!("{} – {}", time::clock(m.start), time::clock(m.end));
+    let left = bar.right() + 10.0;
+    let join_w = if m.join_url.is_some() && !past && !m.cancelled { 64.0 } else { 0.0 };
+    let text_right = rect.right() - 12.0 - join_w;
+    let mut t = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(Rect::from_min_max(pos2(left, rect.top() + 7.0), pos2(text_right, rect.top() + 25.0)))
+            .layout(Layout::left_to_right(Align::Center)),
+    );
+    let mut subject = RichText::new(&m.subject).font(ty::item()).color(p.text.gamma_multiply(fade));
+    if m.cancelled {
+        subject = subject.strikethrough();
+    }
+    t.add(egui::Label::new(subject).truncate().selectable(false));
+    let detail = [times, if live { "now".into() } else { String::new() }, m.organizer.clone()]
+        .into_iter()
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join(" · ");
+    let mut b = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(Rect::from_min_max(pos2(left, rect.top() + 27.0), pos2(text_right, rect.top() + 44.0)))
+            .layout(Layout::left_to_right(Align::Center)),
+    );
+    b.add(
+        egui::Label::new(RichText::new(detail).font(ty::small()).color(if live { p.accent } else { p.dim.gamma_multiply(fade) }))
+            .truncate()
+            .selectable(false),
+    );
+    let place = if m.cancelled { "Cancelled".to_string() } else { m.location.clone() };
+    if !place.is_empty() {
+        let mut c = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(Rect::from_min_max(pos2(left, rect.top() + 43.0), pos2(text_right, rect.top() + 57.0)))
+                .layout(Layout::left_to_right(Align::Center)),
+        );
+        c.add(egui::Label::new(RichText::new(place).font(ty::meta()).color(p.faint)).truncate().selectable(false));
+    }
+
+    let mut joined = false;
+    if join_w > 0.0
+        && let Some(url) = &m.join_url
+    {
+        let button = Rect::from_min_size(pos2(rect.right() - 12.0 - 56.0, rect.center().y - 14.0), vec2(56.0, 28.0));
+        let b = ui.interact(button, ui.scope_id().with(("join", &m.id, m.start)), Sense::click()).on_hover_text("Join in Teams on the web");
+        let (fill, fg, stroke) = if live {
+            (if b.hovered() { p.accent } else { p.accent_fill }, p.on_accent, Stroke::NONE)
+        } else {
+            (if b.hovered() { p.hover } else { egui::Color32::TRANSPARENT }, p.accent, Stroke::new(1.0, p.accent.gamma_multiply(0.6)))
+        };
+        ui.painter().rect(button, CornerRadius::same(8), fill, stroke, egui::StrokeKind::Inside);
+        ui.painter().text(button.center(), Align2::CENTER_CENTER, "Join", ty::small_strong(), fg);
+        if b.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+            joined = true;
+            ui.ctx().open_url(egui::OpenUrl::new_tab(crate::teams::web_join(url)));
+        }
+    }
+    if !joined && response.clicked() {
+        match chat {
+            Some(chat) => ws.open(&chat),
+            None => {
+                if let Some(url) = &m.join_url {
+                    ui.ctx().open_url(egui::OpenUrl::new_tab(crate::teams::web_join(url)));
+                }
+            }
+        }
     }
 }
 

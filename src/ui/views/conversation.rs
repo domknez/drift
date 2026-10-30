@@ -196,9 +196,9 @@ fn head(ui: &mut Ui, ws: &mut Workspace, rect: Rect, directory: &Directory, id: 
         response
     };
     if let Some(url) = &join
-        && square(ui, Icon::Video, "Join the meeting").clicked()
+        && square(ui, Icon::Video, "Join the meeting (Teams on the web)").clicked()
     {
-        ui.ctx().open_url(egui::OpenUrl::new_tab(url));
+        ui.ctx().open_url(egui::OpenUrl::new_tab(crate::teams::web_join(url)));
     }
     if square(ui, Icon::Members, "People here").clicked() {
         ws.side = if ws.side == Side::People { Side::List } else { Side::People };

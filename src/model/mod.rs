@@ -211,6 +211,25 @@ fn code_points(key: &str) -> Option<String> {
     hex.split('-').map(|h| u32::from_str_radix(h, 16).ok().filter(|c| *c >= 0x20).and_then(char::from_u32)).collect()
 }
 
+/// A calendar event (one occurrence of a series).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Meeting {
+    pub id: String,
+    pub subject: String,
+    /// Unix milliseconds.
+    pub start: i64,
+    pub end: i64,
+    pub organizer: String,
+    pub location: String,
+    /// The Teams link to join it, for online meetings.
+    pub join_url: Option<String>,
+    /// The meeting's chat, if it has one.
+    pub chat: Option<ConversationId>,
+    pub cancelled: bool,
+    /// Accepted, tentative, …, as the service says.
+    pub response: String,
+}
+
 /// A message found by search.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SearchHit {
