@@ -36,8 +36,6 @@ pub enum Icon {
     Check,
     /// A smiling face: emoji.
     Smile,
-    /// A paperclip: attach.
-    Clip,
 }
 
 /// Paint `icon` into the square `rect`.
@@ -123,14 +121,6 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             arc(12.0, 12.0, 5.0, 0.2 * PI, 0.8 * PI);
             painter.circle_filled(at(9.0, 9.5), 1.1 * s, color);
             painter.circle_filled(at(15.0, 9.5), 1.1 * s, color);
-        }
-        Icon::Clip => {
-            line(&[(16.5, 7.0), (8.5, 15.0)]);
-            arc(10.0, 16.5, 2.1, 0.25 * PI, 1.25 * PI);
-            line(&[(8.5, 18.0), (18.5, 8.0)]);
-            arc(16.0, 5.5, 3.5, -0.75 * PI, 0.25 * PI);
-            line(&[(13.5, 3.0), (5.0, 11.5)]);
-            arc(9.0, 15.5, 5.6, 0.75 * PI, 1.25 * PI);
         }
     }
 }

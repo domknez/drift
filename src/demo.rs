@@ -49,6 +49,10 @@ fn chat(id: &str, kind: Kind, title: &str, last: (&str, &str, i64), unread: bool
         pinned: false,
         muted,
         join_url: None,
+        members: match &picture {
+            Some(Picture::Person { id, name }) => vec![crate::model::Mention { id: id.clone(), name: name.clone() }],
+            _ => Vec::new(),
+        },
         picture,
     }
 }
@@ -159,6 +163,7 @@ impl Backend for Demo {
                     muted: false,
                     join_url: None,
                     picture: None,
+                    members: Vec::new(),
                 });
             }
         }

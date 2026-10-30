@@ -127,6 +127,7 @@ pub fn conversations(v: &Value) -> Vec<Conversation> {
                 muted: cprops["alerts"].as_str().is_some_and(|a| a.eq_ignore_ascii_case("mute")),
                 join_url,
                 picture: None,
+                members: Vec::new(),
             })
         })
         .collect()

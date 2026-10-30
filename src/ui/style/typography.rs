@@ -28,6 +28,11 @@ pub fn tab() -> FontId {
     FontId::new(13.0, semibold())
 }
 
+/// What's typed in the search field.
+pub fn search() -> FontId {
+    FontId::new(13.5, FontFamily::Proportional)
+}
+
 /// The conversation's name in its header.
 pub fn title() -> FontId {
     FontId::new(16.0, bold())

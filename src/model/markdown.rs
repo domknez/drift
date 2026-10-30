@@ -158,6 +158,13 @@ fn inline(line: &str, people: &[Mention], mentions: &mut Vec<Mention>) -> String
             rest = &rest[1 + person.name.len()..];
             continue;
         }
+        // An emoji Teams has a picture of goes as its Teams emoji.
+        if let Some(key) = super::emoji::key_of(c) {
+            flush(&mut text, &mut out);
+            out.push_str(&super::emoji::html(key, &c.to_string()));
+            rest = rest[c.len_utf8()..].strip_prefix('\u{fe0f}').unwrap_or(&rest[c.len_utf8()..]);
+            continue;
+        }
         text.push(c);
         rest = &rest[c.len_utf8()..];
     }
@@ -255,6 +262,14 @@ mod tests {
         assert_eq!(html("- one\n- two\n\n1. first\n2. second"), "<ul><li>one</li><li>two</li></ul><ol><li>first</li><li>second</li></ol>");
         assert_eq!(html("> quoted\nanswer"), "<blockquote><p>quoted</p></blockquote><p>answer</p>");
         assert_eq!(html("```\nfn a() {}\n  <x>\n```"), "<pre><code>fn a() {}\n  &lt;x&gt;</code></pre>");
+    }
+
+    #[test]
+    fn emoji_go_as_teams_emoji() {
+        let out = html("nice 👍");
+        assert!(out.starts_with("<p>nice <img itemscope=\"\" itemtype=\"http://schema.skype.com/Emoji\" itemid=\"yes\" alt=\"👍\""));
+        assert!(html("❤️ it").contains("itemid=\"heart\""));
+        assert!(!html("❤️ it").contains('\u{fe0f}'));
     }
 
     #[test]

@@ -82,6 +82,9 @@ impl App {
                 let (message, root) = (parts.next(), parts.next());
                 workspace.open_message(&open, message, root);
             }
+            if let Ok(find) = std::env::var("DRIFT_DEMO_FIND") {
+                workspace.find = Some(find);
+            }
             if let Ok(filter) = std::env::var("DRIFT_DEMO_FILTER") {
                 workspace.filter = filter;
             }
@@ -123,6 +126,9 @@ impl App {
         }
         capture.frames += 1;
         ctx.request_repaint();
+        if std::env::var_os("DRIFT_DEMO_FILTER").is_some() {
+            ctx.memory_mut(|m| m.request_focus(egui::Id::unique("search")));
+        }
         // A demo draft is shown as being typed (so @-suggestions open).
         if std::env::var_os("DRIFT_DEMO_DRAFT").is_some() {
             ctx.memory_mut(|m| m.request_focus(egui::Id::unique("composer")));

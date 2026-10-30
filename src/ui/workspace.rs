@@ -52,6 +52,8 @@ pub struct Workspace {
     messages_at: Option<Instant>,
     /// The last failure, shown until the next success.
     pub error: Option<String>,
+    /// Finding in the open conversation: what's typed (None while not finding).
+    pub find: Option<String>,
     /// What the search field holds: it narrows the list, and finds messages.
     pub filter: String,
     /// Messages found for a query, and the query.
@@ -121,6 +123,7 @@ impl Workspace {
             messages_load: Load::Idle,
             messages_at: None,
             error: None,
+            find: None,
             filter: String::new(),
             hits: None,
             hits_load: Load::Idle,
@@ -446,6 +449,7 @@ impl Workspace {
         self.messages_at = None;
         self.thread = None;
         self.focus = None;
+        self.find = None;
         self.draft.clear();
         self.reply_draft.clear();
         self.quoting = None;

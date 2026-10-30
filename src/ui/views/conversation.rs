@@ -90,6 +90,20 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace) {
             page.vertical_centered(|ui| ui.spinner());
         }
         Some(messages) => {
+            // Finding: only the messages that match (replies too, one under another).
+            let query = ws.find.as_deref().map(str::trim).filter(|q| !q.is_empty()).map(str::to_lowercase);
+            let (messages, is_channel) = match &query {
+                Some(q) => (
+                    messages
+                        .into_iter()
+                        .filter(|m| {
+                            text::flatten(&m.body).to_lowercase().contains(q.as_str()) || m.author.name.to_lowercase().contains(q.as_str())
+                        })
+                        .collect::<Vec<_>>(),
+                    false,
+                ),
+                None => (messages, is_channel),
+            };
             let me = ws.me_id.clone();
             let open_thread = ws.thread.clone();
             let focus = ws.focus.clone();
@@ -100,7 +114,16 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace) {
                 |ui| {
                     Frame::new().inner_margin(Margin::symmetric(metrics::PAGE_PAD as i8, 10)).show(ui, |ui| {
                         ui.set_width(ui.available_width());
-                        if messages.is_empty() {
+                        if let Some(q) = &query {
+                            let label = match messages.len() {
+                                0 => format!("Nothing matches “{q}” in the loaded messages."),
+                                1 => "1 message matches.".to_string(),
+                                n => format!("{n} messages match."),
+                            };
+                            ui.add_space(6.0);
+                            ui.vertical_centered(|ui| ui.label(RichText::new(label).font(ty::small()).color(p.faint)));
+                        }
+                        if messages.is_empty() && query.is_none() {
                             ui.add_space(30.0);
                             ui.vertical_centered(|ui| {
                                 ui.label(RichText::new("No messages yet. Say hello.").font(ty::body()).color(p.faint))
@@ -187,14 +210,114 @@ fn head(ui: &mut Ui, ws: &mut Workspace, rect: Rect, directory: &Directory, id: 
     {
         ui.ctx().open_url(egui::OpenUrl::new_tab(url));
     }
-    let _ = square(ui, Icon::Members, "Members");
-    if square(ui, Icon::Search, "Search messages (⌘K)").clicked() {
-        ui.memory_mut(|m| m.request_focus(super::topbar::search_id()));
+    let members = square(ui, Icon::Members, "People here");
+    people_menu(ws, &members, directory, id);
+    let finding = ws.find.is_some();
+    if square(ui, Icon::Search, "Find in this conversation (⌘F)").clicked()
+        || ui.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::F)))
+    {
+        if finding {
+            ws.find = None;
+        } else {
+            ws.find = Some(String::new());
+            ui.memory_mut(|m| m.request_focus(find_id()));
+        }
+    }
+    // The find field, left of the buttons, while finding.
+    if let Some(query) = ws.find.as_mut() {
+        let field = Rect::from_min_size(pos2(x - 250.0, rect.center().y - 17.0), vec2(250.0, 34.0));
+        x = field.left() - 8.0;
+        ui.painter().rect(field, CornerRadius::same(10), p.surface, Stroke::new(1.5, p.accent_fill), egui::StrokeKind::Inside);
+        icons::paint(
+            ui.painter(),
+            Rect::from_min_size(pos2(field.left() + 10.0, field.center().y - 7.5), vec2(15.0, 15.0)),
+            Icon::Search,
+            p.accent,
+        );
+        let line = ui.painter().layout_no_wrap("Ag".into(), ty::small(), p.text).size().y;
+        let text = Rect::from_min_max(
+            pos2(field.left() + 32.0, field.center().y - line / 2.0),
+            pos2(field.right() - 10.0, field.center().y + line / 2.0),
+        );
+        let mut c = ui.new_child(egui::UiBuilder::new().max_rect(text));
+        let response = c.add(
+            egui::TextEdit::singleline(query)
+                .id(find_id())
+                .hint_text(RichText::new("Find in this conversation").font(ty::small()).color(p.faint))
+                .font(ty::small())
+                .frame(Frame::NONE)
+                .margin(Margin::ZERO)
+                .desired_width(f32::INFINITY),
+        );
+        if response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            ws.find = None;
+        }
     }
     if let Some(error) = &ws.error {
         let r = Rect::from_min_max(pos2(x - 260.0, rect.top()), pos2(x, rect.bottom()));
         let mut e = ui.new_child(egui::UiBuilder::new().max_rect(r).layout(Layout::right_to_left(Align::Center)));
         e.add(egui::Label::new(RichText::new(error).font(ty::small()).color(p.danger)).truncate());
+    }
+}
+
+fn find_id() -> egui::Id {
+    egui::Id::unique("find")
+}
+
+/// The people in the conversation (a chat's members; in a channel, who wrote in it);
+/// clicking one opens your chat with them.
+fn people_menu(ws: &mut Workspace, button: &egui::Response, directory: &Directory, id: &str) {
+    let p = colors();
+    let mut people: Vec<crate::model::Mention> = directory.conversation(id).map(|c| c.members.clone()).unwrap_or_default();
+    if people.is_empty() {
+        for m in ws.messages.iter().flatten().rev() {
+            if m.author.id.starts_with("8:") && m.author.id != ws.me_id && !people.iter().any(|x| x.id == m.author.id) {
+                people.push(crate::model::Mention { id: m.author.id.clone(), name: m.author.name.clone() });
+            }
+        }
+    }
+    let mut open = None;
+    let demo = std::env::var_os("DRIFT_DEMO_PEOPLE").is_some().then_some(egui::SetOpenCommand::Bool(true));
+    egui::Popup::menu(button).align(egui::RectAlign::BOTTOM_END).gap(8.0).width(260.0).open_memory(demo).show(|ui| {
+        ui.set_min_width(240.0);
+        let title = if directory.channel(id).is_some() { "Who's written here" } else { "In this chat" };
+        ui.label(RichText::new(title).font(ty::meta()).color(p.faint));
+        if people.is_empty() {
+            ui.label(RichText::new("Nobody yet.").font(ty::small()).color(p.dim));
+        }
+        let mut rows = |ui: &mut Ui| {
+            for person in &people {
+                let chat = directory
+                    .conversations
+                    .iter()
+                    .find(|c| matches!(&c.picture, Some(crate::model::Picture::Person { id, .. }) if *id == person.id));
+                let (r, click) = ui.allocate_exact_size(vec2(ui.available_width(), 34.0), Sense::click());
+                if click.hovered() && chat.is_some() {
+                    ui.painter().rect_filled(r, CornerRadius::same(8), p.hover);
+                }
+                let picture = ws.pictures.get(&Picture::Person { id: person.id.clone(), name: person.name.clone() });
+                let mut c =
+                    ui.new_child(egui::UiBuilder::new().max_rect(r.shrink2(vec2(6.0, 0.0))).layout(Layout::left_to_right(Align::Center)));
+                widgets::avatar(&mut c, &person.id, &person.name, 24.0, picture);
+                c.add_space(4.0);
+                c.label(RichText::new(&person.name).font(ty::small_strong()).color(p.text));
+                if let Some(chat) = chat {
+                    let click = click.on_hover_text("Open your chat").on_hover_cursor(egui::CursorIcon::PointingHand);
+                    if click.clicked() {
+                        open = Some(chat.id.clone());
+                    }
+                }
+            }
+        };
+        // A long list scrolls; a short one is shown whole.
+        if people.len() > 8 {
+            egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| rows(ui));
+        } else {
+            rows(ui);
+        }
+    });
+    if let Some(chat) = open {
+        ws.open(&chat);
     }
 }
 
@@ -540,7 +663,7 @@ pub fn composer(ui: &mut Ui, ws: &mut Workspace, rect: Rect, hint: &str, reply: 
     ui.painter().rect_filled(inner, CornerRadius::same(16), p.surface);
     let sending = ws.sending();
     let send_rect = Rect::from_min_size(pos2(inner.right() - 8.0 - 40.0, inner.center().y - 20.0), vec2(40.0, 40.0));
-    let tools_w = 3.0 * 32.0;
+    let tools_w = 2.0 * 32.0;
     let text_rect =
         Rect::from_min_max(pos2(inner.left() + 16.0, inner.top() + 6.0), pos2(send_rect.left() - tools_w - 10.0, inner.bottom() - 6.0));
 
@@ -631,8 +754,35 @@ pub fn composer(ui: &mut Ui, ws: &mut Workspace, rect: Rect, hint: &str, reply: 
     let tools = Rect::from_min_max(pos2(send_rect.left() - tools_w - 6.0, inner.top()), pos2(send_rect.left() - 6.0, inner.bottom()));
     let mut row = ui.new_child(egui::UiBuilder::new().max_rect(tools).layout(Layout::left_to_right(Align::Center)));
     row.spacing_mut().item_spacing.x = 2.0;
-    let _ = widgets::icon_button(&mut row, Icon::Smile, "Emoji (coming soon)");
-    let _ = widgets::icon_button(&mut row, Icon::Clip, "Attach (coming soon)");
+    let smile = widgets::icon_button(&mut row, Icon::Smile, "Emoji");
+    let mut emoji = None;
+    egui::Popup::menu(&smile)
+        .align(egui::RectAlign::TOP_END)
+        .gap(10.0)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+        .open_memory((std::env::var_os("DRIFT_DEMO_EMOJI").is_some() && !reply).then_some(egui::SetOpenCommand::Bool(true)))
+        .show(|ui| {
+            ui.spacing_mut().item_spacing = vec2(2.0, 2.0);
+            egui::Grid::new("emoji-picker").spacing(vec2(2.0, 2.0)).show(ui, |ui| {
+                for (i, (key, ch)) in crate::model::emoji::PICKER.iter().enumerate() {
+                    let button = match ws.pictures.get(&Picture::Emoji(key.to_string())) {
+                        Some(texture) => egui::Button::image(egui::Image::new((texture, vec2(26.0, 26.0)))),
+                        None => egui::Button::new(RichText::new(*ch).size(20.0)),
+                    };
+                    if ui.add(button.frame(false).min_size(vec2(36.0, 36.0))).on_hover_text(*key).clicked() {
+                        emoji = Some(*ch);
+                    }
+                    if i % 8 == 7 {
+                        ui.end_row();
+                    }
+                }
+            });
+        });
+    if let Some(ch) = emoji {
+        ws.draft_mut(reply).push_str(ch);
+        set_cursor_to_end(ui, id, ws.draft(reply));
+        response.request_focus();
+    }
     if widgets::icon_button(&mut row, Icon::At, "Mention someone").clicked() {
         let draft = ws.draft_mut(reply);
         if !draft.is_empty() && !draft.ends_with(' ') {

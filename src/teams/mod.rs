@@ -410,6 +410,11 @@ impl Backend for Teams {
                         c.title = chat_title(members, &me, &names, &c);
                     }
                     c.picture = chat_picture(members, &me, &names);
+                    c.members = members
+                        .iter()
+                        .filter(|m| **m != me)
+                        .filter_map(|m| Some(crate::model::Mention { id: m.clone(), name: names.get(m)?.clone() }))
+                        .collect();
                 }
                 c
             })
@@ -429,6 +434,7 @@ impl Backend for Teams {
                     muted: channel.muted,
                     join_url: None,
                     picture: None,
+                    members: Vec::new(),
                 });
             }
         }
@@ -588,6 +594,7 @@ mod tests {
             muted: false,
             join_url: None,
             picture: None,
+            members: Vec::new(),
         };
         let ids = |l: &[&str]| l.iter().map(|s| s.to_string()).collect::<Vec<_>>();
         assert_eq!(chat_title(&ids(&["8:orgid:me", "8:orgid:a"]), "8:orgid:me", &names, &chat), "Maya");

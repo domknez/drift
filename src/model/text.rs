@@ -177,7 +177,26 @@ impl Builder {
             return;
         }
         let span = self.span();
-        self.runs.text(text, span);
+        if span.code {
+            self.runs.text(text, span);
+            return;
+        }
+        // Emoji Teams has pictures of become emoji runs (shown as the picture).
+        let mut plain = String::new();
+        let mut chars = text.chars().peekable();
+        while let Some(c) = chars.next() {
+            match super::emoji::key_of(c) {
+                Some(key) => {
+                    if chars.peek() == Some(&'\u{fe0f}') {
+                        chars.next();
+                    }
+                    self.runs.text(&std::mem::take(&mut plain), span.clone());
+                    self.runs.text(&c.to_string(), Span { emoji: Some(key.to_string()), ..span.clone() });
+                }
+                None => plain.push(c),
+            }
+        }
+        self.runs.text(&plain, span);
     }
 
     fn open(&mut self, name: String, attrs: &str) {
@@ -548,6 +567,14 @@ mod tests {
         let blocks = from_html(r#"<p>ok <img alt="🙂" itemtype="http://schema.skype.com/Emoji" itemid="smile" src="x"></p>"#);
         assert_eq!(flatten(&blocks), "ok 🙂");
         assert_eq!(runs(&blocks)[1].span.emoji.as_deref(), Some("smile"));
+    }
+
+    #[test]
+    fn known_emoji_characters_become_emoji() {
+        let blocks = from_html("<p>great 👍️ job</p>");
+        let r = runs(&blocks);
+        assert_eq!(r.iter().map(|r| r.text.as_str()).collect::<Vec<_>>(), ["great ", "👍", " job"]);
+        assert_eq!(r[1].span.emoji.as_deref(), Some("yes"));
     }
 
     #[test]

@@ -1,10 +1,12 @@
 //! The types a backend fills and the UI reads: conversations, teams and their
 //! channels, messages and the people who wrote them.
 
+pub mod emoji;
 pub mod markdown;
 pub mod text;
 pub mod time;
 
+pub use markdown::Mention;
 pub use text::{Block, Inline};
 
 /// A conversation's id as the service knows it (`19:…@thread.v2`, `48:mentions`, …).
@@ -38,6 +40,8 @@ pub struct Conversation {
     /// The meeting's join link, for meeting chats.
     pub join_url: Option<String>,
     pub picture: Option<Picture>,
+    /// Who's in a chat (ids and names; the user left out). Empty for channels.
+    pub members: Vec<Mention>,
 }
 
 /// A picture the service has: a person's photo, a team's, or a group chat's made

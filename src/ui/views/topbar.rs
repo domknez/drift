@@ -8,7 +8,7 @@ use crate::ui::style::icons::{self, Icon};
 use crate::ui::style::{colors, metrics, typography as ty};
 use crate::ui::widgets;
 use crate::ui::workspace::{Section, Workspace};
-use eframe::egui::{self, Align2, CornerRadius, Frame, Layout, Margin, Rect, RichText, Sense, Ui, pos2, vec2};
+use eframe::egui::{self, Align2, CornerRadius, Frame, Margin, Rect, RichText, Sense, Stroke, Ui, pos2, vec2};
 
 const PILL_HEIGHT: f32 = 36.0;
 
@@ -119,16 +119,37 @@ fn tab(ui: &mut Ui, rect: Rect, icon: Icon, label: &str, count: usize, on: bool)
 /// The search pill: it narrows the list as you type.
 fn search(ui: &mut Ui, ws: &mut Workspace, rect: Rect) {
     let p = colors();
-    ui.painter().rect_filled(rect, CornerRadius::same(12), p.panel);
-    icons::paint(
-        ui.painter(),
-        Rect::from_min_size(pos2(rect.left() + 12.0, rect.center().y - 8.0), vec2(16.0, 16.0)),
-        Icon::Search,
-        p.faint,
-    );
-    ui.painter().text(pos2(rect.right() - 12.0, rect.center().y), Align2::RIGHT_CENTER, "⌘K", ty::mono_small(), p.faint);
-    let field = Rect::from_min_max(pos2(rect.left() + 36.0, rect.top()), pos2(rect.right() - 40.0, rect.bottom()));
-    let mut c = ui.new_child(egui::UiBuilder::new().max_rect(field).layout(Layout::left_to_right(egui::Align::Center)));
+    let focused = ui.memory(|m| m.has_focus(search_id()));
+    let font = ty::search();
+    // A clear outline in the accent while typing; the pill alone otherwise.
+    let stroke = if focused { Stroke::new(1.5, p.accent_fill) } else { Stroke::NONE };
+    ui.painter().rect(rect, CornerRadius::same(12), p.panel, stroke, egui::StrokeKind::Inside);
+    let icon = Rect::from_min_size(pos2(rect.left() + 13.0, rect.center().y - 8.0), vec2(16.0, 16.0));
+    icons::paint(ui.painter(), icon, Icon::Search, if focused { p.accent } else { p.faint });
+
+    // On the right: ⌘K, or × to clear what's typed.
+    let has_text = !ws.filter.is_empty();
+    let right = rect.right() - 10.0;
+    if has_text {
+        let clear = Rect::from_center_size(pos2(right - 10.0, rect.center().y), vec2(22.0, 22.0));
+        let response = ui.interact(clear, ui.scope_id().with("clear-search"), Sense::click()).on_hover_text("Clear (Esc)");
+        if response.hovered() {
+            ui.painter().circle_filled(clear.center(), 11.0, p.hover);
+        }
+        icons::paint(ui.painter(), Rect::from_center_size(clear.center(), vec2(12.0, 12.0)), Icon::Close, p.dim);
+        if response.clicked() {
+            ws.filter.clear();
+            ws.hits = None;
+        }
+    } else {
+        ui.painter().text(pos2(right - 2.0, rect.center().y), Align2::RIGHT_CENTER, "⌘K", ty::mono_small(), p.faint);
+    }
+
+    // The text field, exactly one line tall and centred in the pill.
+    let line = ui.painter().layout_no_wrap("Ag".into(), font.clone(), p.text).size().y;
+    let field =
+        Rect::from_min_max(pos2(icon.right() + 9.0, rect.center().y - line / 2.0), pos2(right - 30.0, rect.center().y + line / 2.0));
+    let mut c = ui.new_child(egui::UiBuilder::new().max_rect(field));
     let hint = match ws.section {
         Section::Activity => "Search activity",
         Section::Chats => "Search messages, people, channels",
@@ -138,18 +159,24 @@ fn search(ui: &mut Ui, ws: &mut Workspace, rect: Rect) {
     let response = c.add(
         egui::TextEdit::singleline(&mut ws.filter)
             .id(search_id())
-            .hint_text(RichText::new(hint).font(ty::small()).color(p.faint))
-            .font(ty::small())
+            .hint_text(RichText::new(hint).font(font.clone()).color(p.faint))
+            .font(font)
+            .text_color(p.text)
             .frame(Frame::NONE)
-            .margin(Margin { left: 0, right: 0, top: 3, bottom: 0 })
+            .margin(Margin::ZERO)
             .desired_width(f32::INFINITY),
     );
     if ui.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::K))) {
         response.request_focus();
     }
-    // Enter searches messages at once (otherwise a pause in typing does).
+    // Enter searches messages at once (otherwise a pause in typing does); Esc clears.
     if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
         ws.search(ui.ctx());
+    }
+    if response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+        ws.filter.clear();
+        ws.hits = None;
+        response.surrender_focus();
     }
     if response.changed() && ws.filter.is_empty() {
         ws.hits = None;

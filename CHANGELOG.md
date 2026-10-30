@@ -20,6 +20,9 @@ The first version of drift:
 - Search messages in all chats and channels from the search field; a hit opens that
   message
 - Links in messages open again; reactions hang off their bubble
+- Find in the open conversation (⌘F); who's in it, with a click to your chat with them
+- An emoji picker with Teams' colour emoji; emoji you send go as Teams emoji
+- A cleaner search field: centred, outlined while typing, × or Esc to clear
 - Activity: mentions and replies with who, what and where; a click opens that message
 - Reply with a quote, edit (↑ in an empty box edits your last message) and delete your
   messages; Markdown and @mentions when writing
