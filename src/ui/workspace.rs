@@ -13,9 +13,11 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::time::{Duration, Instant};
 
 /// How often the sidebar is fetched again (until the service pushes changes).
-const DIRECTORY_EVERY: Duration = Duration::from_secs(15);
+const DIRECTORY_EVERY: Duration = Duration::from_secs(10);
 /// How often the open conversation is fetched again.
 const MESSAGES_EVERY: Duration = Duration::from_secs(20);
+/// How often the open conversation is fetched again while drift is in front.
+const MESSAGES_FRONT_EVERY: Duration = Duration::from_secs(5);
 /// How often the calendar is fetched again.
 const CALENDAR_EVERY: Duration = Duration::from_secs(5 * 60);
 /// Searching messages starts once typing has paused this long.
@@ -574,6 +576,14 @@ impl Workspace {
                         self.me_id = self.backend.me_id();
                     }
                     self.notify_new(ctx, &directory);
+                    // Something newer in the open conversation than what's on screen: fetch it now.
+                    let newest = self.messages.as_ref().and_then(|m| m.last()).map(|m| m.at);
+                    if let Some(open) = self.open.as_deref()
+                        && let Some(last) = directory.conversation(open).and_then(|c| c.last.as_ref())
+                        && newest.is_some_and(|at| last.at > at)
+                    {
+                        self.messages_at = None;
+                    }
                     self.directory = Some(directory);
                     self.error = None;
                 }
@@ -658,7 +668,7 @@ impl Workspace {
         }
         if let Some(id) = self.open.clone()
             && !self.messages_load.is_running()
-            && due(self.messages_at, MESSAGES_EVERY)
+            && due(self.messages_at, if ctx.input(|i| i.viewport().focused.unwrap_or(true)) { MESSAGES_FRONT_EVERY } else { MESSAGES_EVERY })
         {
             self.messages_at = Some(Instant::now());
             let backend = self.backend.clone();
@@ -690,7 +700,7 @@ impl Workspace {
             self.activity_load = Load::start(ctx, move || backend.messages(&feed));
         }
         // Wake up for the next refresh even when nothing moves.
-        ctx.request_repaint_after(MESSAGES_EVERY);
+        ctx.request_repaint_after(MESSAGES_FRONT_EVERY);
         None
     }
 
