@@ -137,7 +137,7 @@ fn search(ui: &mut Ui, ws: &mut Workspace, rect: Rect) {
     };
     let response = c.add(
         egui::TextEdit::singleline(&mut ws.filter)
-            .id_salt("search")
+            .id(search_id())
             .hint_text(RichText::new(hint).font(ty::small()).color(p.faint))
             .font(ty::small())
             .frame(Frame::NONE)
@@ -147,6 +147,18 @@ fn search(ui: &mut Ui, ws: &mut Workspace, rect: Rect) {
     if ui.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::K))) {
         response.request_focus();
     }
+    // Enter searches messages at once (otherwise a pause in typing does).
+    if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+        ws.search(ui.ctx());
+    }
+    if response.changed() && ws.filter.is_empty() {
+        ws.hits = None;
+    }
+}
+
+/// The search field's id, for focusing it from elsewhere (the header's search button).
+pub fn search_id() -> egui::Id {
+    egui::Id::unique("search")
 }
 
 /// The meeting to join today: the newest meeting chat with a link and activity today.

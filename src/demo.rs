@@ -4,7 +4,9 @@
 use crate::backend::{Backend, Error, Result};
 use crate::model::markdown::Outgoing;
 use crate::model::text::{self, Block};
-use crate::model::{Author, Card, Channel, Conversation, Directory, Kind, Message, Picture, Preview, Reaction, Source, Team, time};
+use crate::model::{
+    Author, Card, Channel, Conversation, Directory, Kind, Message, Picture, Preview, Reaction, SearchHit, Source, Team, time,
+};
 
 pub struct Demo;
 
@@ -339,6 +341,27 @@ impl Backend for Demo {
 
     fn mark_read(&self, _conversation: &str, _message: &str) -> Result<()> {
         Ok(())
+    }
+
+    fn search(&self, query: &str) -> Result<Vec<SearchHit>> {
+        let query = query.to_lowercase();
+        let mut hits = Vec::new();
+        for (conversation, place) in [(OPEN, "PR Reviews · Halcyon"), ("19:maya", "Maya Lindqvist")] {
+            for m in self.messages(conversation)? {
+                let text = crate::model::text::flatten(&m.body);
+                if text.to_lowercase().contains(&query) {
+                    hits.push(SearchHit {
+                        conversation: conversation.into(),
+                        message: m.id,
+                        author: m.author.name,
+                        at: m.at,
+                        text,
+                        place: place.into(),
+                    });
+                }
+            }
+        }
+        Ok(hits)
     }
 
     fn pin(&self, _conversation: &str, _pinned: bool) -> Result<()> {

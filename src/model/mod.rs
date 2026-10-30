@@ -199,6 +199,19 @@ fn code_points(key: &str) -> Option<String> {
     hex.split('-').map(|h| u32::from_str_radix(h, 16).ok().filter(|c| *c >= 0x20).and_then(char::from_u32)).collect()
 }
 
+/// A message found by search.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SearchHit {
+    pub conversation: ConversationId,
+    pub message: String,
+    pub author: String,
+    /// Unix milliseconds.
+    pub at: i64,
+    pub text: String,
+    /// Where it was written: a team's channel, or a chat's name.
+    pub place: String,
+}
+
 /// Everything listed in the sidebar.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Directory {

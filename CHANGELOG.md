@@ -17,6 +17,9 @@ The first version of drift:
   posts link to their thread, which opens beside the channel for replying
 - Right-click a message to react, reply in its thread, copy it or open its link;
   click a reaction to add or take back yours
+- Search messages in all chats and channels from the search field; a hit opens that
+  message
+- Links in messages open again; reactions hang off their bubble
 - Activity: mentions and replies with who, what and where; a click opens that message
 - Reply with a quote, edit (↑ in an empty box edits your last message) and delete your
   messages; Markdown and @mentions when writing

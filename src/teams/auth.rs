@@ -17,6 +17,8 @@ const AUTHORITY: &str = "https://login.microsoftonline.com/organizations/oauth2/
 const AUTHZ: &str = "https://teams.microsoft.com/api/authsvc/v1.0/authz";
 /// The chat service's audience; the sign-in asks for it first.
 pub const SPACES: &str = "https://api.spaces.skype.com";
+/// The audience of Microsoft 365 search (finding messages).
+pub const SEARCH: &str = "https://outlook.office.com/search";
 /// The audience of the chat service aggregator (teams, channels, chats).
 pub const CHAT_AGGREGATOR: &str = "https://chatsvcagg.teams.microsoft.com";
 /// Tokens are renewed when they have less than this left (ms).

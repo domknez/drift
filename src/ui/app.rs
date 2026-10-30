@@ -82,6 +82,9 @@ impl App {
                 let (message, root) = (parts.next(), parts.next());
                 workspace.open_message(&open, message, root);
             }
+            if let Ok(filter) = std::env::var("DRIFT_DEMO_FILTER") {
+                workspace.filter = filter;
+            }
             // DRIFT_DEMO_DRAFT: text in the composer; DRIFT_DEMO_QUOTE: a message quoted in it.
             if let Ok(draft) = std::env::var("DRIFT_DEMO_DRAFT") {
                 workspace.draft = draft;

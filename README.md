@@ -39,6 +39,9 @@ Sibling of [dust](https://github.com/domknez/dust) (music) and
 - **Write like in Teams:** Markdown (`**bold**`, `*italic*`, `~~strike~~`, `` `code` ``,
   code blocks, lists, `>` quotes, links), `@` to mention a colleague, ↑ in an empty box
   to edit your last message, Esc to cancel a quote or an edit
+- **Search:** typing in the search field narrows the list to names, and after a moment
+  finds messages too (in all your chats and channels, as Teams' search does), with
+  what you typed marked; a click opens that message. ⌘K jumps to it
 - **Activity:** who mentioned you or replied, what they wrote and where; a click
   opens that very message, marked (in its thread if it's a reply)
 - **Pin and unpin** chats and channels from their right-click menu

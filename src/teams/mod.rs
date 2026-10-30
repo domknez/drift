@@ -13,8 +13,8 @@ pub mod shape;
 
 use crate::backend::{Backend, Error, Result};
 use crate::model::markdown::Outgoing;
-use crate::model::{Conversation, Directory, Kind, Message, Picture};
-use auth::{CHAT_AGGREGATOR, SPACES, Session};
+use crate::model::{Conversation, Directory, Kind, Message, Picture, SearchHit};
+use auth::{CHAT_AGGREGATOR, SEARCH, SPACES, Session};
 use http::{Body, Method};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -102,6 +102,36 @@ impl Teams {
             body["properties"] = serde_json::json!({"mentions": Value::Array(mentions).to_string()});
         }
         body
+    }
+
+    /// Search Teams messages (Microsoft 365 search, as Teams' own search box does).
+    fn search_raw(&self, query: &str) -> Result<Value> {
+        let bearer = format!("Bearer {}", self.session().access(SEARCH)?);
+        let id = || {
+            format!(
+                "{:08x}-{:04x}-4{:03x}-a{:03x}-{:012x}",
+                fastrand::u32(..),
+                fastrand::u16(..),
+                fastrand::u16(..0xfff),
+                fastrand::u16(..0xfff),
+                fastrand::u64(..0xffff_ffff_ffff)
+            )
+        };
+        let body = serde_json::json!({
+            "entityRequests": [{
+                "entityType": "Message",
+                "contentSources": ["Teams"],
+                "propertySet": "Optimized",
+                "query": {"queryString": query, "displayQueryString": query},
+                "from": 0,
+                "size": 25,
+                "topResultsCount": 5
+            }],
+            "cvid": id(),
+            "logicalId": id(),
+            "scenario": {"Dimensions": [{"DimensionName": "QueryType", "DimensionValue": "Messages"}, {"DimensionName": "FormFactor", "DimensionValue": "general.web.reactSearch"}], "Name": "powerbar"}
+        });
+        http::request(Method::Post, "https://substrate.office.com/search/api/v2/query", &[("Authorization", &bearer)], Body::Json(&body))
     }
 
     /// The aggregator's roster: teams with their channels, and the chats.
@@ -251,14 +281,22 @@ impl Teams {
                     Value::String(s) => {
                         if let Some(at) = s.find("http") {
                             let host = s[at..].split("://").nth(1).and_then(|r| r.split(['/', '"', ')', ' ']).next()).unwrap_or("?");
-                            let how = if s[..at].ends_with("](") { "markdown" } else if s[..at].ends_with("href=\"") { "href" } else { "plain" };
+                            let how = if s[..at].ends_with("](") {
+                                "markdown"
+                            } else if s[..at].ends_with("href=\"") {
+                                "href"
+                            } else {
+                                "plain"
+                            };
                             out.push(format!("{path} -> {host} ({how})"));
                         }
                     }
                     _ => {}
                 }
             }
-            if let Some(m) = answer["messages"].as_array().into_iter().flatten().find(|m| m["messagetype"].as_str() == Some("RichText/Media_Card")) {
+            if let Some(m) =
+                answer["messages"].as_array().into_iter().flatten().find(|m| m["messagetype"].as_str() == Some("RichText/Media_Card"))
+            {
                 let mut found = Vec::new();
                 let mut whole = m.clone();
                 if let Some(card) = m["content"].as_str().and_then(parse::swift) {
@@ -267,14 +305,19 @@ impl Teams {
                 if let Some(c) = whole.get_mut("content") {
                     // The content outside the card: only whether and where it links.
                     let text = c.as_str().unwrap_or("").to_string();
-                    let outside: String = text.split("<Swift").next().unwrap_or("").to_string() + text.split("/>").skip(1).collect::<Vec<_>>().join("/>").as_str();
+                    let outside: String = text.split("<Swift").next().unwrap_or("").to_string()
+                        + text.split("/>").skip(1).collect::<Vec<_>>().join("/>").as_str();
                     *c = Value::from(outside);
                 }
                 links(&whole, "m".into(), &mut found);
                 out.push_str(&format!("== links in a Media_Card message:\n{}\n", found.join("\n")));
                 let parsed = parse::messages(&answer, "");
                 let cards: Vec<_> = parsed.iter().filter_map(|m| m.card.as_ref()).collect();
-                out.push_str(&format!("== parsed cards: {}, with a link: {}\n", cards.len(), cards.iter().filter(|c| c.link.is_some()).count()));
+                out.push_str(&format!(
+                    "== parsed cards: {}, with a link: {}\n",
+                    cards.len(),
+                    cards.iter().filter(|c| c.link.is_some()).count()
+                ));
             }
         }
         let me = Picture::Person { id: self.my_id(), name: Backend::me(self) };
@@ -424,6 +467,10 @@ impl Backend for Teams {
         let path = format!("/v1/users/ME/conversations/{}/properties?name=consumptionhorizon", http::encode(conversation));
         let now = crate::model::time::now_ms();
         self.chat_write(Method::Put, &path, &serde_json::json!({"consumptionhorizon": format!("{message};{now};{message}")}))
+    }
+
+    fn search(&self, query: &str) -> Result<Vec<SearchHit>> {
+        Ok(parse::search_hits(&self.search_raw(query)?))
     }
 
     fn pin(&self, conversation: &str, pinned: bool) -> Result<()> {

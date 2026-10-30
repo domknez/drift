@@ -5,7 +5,7 @@ use super::load::Load;
 use super::pictures::Pictures;
 use crate::backend::{Backend, Error};
 use crate::model::markdown::{self, Mention};
-use crate::model::{ConversationId, Directory, Message, Picture, text};
+use crate::model::{ConversationId, Directory, Message, Picture, SearchHit, text};
 use eframe::egui;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -15,6 +15,8 @@ use std::time::{Duration, Instant};
 const DIRECTORY_EVERY: Duration = Duration::from_secs(60);
 /// How often the open conversation is fetched again.
 const MESSAGES_EVERY: Duration = Duration::from_secs(20);
+/// Searching messages starts once typing has paused this long.
+const SEARCH_PAUSE: Duration = Duration::from_millis(500);
 
 pub struct Workspace {
     pub backend: Arc<dyn Backend>,
@@ -50,8 +52,13 @@ pub struct Workspace {
     messages_at: Option<Instant>,
     /// The last failure, shown until the next success.
     pub error: Option<String>,
-    /// What the sidebar's search field holds.
+    /// What the search field holds: it narrows the list, and finds messages.
     pub filter: String,
+    /// Messages found for a query, and the query.
+    pub hits: Option<(String, Vec<SearchHit>)>,
+    hits_load: Load<(String, Vec<SearchHit>), Error>,
+    /// The query last seen, and when it last changed (searching waits for a pause).
+    typed: (String, Instant),
     /// Sidebar sections folded away, by key.
     pub folded: HashSet<String>,
     /// The message being typed in the open conversation.
@@ -115,6 +122,9 @@ impl Workspace {
             messages_at: None,
             error: None,
             filter: String::new(),
+            hits: None,
+            hits_load: Load::Idle,
+            typed: (String::new(), Instant::now()),
             // Meeting chats pile up; they start folded.
             folded: HashSet::from(["meetings".to_string()]),
             draft: String::new(),
@@ -271,6 +281,17 @@ impl Workspace {
         self.focus_scrolled = false;
     }
 
+    /// Search messages for what's in the search field now.
+    pub fn search(&mut self, ctx: &egui::Context) {
+        let query = self.filter.trim().to_string();
+        if query.is_empty() {
+            self.hits = None;
+            return;
+        }
+        let backend = self.backend.clone();
+        self.hits_load = Load::start(ctx, move || backend.search(&query).map(|hits| (query, hits)));
+    }
+
     /// Pin or unpin a conversation: shown at once, sent behind.
     pub fn set_pinned(&mut self, ctx: &egui::Context, id: &str, pinned: bool) {
         if let Some(c) = self.directory.as_mut().and_then(|d| d.conversations.iter_mut().find(|c| c.id == id)) {
@@ -333,6 +354,27 @@ impl Workspace {
                 Err(e) => self.failed(e),
             }
         }
+        if let Some(result) = self.hits_load.take() {
+            match result {
+                Ok(hits) => self.hits = Some(hits),
+                Err(Error::SignedOut) => return Some(Outcome::SignedOut),
+                Err(e) => self.failed(e),
+            }
+        }
+        // Search messages once typing pauses.
+        let query = self.filter.trim().to_string();
+        if query != self.typed.0 {
+            self.typed = (query.clone(), Instant::now());
+        }
+        if query.chars().count() >= 2
+            && self.typed.1.elapsed() >= SEARCH_PAUSE
+            && self.hits.as_ref().is_none_or(|(q, _)| *q != query)
+            && !self.hits_load.is_running()
+        {
+            self.search(ctx);
+        } else if query.chars().count() >= 2 && self.typed.1.elapsed() < SEARCH_PAUSE {
+            ctx.request_repaint_after(SEARCH_PAUSE);
+        }
         if let Some(result) = self.activity_load.take() {
             match result {
                 Ok(items) => self.activity = Some(items),
@@ -343,6 +385,13 @@ impl Workspace {
         if let Some(result) = self.messages_load.take() {
             match result {
                 Ok((id, messages)) if Some(&id) == self.open.as_ref() => {
+                    // A message to show that's a reply: its thread opens too.
+                    if self.thread.is_none()
+                        && let Some(root) =
+                            self.focus.as_ref().and_then(|f| messages.iter().find(|m| &m.id == f)).and_then(|m| m.root.clone())
+                    {
+                        self.thread = Some(root);
+                    }
                     self.messages = Some(messages);
                     self.error = None;
                     self.mark_read(ctx);

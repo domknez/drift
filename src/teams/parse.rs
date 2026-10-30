@@ -1,7 +1,7 @@
 //! The services' JSON as `model` types. Fields are read leniently: the web client's
 //! API isn't documented, and what's missing gets a default rather than an error.
 
-use crate::model::{Author, Card, Channel, Conversation, Kind, Message, Picture, Preview, Reaction, Source, Team, text, time};
+use crate::model::{Author, Card, Channel, Conversation, Kind, Message, Picture, Preview, Reaction, SearchHit, Source, Team, text, time};
 use serde_json::Value;
 
 fn str_of<'a>(v: &'a Value, keys: &[&str]) -> Option<&'a str> {
@@ -326,6 +326,31 @@ fn strip_link(s: &str, link: &mut Option<String>) -> String {
     out.trim().to_string()
 }
 
+/// Messages found by Microsoft 365 search.
+pub fn search_hits(v: &Value) -> Vec<SearchHit> {
+    v["EntitySets"][0]["ResultSets"][0]["Results"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|r| {
+            let src = &r["Source"];
+            let conversation = str_of(src, &["ClientConversationId", "ClientThreadId"])?.to_string();
+            let message = str_of(src, &["InternetMessageId"])?.to_string();
+            let at = str_of(src, &["DateTimeSent", "DateTimeReceived", "DateTimeCreated"]).and_then(time::parse_iso).unwrap_or(0);
+            let author = str_of(&src["From"]["EmailAddress"], &["Name"]).unwrap_or("").to_string();
+            let summary = str_of(r, &["HitHighlightedSummary"]).or(str_of(src, &["Preview"])).unwrap_or("");
+            // The summary marks the matches with <c0>…</c0>; the text alone is kept.
+            let text = text::flatten(&text::from_html(&summary.replace("<c0>", "").replace("</c0>", "")));
+            let place = match (str_of(src, &["TeamName"]), str_of(src, &["ChannelName"])) {
+                (Some(team), Some(channel)) => format!("{channel} · {team}"),
+                (_, Some(channel)) => channel.to_string(),
+                _ => str_of(src, &["Subject", "DisplayTo"]).unwrap_or("").to_string(),
+            };
+            Some(SearchHit { conversation, message, author, at, text, place })
+        })
+        .collect()
+}
+
 /// Display names by id from the middle tier's profile answer.
 pub fn profiles(v: &Value) -> Vec<(String, String)> {
     let list = v["value"].as_array().filter(|a| !a.is_empty()).or(v["resolvedUsers"].as_array());
@@ -473,6 +498,24 @@ mod tests {
         assert_eq!(card.link.as_deref(), Some("https://dev.example.com/pr/10499"));
         assert_eq!(card.detail, "Active | pm-ui");
         assert_eq!(card.facts.len(), 2);
+    }
+
+    #[test]
+    fn reads_search_hits() {
+        let v = json!({"EntitySets": [{"ResultSets": [{"Results": [{"HitHighlightedSummary": "can you check the <c0>release</c0> notes",
+            "Source": {"ClientConversationId": "19:x@thread.v2", "InternetMessageId": "1793304000000", "DateTimeSent": "2026-10-29T20:00:00Z",
+                "From": {"EmailAddress": {"Name": "Priya Nair"}}, "ChannelName": "General", "TeamName": "Halcyon"}}]}]}]});
+        assert_eq!(
+            search_hits(&v),
+            [SearchHit {
+                conversation: "19:x@thread.v2".into(),
+                message: "1793304000000".into(),
+                author: "Priya Nair".into(),
+                at: 1_793_304_000_000,
+                text: "can you check the release notes".into(),
+                place: "General · Halcyon".into(),
+            }]
+        );
     }
 
     #[test]

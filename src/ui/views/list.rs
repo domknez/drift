@@ -42,6 +42,9 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace) {
     let area = Rect::from_min_max(pos2(full.left(), top), pos2(full.right(), full.bottom() - 6.0));
     let mut body = ui.new_child(egui::UiBuilder::new().max_rect(area).layout(Layout::top_down(Align::Min)));
     egui::ScrollArea::vertical().id_salt(("list", ws.section as u8)).auto_shrink([false, false]).show(&mut body, |ui| {
+        if !ws.filter.trim().is_empty() {
+            hits(ui, ws);
+        }
         match ws.section {
             Section::Chats => chats(ui, ws, &directory),
             Section::Teams => teams(ui, ws, &directory),
@@ -119,7 +122,7 @@ fn chats(ui: &mut Ui, ws: &mut Workspace, d: &Directory) {
         }
     }
     if pinned.is_empty() && recent.is_empty() {
-        empty(ui, "Nothing here.");
+        empty(ui, if ws.filter.trim().is_empty() { "Nothing here." } else { "No chats or channels by that name." });
     }
 }
 
@@ -171,6 +174,74 @@ fn meetings(ui: &mut Ui, ws: &mut Workspace, d: &Directory) {
     }
     for c in &list {
         row(ui, ws, d, c);
+    }
+}
+
+/// Messages found for what's typed in the search field.
+fn hits(ui: &mut Ui, ws: &mut Workspace) {
+    let p = colors();
+    let query = ws.filter.trim().to_string();
+    let found = ws.hits.as_ref().filter(|(q, _)| *q == query).map(|(_, h)| h.clone());
+    if !section(ui, ws, "messages", "MESSAGES") {
+        return;
+    }
+    match found {
+        None => {
+            ui.horizontal(|ui| {
+                ui.add_space(20.0);
+                ui.spinner();
+                ui.label(RichText::new("Searching messages…").font(ty::small()).color(p.faint));
+            });
+        }
+        Some(hits) if hits.is_empty() => empty(ui, "No messages found."),
+        Some(hits) => {
+            for hit in &hits {
+                hit_row(ui, ws, hit, &query);
+            }
+        }
+    }
+    ui.add_space(6.0);
+}
+
+/// A message found: who wrote it, the text with the query marked, where and when.
+fn hit_row(ui: &mut Ui, ws: &mut Workspace, hit: &crate::model::SearchHit, query: &str) {
+    let p = colors();
+    let selected = ws.focus.as_deref() == Some(hit.message.as_str());
+    let (outer, response) = ui.allocate_exact_size(vec2(ui.available_width(), 66.0), Sense::click());
+    let rect = Rect::from_min_size(outer.min + vec2(8.0, 1.0), vec2(outer.width() - 16.0, 64.0));
+    if selected || response.hovered() {
+        ui.painter().rect_filled(rect, CornerRadius::same(12), if selected { p.selected } else { p.hover });
+    }
+    let left = rect.left() + 12.0;
+    let right = rect.right() - 12.0;
+    let galley = ui.painter().layout_no_wrap(short_time(hit.at), ty::meta(), p.faint);
+    let time_w = galley.size().x;
+    ui.painter().galley(pos2(right - time_w, rect.top() + 8.0), galley, p.faint);
+    let line = |y: f32, r: f32| Rect::from_min_max(pos2(left, rect.top() + y), pos2(r, rect.top() + y + 18.0));
+    let mut a = ui.new_child(egui::UiBuilder::new().max_rect(line(6.0, right - time_w - 6.0)).layout(Layout::left_to_right(Align::Center)));
+    a.add(egui::Label::new(RichText::new(&hit.author).font(ty::item()).color(p.text)).truncate().selectable(false));
+    // The text, with the query in the accent.
+    let mut job = egui::text::LayoutJob::default();
+    let lower = hit.text.to_lowercase();
+    let q = query.to_lowercase();
+    let mut at = 0;
+    while let Some(found) = lower[at..].find(&q).map(|f| f + at) {
+        job.append(&hit.text[at..found], 0.0, egui::TextFormat::simple(ty::small(), p.dim));
+        job.append(&hit.text[found..found + q.len()], 0.0, egui::TextFormat::simple(ty::small_strong(), p.accent));
+        at = found + q.len();
+        if q.is_empty() {
+            break;
+        }
+    }
+    job.append(&hit.text[at.min(hit.text.len())..], 0.0, egui::TextFormat::simple(ty::small(), p.dim));
+    let mut b = ui.new_child(egui::UiBuilder::new().max_rect(line(25.0, right)).layout(Layout::left_to_right(Align::Center)));
+    b.add(egui::Label::new(job).truncate().selectable(false));
+    let mut c = ui.new_child(egui::UiBuilder::new().max_rect(line(43.0, right)).layout(Layout::left_to_right(Align::Center)));
+    if !hit.place.is_empty() {
+        c.add(egui::Label::new(RichText::new(format!("in {}", hit.place)).font(ty::meta()).color(p.faint)).truncate().selectable(false));
+    }
+    if response.clicked() {
+        ws.open_message(&hit.conversation, Some(hit.message.clone()), None);
     }
 }
 

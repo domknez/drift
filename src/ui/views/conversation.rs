@@ -188,7 +188,9 @@ fn head(ui: &mut Ui, ws: &mut Workspace, rect: Rect, directory: &Directory, id: 
         ui.ctx().open_url(egui::OpenUrl::new_tab(url));
     }
     let _ = square(ui, Icon::Members, "Members");
-    let _ = square(ui, Icon::Search, "Search");
+    if square(ui, Icon::Search, "Search messages (⌘K)").clicked() {
+        ui.memory_mut(|m| m.request_focus(super::topbar::search_id()));
+    }
     if let Some(error) = &ws.error {
         let r = Rect::from_min_max(pos2(x - 260.0, rect.top()), pos2(x, rect.bottom()));
         let mut e = ui.new_child(egui::UiBuilder::new().max_rect(r).layout(Layout::right_to_left(Align::Center)));
