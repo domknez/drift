@@ -11,9 +11,6 @@ channels to keep an eye on, and the odd call. It shows just that, in one calm si
 in a single native process — no browser engine, no helper processes, no idle CPU, and
 a fraction of the memory the official app keeps busy doing nothing.
 
-Sibling of [dust](https://github.com/domknez/dust) (music) and
-[haze](https://github.com/domknez/haze) (IPTV).
-
 > **Early days.** Messages, live updates and notifications all work across your chats,
 > channels and teams. Calls still open in Teams itself.
 
