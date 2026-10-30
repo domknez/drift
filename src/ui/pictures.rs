@@ -82,6 +82,11 @@ impl Pictures {
         }
     }
 
+    /// Whether the picture is on its way (not loaded, and not known to be missing).
+    pub fn loading(&self, picture: &Picture) -> bool {
+        matches!(self.slots.get(&picture.key()), Some(Slot::Loading))
+    }
+
     fn start_workers(&mut self) {
         let Some(tx) = self.done_tx.take() else { return };
         for i in 0..WORKERS {

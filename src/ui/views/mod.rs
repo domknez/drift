@@ -53,6 +53,11 @@ pub fn workspace(ui: &mut egui::Ui, ws: &mut Workspace, theme: Appearance) -> Op
             ws.open(&id);
         }
     });
+    if let Some(url) = ws.viewing.clone()
+        && !super::widgets::lightbox(ui.ctx(), &mut ws.pictures, &url)
+    {
+        ws.viewing = None;
+    }
     request
 }
 

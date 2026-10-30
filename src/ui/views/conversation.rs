@@ -31,6 +31,8 @@ pub enum Action {
     Delete(String),
     /// Bring a message into view and mark it (a reply's quote was clicked).
     Show(String),
+    /// See a picture big.
+    View(String),
 }
 
 /// Do what a click on a message asked for; `reply` when it came from the thread.
@@ -54,6 +56,7 @@ pub fn apply(ui: &Ui, ws: &mut Workspace, action: Action, reply: bool) {
             ws.focus = Some(id);
             ws.focus_scrolled = false;
         }
+        Action::View(url) => ws.viewing = Some(url),
     }
 }
 
@@ -100,6 +103,12 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace) {
             page.vertical_centered(|ui| ui.spinner());
         }
         Some(messages) => {
+            // Drawn the first time: laid out once unseen, so the list opens at its newest
+            // messages rather than showing its oldest for a frame.
+            if ws.drawn.as_deref() != Some(id.as_str()) {
+                ws.drawn = Some(id.clone());
+                ui.ctx().request_discard("a conversation's first layout");
+            }
             // Finding: the matches are marked in the text (the list panel lists them).
             let query = ws.find.as_deref().map(str::trim).filter(|q| !q.is_empty()).map(str::to_string);
             widgets::set_highlight(query.clone());
@@ -397,7 +406,7 @@ pub fn bubble(
     };
     let mut action = None;
     ui.add_space(if first { 8.0 } else { 3.0 });
-    let mut quoted = None;
+    let mut clicked = None;
     // What goes inside the bubble: who and when (on the first), the text, a card.
     let mut content = |ui: &mut Ui| {
         ui.spacing_mut().item_spacing.y = 4.0;
@@ -415,9 +424,9 @@ pub fn bubble(
             });
         }
         if !m.body.is_empty()
-            && let Some(id) = widgets::blocks(ui, pictures, &m.body)
+            && let Some(click) = widgets::blocks(ui, pictures, &m.body)
         {
-            quoted = Some(id);
+            clicked = Some(click);
         }
         if let Some(card) = &m.card {
             widgets::card(ui, card);
@@ -457,8 +466,10 @@ pub fn bubble(
         .inner
     });
     let frame = row.inner;
-    if let Some(id) = quoted.take() {
-        action = Some(Action::Show(id));
+    match clicked.take() {
+        Some(widgets::Clicked::Quote(id)) => action = Some(Action::Show(id)),
+        Some(widgets::Clicked::Image(url)) => action = Some(Action::View(url)),
+        None => {}
     }
     if focused && !view.scrolled {
         response.scroll_to_me(Some(Align::Center));

@@ -18,34 +18,25 @@ pub fn init() {
 
 /// Show a notification; `on_click` runs (on another thread) if the user clicks it.
 pub fn show(title: &str, subtitle: Option<&str>, body: &str, on_click: impl FnOnce() + Send + 'static) {
+    // Outside the app bundle drift has no identity of its own on macOS: a notification
+    // would come from an app called "use_default", and a click on it would ask where
+    // that app is. There, only the toasts in the window tell of new messages.
     #[cfg(target_os = "macos")]
     if bundled() {
         center::show(title, subtitle, body, Box::new(on_click));
-        return;
     }
-    let (title, subtitle, body) = (title.to_string(), subtitle.map(str::to_string), body.to_string());
-    let spawned = std::thread::Builder::new().name("notification".into()).spawn(move || {
-        let mut n = notify_rust::Notification::new();
-        n.summary(&title).body(&body).appname("drift");
-        #[cfg(target_os = "macos")]
-        {
-            if let Some(subtitle) = &subtitle {
-                n.subtitle(subtitle);
-            }
-            // Sends it and waits for a click (or for it to be dismissed).
-            notify_rust::NotificationHandle::new(n).wait_for_action(|action| {
-                if action != "__closed" {
-                    on_click();
-                }
-            });
-        }
-        #[cfg(not(target_os = "macos"))]
-        {
-            if let Some(subtitle) = &subtitle {
-                n.body(&format!("{subtitle}: {body}"));
-            }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let body = match subtitle {
+            Some(subtitle) => format!("{subtitle}: {body}"),
+            None => body.to_string(),
+        };
+        let title = title.to_string();
+        let spawned = std::thread::Builder::new().name("notification".into()).spawn(move || {
+            let mut n = notify_rust::Notification::new();
+            n.summary(&title).body(&body).appname("drift");
             match n.show() {
-                #[cfg(all(unix, not(target_os = "macos")))]
+                #[cfg(unix)]
                 Ok(handle) => handle.wait_for_action(|action| {
                     if action == "default" {
                         on_click();
@@ -55,10 +46,10 @@ pub fn show(title: &str, subtitle: Option<&str>, body: &str, on_click: impl FnOn
                 Ok(_) => drop(on_click),
                 Err(e) => log_warn!("could not show a notification: {e}"),
             }
+        });
+        if let Err(e) = spawned {
+            log_warn!("could not show a notification: {e}");
         }
-    });
-    if let Err(e) = spawned {
-        log_warn!("could not show a notification: {e}");
     }
 }
 

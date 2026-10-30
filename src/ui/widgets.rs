@@ -134,11 +134,18 @@ pub fn rich_text(ui: &mut Ui, pictures: &mut Pictures, body: &[Inline], color: C
                 ui.spacing_mut().item_spacing.x = 0.0;
                 for (text, run) in line {
                     let s = &run.span;
-                    // Emoji the service has a picture of are drawn in colour.
-                    if let Some(texture) = s.emoji.as_ref().and_then(|key| pictures.get(&Picture::Emoji(key.clone()))) {
-                        let size = if line_is_emoji_only { 30.0 } else { 19.0 };
-                        ui.add(egui::Image::new((texture, vec2(size, size))));
-                        continue;
+                    // Emoji the service has a picture of are drawn in colour; while the
+                    // picture loads, its place is kept, so the text doesn't move when it comes.
+                    if let Some(emoji) = s.emoji.as_ref().map(|key| Picture::Emoji(key.clone())) {
+                        let size = vec2(1.0, 1.0) * if line_is_emoji_only { 30.0 } else { 19.0 };
+                        if let Some(texture) = pictures.get(&emoji) {
+                            ui.add(egui::Image::new((texture, size)));
+                            continue;
+                        }
+                        if pictures.loading(&emoji) {
+                            ui.allocate_exact_size(size, Sense::hover());
+                            continue;
+                        }
                     }
                     let font = if s.code {
                         ty::code()
@@ -185,9 +192,16 @@ pub fn rich_text(ui: &mut Ui, pictures: &mut Pictures, body: &[Inline], color: C
     });
 }
 
-/// A message's blocks: paragraphs, tables, quotes and code. Returns the id of the
-/// message a clicked quote is of.
-pub fn blocks(ui: &mut Ui, pictures: &mut Pictures, blocks: &[Block]) -> Option<String> {
+/// What was clicked in a message's blocks.
+pub enum Clicked {
+    /// A quote: the id of the message it's of.
+    Quote(String),
+    /// A picture: its URL.
+    Image(String),
+}
+
+/// A message's blocks: paragraphs, tables, quotes, code and pictures.
+pub fn blocks(ui: &mut Ui, pictures: &mut Pictures, blocks: &[Block]) -> Option<Clicked> {
     let p = colors();
     let mut clicked = None;
     for block in blocks {
@@ -195,7 +209,7 @@ pub fn blocks(ui: &mut Ui, pictures: &mut Pictures, blocks: &[Block]) -> Option<
             Block::Text(runs) => rich_text(ui, pictures, runs, p.text),
             Block::Quote(runs, of) => {
                 if quote(ui, pictures, runs, of.is_some()) {
-                    clicked = of.clone();
+                    clicked = of.clone().map(Clicked::Quote);
                 }
             }
             Block::Code(code) => {
@@ -210,15 +224,19 @@ pub fn blocks(ui: &mut Ui, pictures: &mut Pictures, blocks: &[Block]) -> Option<
                 );
             }
             Block::Table { rows, header } => table(ui, pictures, rows, *header),
-            Block::Image { url, size } => image(ui, pictures, url, *size),
+            Block::Image { url, size } => {
+                if image(ui, pictures, url, *size) {
+                    clicked = Some(Clicked::Image(url.clone()));
+                }
+            }
         }
     }
     clicked
 }
 
 /// A picture in a message, at most this wide, its corners rounded; a soft placeholder
-/// of the right shape while it loads.
-fn image(ui: &mut Ui, pictures: &mut Pictures, url: &str, size: Option<(u32, u32)>) {
+/// of the right shape while it loads. True when it was clicked (to see it big).
+fn image(ui: &mut Ui, pictures: &mut Pictures, url: &str, size: Option<(u32, u32)>) -> bool {
     const MAX: f32 = 320.0;
     let p = colors();
     let texture = pictures.get(&Picture::Image(url.to_string()));
@@ -228,15 +246,38 @@ fn image(ui: &mut Ui, pictures: &mut Pictures, url: &str, size: Option<(u32, u32
         .unwrap_or((MAX, MAX * 0.6));
     let scale = (MAX.min(ui.available_width()) / natural.0).min(1.0);
     let shown = vec2(natural.0 * scale, natural.1 * scale);
-    let (rect, _) = ui.allocate_exact_size(shown, Sense::hover());
+    let (rect, response) = ui.allocate_exact_size(shown, Sense::click());
     match texture {
         Some(t) => {
             egui::Image::new((t, shown)).corner_radius(10).paint_at(ui, rect);
+            response.on_hover_cursor(egui::CursorIcon::ZoomIn).clicked()
         }
         None => {
             ui.painter().rect_filled(rect, CornerRadius::same(10), p.hover);
+            false
         }
     }
+}
+
+/// A picture over the whole window, as big as fits; a click anywhere or Esc closes
+/// it. False once it's closed.
+pub fn lightbox(ctx: &egui::Context, pictures: &mut Pictures, url: &str) -> bool {
+    let Some(texture) = pictures.get(&Picture::Image(url.to_string())) else { return false };
+    let natural = ctx.tex_manager().read().meta(texture).map_or(vec2(1.0, 1.0), |m| vec2(m.size[0] as f32, m.size[1] as f32));
+    let mut open = !ctx.input(|i| i.key_pressed(egui::Key::Escape));
+    egui::Area::new(egui::Id::unique("lightbox")).order(egui::Order::Foreground).fixed_pos(egui::Pos2::ZERO).show(ctx, |ui| {
+        let screen = ctx.content_rect();
+        let response = ui.allocate_rect(screen, Sense::click());
+        ui.painter().rect_filled(screen, CornerRadius::ZERO, Color32::from_black_alpha(215));
+        let room = screen.shrink(40.0).size();
+        let scale = (room.x / natural.x).min(room.y / natural.y).min(1.0);
+        let rect = Rect::from_center_size(screen.center(), natural * scale);
+        egui::Image::new((texture, rect.size())).corner_radius(8).paint_at(ui, rect);
+        if response.clicked() {
+            open = false;
+        }
+    });
+    open
 }
 
 /// A quote (or the message a reply quotes): a tinted box with an accent edge, the
@@ -365,8 +406,10 @@ pub fn reactions(ui: &mut Ui, pictures: &mut Pictures, reactions: &[Reaction], r
             let (fill, text) = if r.mine { (p.selected, p.accent) } else { (p.surface, p.dim) };
             // Painted at its own size: an emoji (picture, or the character) and the count.
             let count = ui.painter().layout_no_wrap(r.count.to_string(), ty::small_strong(), text);
-            let picture = pictures.get(&Picture::Emoji(r.key.clone()));
-            let glyph = picture.is_none().then(|| ui.painter().layout_no_wrap(r.emoji(), ty::small_strong(), text));
+            let emoji = Picture::Emoji(r.key.clone());
+            let picture = pictures.get(&emoji);
+            // While the picture loads, its place is kept.
+            let glyph = (picture.is_none() && !pictures.loading(&emoji)).then(|| ui.painter().layout_no_wrap(r.emoji(), ty::small_strong(), text));
             let emoji_w = glyph.as_ref().map_or(17.0, |g| g.size().x);
             let size = vec2(9.0 + emoji_w + 4.0 + count.size().x + 9.0, 24.0);
             let (rect, response) = ui.allocate_exact_size(size, Sense::click());

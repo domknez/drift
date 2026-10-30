@@ -18,8 +18,6 @@ ureq = { version = "3", features = ["json"] }
 # Trouter, the websocket Teams pushes changes through; some of its bodies come gzipped.
 tungstenite = { version = "0.28", default-features = false, features = ["handshake", "rustls-tls-webpki-roots"] }
 flate2 = "1"
-# The system's notifications for new messages.
-notify-rust = "4"
 # The system's file dialog, for attaching pictures.
 rfd = "0.15"
 # The Microsoft sign-in page, shown in a helper process (see login.rs).
@@ -51,9 +49,12 @@ objc2-user-notifications = { version = "0.3", default-features = false, features
 libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
+notify-rust = "4"
 windows-native-keyring-store = { version = "1", default-features = false }
 
 [target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
+# The system's notifications for new messages (macOS uses its notification center).
+notify-rust = "4"
 dbus-secret-service-keyring-store = { version = "1", features = ["crypto-rust"] }
 
 [profile.release]

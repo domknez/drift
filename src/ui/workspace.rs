@@ -99,6 +99,11 @@ pub struct Workspace {
     seen_once: bool,
     /// Conversations whose notification was clicked.
     clicked: (Sender<String>, Receiver<String>),
+    /// The picture shown over the window, by its URL.
+    pub viewing: Option<String>,
+    /// The conversation last drawn (its first drawing is laid out once unseen, so it
+    /// opens at its newest messages without a flash of its oldest).
+    pub drawn: Option<ConversationId>,
     /// Changes the service pushes.
     pushes: Receiver<Push>,
     /// Whether the service is pushing changes (then polling slows down).
@@ -208,6 +213,8 @@ impl Workspace {
             seen: HashMap::new(),
             seen_once: false,
             clicked: std::sync::mpsc::channel(),
+            viewing: None,
+            drawn: None,
             pushes,
             live: false,
             badge: None,
