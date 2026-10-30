@@ -271,7 +271,6 @@ pub fn reactions(ui: &mut Ui, pictures: &mut Pictures, reactions: &[Reaction], r
     }
     let p = colors();
     let mut clicked = None;
-    ui.add_space(4.0);
     let layout = if right { egui::Layout::right_to_left(egui::Align::Min) } else { egui::Layout::left_to_right(egui::Align::Min) };
     ui.with_layout(layout.with_main_wrap(!right), |ui| {
         ui.spacing_mut().item_spacing.x = 6.0;
@@ -284,6 +283,8 @@ pub fn reactions(ui: &mut Ui, pictures: &mut Pictures, reactions: &[Reaction], r
             let emoji_w = glyph.as_ref().map_or(17.0, |g| g.size().x);
             let size = vec2(9.0 + emoji_w + 4.0 + count.size().x + 9.0, 24.0);
             let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+            // A ring in the panel's colour cuts the pill out of the bubble it overlaps.
+            ui.painter().rect_filled(rect.expand(2.0), CornerRadius::same(14), p.panel);
             let stroke = if r.mine { Stroke::new(1.0, p.accent.gamma_multiply(0.6)) } else { Stroke::NONE };
             ui.painter().rect(rect, CornerRadius::same(12), fill, stroke, egui::StrokeKind::Inside);
             let emoji = Rect::from_min_size(egui::pos2(rect.left() + 9.0, rect.center().y - 8.5), vec2(emoji_w, 17.0));

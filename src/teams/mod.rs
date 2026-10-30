@@ -242,6 +242,40 @@ impl Teams {
                 .take(3)
                 .collect();
             out.push_str(&format!("== Media_Card tags: {outside:?}\n"));
+            // Where links sit in these messages: the path to each string holding one,
+            // and the link's host (never the rest of it).
+            fn links(v: &Value, path: String, out: &mut Vec<String>) {
+                match v {
+                    Value::Object(o) => o.iter().for_each(|(k, c)| links(c, format!("{path}.{k}"), out)),
+                    Value::Array(a) => a.iter().enumerate().for_each(|(i, c)| links(c, format!("{path}[{i}]"), out)),
+                    Value::String(s) => {
+                        if let Some(at) = s.find("http") {
+                            let host = s[at..].split("://").nth(1).and_then(|r| r.split(['/', '"', ')', ' ']).next()).unwrap_or("?");
+                            let how = if s[..at].ends_with("](") { "markdown" } else if s[..at].ends_with("href=\"") { "href" } else { "plain" };
+                            out.push(format!("{path} -> {host} ({how})"));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            if let Some(m) = answer["messages"].as_array().into_iter().flatten().find(|m| m["messagetype"].as_str() == Some("RichText/Media_Card")) {
+                let mut found = Vec::new();
+                let mut whole = m.clone();
+                if let Some(card) = m["content"].as_str().and_then(parse::swift) {
+                    whole["swift"] = card;
+                }
+                if let Some(c) = whole.get_mut("content") {
+                    // The content outside the card: only whether and where it links.
+                    let text = c.as_str().unwrap_or("").to_string();
+                    let outside: String = text.split("<Swift").next().unwrap_or("").to_string() + text.split("/>").skip(1).collect::<Vec<_>>().join("/>").as_str();
+                    *c = Value::from(outside);
+                }
+                links(&whole, "m".into(), &mut found);
+                out.push_str(&format!("== links in a Media_Card message:\n{}\n", found.join("\n")));
+                let parsed = parse::messages(&answer, "");
+                let cards: Vec<_> = parsed.iter().filter_map(|m| m.card.as_ref()).collect();
+                out.push_str(&format!("== parsed cards: {}, with a link: {}\n", cards.len(), cards.iter().filter(|c| c.link.is_some()).count()));
+            }
         }
         let me = Picture::Person { id: self.my_id(), name: Backend::me(self) };
         match self.picture(&me) {

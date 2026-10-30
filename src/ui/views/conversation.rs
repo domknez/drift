@@ -323,6 +323,12 @@ pub fn bubble(
         ui.new_child(egui::UiBuilder::new().max_rect(probe_rect).layout(Layout::top_down(Align::Min)).sizing_pass().invisible());
     content(&mut probe);
     let width = (probe.min_rect().width() + 2.0 * PAD_X).min(max);
+    let height = probe.min_rect().height() + 20.0;
+    // The bubble's own click area (right-click menu) goes in first, under its text:
+    // links and cards inside are added after it and so take their clicks.
+    let left = if mine { ui.max_rect().right() - width } else { ui.max_rect().left() + indent };
+    let area = Rect::from_min_size(pos2(left, ui.cursor().top()), vec2(width, height));
+    let response = ui.interact(area, ui.next_auto_id().with(("bubble", &m.id)), Sense::click());
 
     let layout = if mine { Layout::right_to_left(Align::Min) } else { Layout::left_to_right(Align::Min) };
     let row = ui.with_layout(layout, |ui| {
@@ -343,14 +349,14 @@ pub fn bubble(
         })
         .inner
     });
-    let response = row.inner.interact(Sense::click());
+    let frame = row.inner;
     if focused && !view.scrolled {
         response.scroll_to_me(Some(Align::Center));
         view.scrolled = true;
     }
     // The author's picture beside the last bubble of a run, level with its bottom.
     if !mine && last {
-        let at = Rect::from_min_size(pos2(response.rect.left() - indent, response.rect.bottom() - avatar), vec2(avatar, avatar));
+        let at = Rect::from_min_size(pos2(frame.rect.left() - indent, frame.rect.bottom() - avatar), vec2(avatar, avatar));
         let picture = pictures.get(&Picture::Person { id: m.author.id.clone(), name: m.author.name.clone() });
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(at));
         widgets::avatar(&mut child, &m.author.id, &m.author.name, avatar, picture);
@@ -404,30 +410,33 @@ pub fn bubble(
         }
     });
 
-    // Reactions and the thread link, under the bubble.
-    let has_thread = thread.is_some_and(|t| !t.is_empty());
-    if !m.reactions.is_empty() || has_thread {
+    // Reactions hang off the bubble's bottom edge; the thread link sits right under it.
+    if !m.reactions.is_empty() {
+        ui.add_space(-ui.spacing().item_spacing.y - 7.0);
+        let inset = 12.0;
         if mine {
             ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+                ui.add_space(inset);
                 if let Some(key) = widgets::reactions(ui, pictures, &m.reactions, true) {
                     action = Some(Action::React { message: m.id.clone(), key });
                 }
             });
         } else {
             ui.horizontal(|ui| {
-                ui.add_space(indent - ui.spacing().item_spacing.x);
-                ui.vertical(|ui| {
-                    if let Some(key) = widgets::reactions(ui, pictures, &m.reactions, false) {
-                        action = Some(Action::React { message: m.id.clone(), key });
-                    }
-                    if let Some(thread) = thread.filter(|t| !t.is_empty())
-                        && thread_link(ui, pictures, thread)
-                    {
-                        action = Some(Action::OpenThread(m.id.clone()));
-                    }
-                });
+                ui.add_space(indent + inset - ui.spacing().item_spacing.x);
+                if let Some(key) = widgets::reactions(ui, pictures, &m.reactions, false) {
+                    action = Some(Action::React { message: m.id.clone(), key });
+                }
             });
         }
+    }
+    if let Some(thread) = thread.filter(|t| !t.is_empty()) {
+        ui.horizontal(|ui| {
+            ui.add_space(indent - ui.spacing().item_spacing.x);
+            if thread_link(ui, pictures, thread) {
+                action = Some(Action::OpenThread(m.id.clone()));
+            }
+        });
     }
     if last {
         ui.add_space(6.0);
