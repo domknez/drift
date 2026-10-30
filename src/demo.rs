@@ -218,7 +218,7 @@ impl Backend for Demo {
                     None,
                     ME,
                     today(10, 25),
-                    "<blockquote itemtype=\"http://schema.skype.com/Reply\"><strong itemprop=\"mri\">Maya Lindqvist</strong><p itemprop=\"preview\">Maybe scale it by deltaY instead of a fixed step?</p></blockquote><p>Good catch, I'll try that after stand-up.</p>",
+                    "<blockquote itemtype=\"http://schema.skype.com/Reply\" itemid=\"3004\"><strong itemprop=\"mri\">Maya Lindqvist</strong><p itemprop=\"preview\">Maybe scale it by deltaY instead of a fixed step?</p></blockquote><p>Good catch, I'll try that after stand-up.</p>",
                     None,
                     vec![Reaction { key: "praying".into(), count: 1, mine: false }],
                 ),

@@ -135,13 +135,19 @@ pub fn rich_text(ui: &mut Ui, pictures: &mut Pictures, body: &[Inline], color: C
     });
 }
 
-/// A message's blocks: paragraphs, tables, quotes and code.
-pub fn blocks(ui: &mut Ui, pictures: &mut Pictures, blocks: &[Block]) {
+/// A message's blocks: paragraphs, tables, quotes and code. Returns the id of the
+/// message a clicked quote is of.
+pub fn blocks(ui: &mut Ui, pictures: &mut Pictures, blocks: &[Block]) -> Option<String> {
     let p = colors();
+    let mut clicked = None;
     for block in blocks {
         match block {
             Block::Text(runs) => rich_text(ui, pictures, runs, p.text),
-            Block::Quote(runs) => quote(ui, pictures, runs),
+            Block::Quote(runs, of) => {
+                if quote(ui, pictures, runs, of.is_some()) {
+                    clicked = of.clone();
+                }
+            }
             Block::Code(code) => {
                 Frame::new().fill(p.code).corner_radius(CornerRadius::same(metrics::RADIUS)).inner_margin(Margin::symmetric(12, 10)).show(
                     ui,
@@ -156,11 +162,12 @@ pub fn blocks(ui: &mut Ui, pictures: &mut Pictures, blocks: &[Block]) {
             Block::Table { rows, header } => table(ui, pictures, rows, *header),
         }
     }
+    clicked
 }
 
 /// A quote (or the message a reply quotes): a tinted box with an accent edge, the
-/// quoted author in the accent.
-fn quote(ui: &mut Ui, pictures: &mut Pictures, runs: &[Inline]) {
+/// quoted author in the accent. A reply's quote can be clicked (true when it was).
+fn quote(ui: &mut Ui, pictures: &mut Pictures, runs: &[Inline], clickable: bool) -> bool {
     let p = colors();
     let response = Frame::new()
         .fill(p.accent_fill.gamma_multiply(0.13))
@@ -179,6 +186,8 @@ fn quote(ui: &mut Ui, pictures: &mut Pictures, runs: &[Inline]) {
         .response;
     let bar = Rect::from_min_size(response.rect.min, vec2(3.0, response.rect.height()));
     ui.painter().rect_filled(bar, CornerRadius { nw: 8, sw: 8, ne: 0, se: 0 }, p.accent);
+    clickable
+        && response.interact(Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text("Go to this message").clicked()
 }
 
 /// A table with hairlines between its cells; wide ones scroll sideways.

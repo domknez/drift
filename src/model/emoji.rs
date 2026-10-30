@@ -48,7 +48,7 @@ pub const PICKER: [(&str, &str); 40] = [
 
 /// The key of an emoji character (a trailing variation selector is ignored).
 pub fn key_of(ch: char) -> Option<&'static str> {
-    PICKER.iter().find(|(_, c)| c.chars().next() == Some(ch) && c.chars().count() == 1).map(|(k, _)| *k)
+    PICKER.iter().find(|(_, c)| c.starts_with(ch) && c.chars().count() == 1).map(|(k, _)| *k)
 }
 
 /// The Teams markup of an emoji, as its composer sends it.

@@ -32,8 +32,8 @@ pub enum Block {
         rows: Vec<Vec<Vec<Inline>>>,
         header: bool,
     },
-    /// A quote, or the message a reply quotes.
-    Quote(Vec<Inline>),
+    /// A quote, or the message a reply quotes (with that message's id).
+    Quote(Vec<Inline>, Option<String>),
     /// Preformatted text, spaces kept.
     Code(String),
 }
@@ -52,7 +52,7 @@ pub fn flatten(body: &[Block]) -> String {
     let mut words = Vec::new();
     for block in body {
         match block {
-            Block::Text(runs) | Block::Quote(runs) => words.extend(runs.iter().map(|r| r.text.as_str())),
+            Block::Text(runs) | Block::Quote(runs, _) => words.extend(runs.iter().map(|r| r.text.as_str())),
             Block::Table { rows, .. } => words.extend(rows.iter().flatten().flatten().map(|r| r.text.as_str())),
             Block::Code(text) => words.push(text),
         }
@@ -94,7 +94,7 @@ pub fn to_markdown(body: &[Block]) -> String {
     for block in body {
         parts.push(match block {
             Block::Text(r) => runs(r),
-            Block::Quote(r) => runs(r).lines().map(|l| format!("> {l}")).collect::<Vec<_>>().join("\n"),
+            Block::Quote(r, _) => runs(r).lines().map(|l| format!("> {l}")).collect::<Vec<_>>().join("\n"),
             Block::Code(code) => format!("```\n{code}\n```"),
             Block::Table { rows, .. } => {
                 rows.iter().map(|row| row.iter().map(|c| runs(c)).collect::<Vec<_>>().join(" | ")).collect::<Vec<_>>().join("\n")
@@ -152,6 +152,8 @@ struct Builder {
     table: Option<Table>,
     /// Inside a `<blockquote>` (depth).
     quote: usize,
+    /// The id of the message a reply's quote is of.
+    quoted: Option<String>,
     /// Inside a `<pre>`: its text so far.
     pre: Option<String>,
 }
@@ -256,6 +258,9 @@ impl Builder {
             "blockquote" => {
                 self.end_paragraph();
                 self.quote += 1;
+                if attr(attrs, "itemtype").is_some_and(|t| t.ends_with("/Reply")) {
+                    self.quoted = attr(attrs, "itemid").filter(|id| !id.is_empty());
+                }
             }
             "li" => {
                 self.runs.block();
@@ -297,6 +302,9 @@ impl Builder {
             "blockquote" => {
                 self.end_paragraph();
                 self.quote = self.quote.saturating_sub(1);
+                if self.quote == 0 {
+                    self.quoted = None;
+                }
             }
             n if is_block(n) => self.runs.block(),
             _ => {}
@@ -325,7 +333,7 @@ impl Builder {
         if runs.is_empty() {
             return;
         }
-        self.blocks.push(if self.quote > 0 { Block::Quote(runs) } else { Block::Text(runs) });
+        self.blocks.push(if self.quote > 0 { Block::Quote(runs, self.quoted.clone()) } else { Block::Text(runs) });
     }
 
     fn finish(mut self) -> Vec<Block> {
@@ -528,7 +536,7 @@ mod tests {
         blocks
             .iter()
             .map(|b| match b {
-                Block::Text(r) | Block::Quote(r) => r.iter().map(|r| r.text.as_str()).collect(),
+                Block::Text(r) | Block::Quote(r, _) => r.iter().map(|r| r.text.as_str()).collect(),
                 Block::Code(c) => vec![c.as_str()],
                 Block::Table { .. } => vec!["<table>"],
             })
@@ -578,6 +586,12 @@ mod tests {
     }
 
     #[test]
+    fn reply_quotes_know_their_message() {
+        let html = r#"<blockquote itemscope="" itemtype="http://schema.skype.com/Reply" itemid="1698"><strong itemprop="mri">Maya</strong><p itemprop="preview">old</p></blockquote><p>new</p>"#;
+        assert!(matches!(&from_html(html)[0], Block::Quote(_, Some(id)) if id == "1698"));
+    }
+
+    #[test]
     fn decodes_references() {
         assert_eq!(decode("a &lt;b&gt; &#39;c&#x27; &unknown; & d"), "a <b> 'c' &unknown; & d");
     }
@@ -612,7 +626,7 @@ mod tests {
     fn quotes_and_code_blocks() {
         let html = "<blockquote><p>original</p></blockquote><p>answer</p><pre><code>fn main() {\n    run();\n}</code></pre>";
         let blocks = from_html(html);
-        assert!(matches!(&blocks[0], Block::Quote(r) if r[0].text == "original"));
+        assert!(matches!(&blocks[0], Block::Quote(r, None) if r[0].text == "original"));
         assert!(matches!(&blocks[1], Block::Text(r) if r[0].text == "answer"));
         assert_eq!(blocks[2], Block::Code("fn main() {\n    run();\n}".into()));
     }

@@ -24,6 +24,7 @@ The first version of drift:
 - An emoji picker with Teams' colour emoji; emoji you send go as Teams emoji
 - A cleaner search field: centred, outlined while typing, × or Esc to clear
 - Activity: mentions and replies with who, what and where; a click opens that message
+- Click a quoted message to go to it
 - Reply with a quote, edit (↑ in an empty box edits your last message) and delete your
   messages; Markdown and @mentions when writing
 - Teams' own colour emoji in reactions and messages

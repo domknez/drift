@@ -22,10 +22,15 @@ const QUICK_REACTIONS: [(&str, &str); 6] =
 /// What a click on a message asks for.
 pub enum Action {
     OpenThread(String),
-    React { message: String, key: String },
+    React {
+        message: String,
+        key: String,
+    },
     Quote(Message),
     Edit(Message),
     Delete(String),
+    /// Bring a message into view and mark it (a reply's quote was clicked).
+    Show(String),
 }
 
 /// Do what a click on a message asked for; `reply` when it came from the thread.
@@ -45,6 +50,10 @@ pub fn apply(ui: &Ui, ws: &mut Workspace, action: Action, reply: bool) {
             focus_composer(ui, reply);
         }
         Action::Delete(id) => ws.delete(ui.ctx(), &id),
+        Action::Show(id) => {
+            ws.focus = Some(id);
+            ws.focus_scrolled = false;
+        }
     }
 }
 
@@ -418,6 +427,7 @@ pub fn bubble(
     };
     let mut action = None;
     ui.add_space(if first { 8.0 } else { 3.0 });
+    let mut quoted = None;
     // What goes inside the bubble: who and when (on the first), the text, a card.
     let mut content = |ui: &mut Ui| {
         ui.spacing_mut().item_spacing.y = 4.0;
@@ -434,8 +444,10 @@ pub fn bubble(
                 ui.label(RichText::new(stamp).font(ty::meta()).color(p.faint));
             });
         }
-        if !m.body.is_empty() {
-            widgets::blocks(ui, pictures, &m.body);
+        if !m.body.is_empty()
+            && let Some(id) = widgets::blocks(ui, pictures, &m.body)
+        {
+            quoted = Some(id);
         }
         if let Some(card) = &m.card {
             widgets::card(ui, card);
@@ -475,6 +487,9 @@ pub fn bubble(
         .inner
     });
     let frame = row.inner;
+    if let Some(id) = quoted.take() {
+        action = Some(Action::Show(id));
+    }
     if focused && !view.scrolled {
         response.scroll_to_me(Some(Align::Center));
         view.scrolled = true;
