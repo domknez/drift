@@ -231,7 +231,7 @@ impl Backend for Teams {
 
         let mut conversations: Vec<Conversation> = listed
             .into_iter()
-            .filter(|c| matches!(c.kind, Kind::Chat | Kind::Meeting) && !channel_ids.contains(c.id.as_str()))
+            .filter(|c| matches!(c.kind, Kind::Chat | Kind::Meeting | Kind::Feed) && !channel_ids.contains(c.id.as_str()))
             .map(|mut c| {
                 let roster = roster_chats.get(&c.id);
                 let members: &[String] = roster.map(|r| r.members.as_slice()).unwrap_or(&[]);
@@ -242,10 +242,16 @@ impl Backend for Teams {
                         c.title = r.title.clone();
                     }
                 }
-                if c.title.is_empty() {
-                    c.title = chat_title(members, &me, &names, &c);
+                if c.kind == Kind::Feed {
+                    if c.title.is_empty() {
+                        c.title = "Activity".to_string();
+                    }
+                } else {
+                    if c.title.is_empty() {
+                        c.title = chat_title(members, &me, &names, &c);
+                    }
+                    c.picture = chat_picture(members, &me, &names);
                 }
-                c.picture = chat_picture(members, &me, &names);
                 c
             })
             .collect();
@@ -270,6 +276,33 @@ impl Backend for Teams {
         conversations.sort_by_key(|c| std::cmp::Reverse(c.last.as_ref().map_or(0, |l| l.at)));
         Ok(Directory { teams, conversations })
     }
+    fn send(&self, conversation: &str, text: &str) -> Result<()> {
+        let text = text.trim();
+        if text.is_empty() {
+            return Err(Error::Service("empty message".into()));
+        }
+        let name = Backend::me(self);
+        for attempt in 0..2 {
+            let skype = self.session().skype()?;
+            let url = format!("{}/v1/users/ME/conversations/{}/messages", skype.chat_service, http::encode(conversation));
+            let body = serde_json::json!({
+                "clientmessageid": client_message_id(),
+                "content": text,
+                "messagetype": "Text",
+                "contenttype": "text",
+                "imdisplayname": name,
+            });
+            let auth = format!("skypetoken={}", skype.token);
+            let headers = [("Authentication", auth.as_str()), ("X-Skypetoken", skype.token.as_str()), ("BehaviorOverride", "redirectAs404")];
+            match http::request(Method::Post, &url, &headers, Body::Json(&body)) {
+                Err(Error::SignedOut) if attempt == 0 => self.session().drop_skype(),
+                Ok(_) => return Ok(()),
+                Err(e) => return Err(e),
+            }
+        }
+        Err(Error::SignedOut)
+    }
+
     fn messages(&self, conversation: &str) -> Result<Vec<Message>> {
         let path = format!(
             "/v1/users/ME/conversations/{}/messages?view=msnp24Equivalent|supportsMessageProperties&pageSize={PAGE}&startTime=1",
@@ -317,6 +350,16 @@ fn chat_picture(members: &[String], me: &str, names: &HashMap<String, String>) -
         }
         _ => Some(Picture::Group(others)),
     }
+}
+
+/// A fresh 19-digit client message id (the service dedups and echoes it back).
+fn client_message_id() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let nanos = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_nanos() as u64);
+    let n = COUNTER.fetch_add(1, Ordering::Relaxed) % 1000;
+    format!("{:019}", nanos.wrapping_add(n))
 }
 
 /// A name for a chat without a topic: its other members, or who wrote last.

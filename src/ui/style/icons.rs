@@ -18,6 +18,22 @@ pub enum Icon {
     Moon,
     /// A door with an arrow out: sign out.
     SignOut,
+    /// A paper plane: send.
+    Send,
+    /// An at sign: activity and mentions.
+    At,
+    /// A camera: a meeting / join.
+    Video,
+    /// A bell with a slash: muted.
+    Mute,
+    /// A plus: new.
+    Plus,
+    /// Three dots: more.
+    More,
+    /// Two people: members.
+    Members,
+    /// A magnifier: search.
+    Search,
 }
 
 /// Paint `icon` into the square `rect`.
@@ -69,6 +85,45 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             line(&[(10.0, 4.0), (5.0, 4.0), (5.0, 20.0), (10.0, 20.0)]);
             line(&[(10.0, 12.0), (20.0, 12.0)]);
             line(&[(16.0, 8.0), (20.0, 12.0), (16.0, 16.0)]);
+        }
+        Icon::Send => {
+            line(&[(21.0, 3.0), (10.5, 13.5)]);
+            line(&[(21.0, 3.0), (14.0, 21.0), (10.5, 13.5), (3.0, 10.0), (21.0, 3.0)]);
+        }
+        Icon::At => {
+            circle(12.0, 12.0, 3.8);
+            line(&[(15.8, 8.2), (15.8, 13.0)]);
+            arc(18.8, 13.0, 3.0, PI, TAU);
+            arc(12.0, 12.0, 9.0, 0.15 * PI, 1.8 * PI);
+        }
+        Icon::Video => {
+            painter.rect_stroke(Rect::from_min_max(at(3.0, 7.0), at(15.0, 17.0)), 2.0 * s, stroke, eframe::egui::StrokeKind::Middle);
+            line(&[(15.0, 10.5), (21.0, 7.5), (21.0, 16.5), (15.0, 13.5)]);
+        }
+        Icon::Mute => {
+            arc(12.0, 11.0, 6.0, PI, TAU);
+            line(&[(6.0, 11.0), (6.0, 16.0), (18.0, 16.0), (18.0, 11.0)]);
+            line(&[(10.0, 19.0), (14.0, 19.0)]);
+            line(&[(3.0, 4.0), (21.0, 21.0)]);
+        }
+        Icon::Plus => {
+            line(&[(12.0, 5.0), (12.0, 19.0)]);
+            line(&[(5.0, 12.0), (19.0, 12.0)]);
+        }
+        Icon::More => {
+            for x in [5.5, 12.0, 18.5] {
+                painter.circle_filled(at(x, 12.0), 1.6 * s, color);
+            }
+        }
+        Icon::Members => {
+            circle(9.0, 8.0, 3.2);
+            arc(9.0, 20.0, 6.0, PI, TAU);
+            circle(16.5, 8.5, 2.6);
+            arc(17.5, 19.0, 4.5, 1.15 * PI, TAU);
+        }
+        Icon::Search => {
+            circle(11.0, 11.0, 6.5);
+            line(&[(16.0, 16.0), (20.5, 20.5)]);
         }
     }
 }

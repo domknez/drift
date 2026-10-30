@@ -4,6 +4,9 @@
 
 The first version of drift:
 
+- Write and send messages: a composer in every chat and channel (Enter sends,
+  Shift+Enter for a new line)
+
 - Sign in with Microsoft (work or school account) in a small window; the sign-in
   is kept in the system keychain and renewed on its own
 - One sidebar for everything: your teams with their channels, your chats and your

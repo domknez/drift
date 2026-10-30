@@ -42,4 +42,8 @@ pub trait Backend: Send + Sync {
 
     /// A picture's image file (JPEG or PNG).
     fn picture(&self, picture: &Picture) -> Result<Vec<u8>>;
+
+    /// Send a plain-text message to a conversation. For a channel reply, `conversation`
+    /// is `<channel id>;messageid=<post id>`; for a new post, the channel id.
+    fn send(&self, conversation: &str, text: &str) -> Result<()>;
 }

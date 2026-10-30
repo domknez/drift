@@ -196,6 +196,12 @@ impl Directory {
         self.conversations.iter().filter(|c| c.kind == Kind::Chat)
     }
 
+    /// The mentions/activity feed, if the service lists one.
+    pub fn activity(&self) -> Option<&Conversation> {
+        let feeds = || self.conversations.iter().filter(|c| c.kind == Kind::Feed);
+        feeds().find(|c| c.id.contains("mention")).or_else(|| feeds().next())
+    }
+
     /// The team and channel a conversation belongs to, if it's a channel.
     pub fn channel(&self, id: &str) -> Option<(&Team, &Channel)> {
         self.teams.iter().find_map(|t| t.channels.iter().find(|c| c.id == id).map(|c| (t, c)))

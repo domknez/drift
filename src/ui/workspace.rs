@@ -38,6 +38,9 @@ pub struct Workspace {
     pub folded: HashSet<String>,
     /// Posts showing all their replies, by id.
     pub unfolded_threads: HashSet<String>,
+    /// The message being typed in the open conversation.
+    pub draft: String,
+    sending: Load<(), Error>,
 }
 
 /// What the workspace needs the app to do.
@@ -65,12 +68,41 @@ impl Workspace {
             // Meeting chats pile up; they start folded.
             folded: HashSet::from(["meetings".to_string()]),
             unfolded_threads: HashSet::new(),
+            draft: String::new(),
+            sending: Load::Idle,
         }
+    }
+
+    /// Whether a send is in flight (the composer shows it).
+    pub fn sending(&self) -> bool {
+        self.sending.is_running()
+    }
+
+    /// Send the draft to the open conversation; it's cleared and the view refreshes.
+    pub fn send(&mut self, ctx: &egui::Context) {
+        let text = self.draft.trim().to_string();
+        let Some(id) = self.open.clone() else { return };
+        if text.is_empty() || self.sending.is_running() {
+            return;
+        }
+        self.draft.clear();
+        let backend = self.backend.clone();
+        self.sending = Load::start(ctx, move || backend.send(&id, &text));
     }
 
     /// Collect finished loads and start the ones that are due.
     pub fn tick(&mut self, ctx: &egui::Context) -> Option<Outcome> {
         self.pictures.begin_frame();
+        if let Some(result) = self.sending.take() {
+            match result {
+                Ok(()) => {
+                    self.error = None;
+                    self.messages_at = None; // show the sent message right away
+                }
+                Err(Error::SignedOut) => return Some(Outcome::SignedOut),
+                Err(e) => self.failed(e),
+            }
+        }
         if let Some(result) = self.directory_load.take() {
             match result {
                 Ok(directory) => {
@@ -131,6 +163,7 @@ impl Workspace {
         self.messages_load = Load::Idle;
         self.messages_at = None;
         self.unfolded_threads.clear();
+        self.draft.clear();
         // Read here; Teams itself still counts it until it's read there.
         if let Some(c) = self.directory.as_mut().and_then(|d| d.conversations.iter_mut().find(|c| c.id == id)) {
             c.unread = false;
