@@ -47,8 +47,7 @@ Sibling of [dust](https://github.com/domknez/dust) (music) and
   mentions and emoji; reactions under them; cards from bots and connectors (pull
   requests, alerts) as one compact row that opens its link
 - **Modern UI:** panels floating on a canvas, a deep ink dark and a warm paper light
-  theme (or follow the system) with one violet accent, Plus Jakarta Sans and
-  JetBrains Mono
+  theme (or follow the system) with one violet accent, Geist and Geist Mono
 - Runs on macOS, Linux and Windows
 
 ## Build

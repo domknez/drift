@@ -1,4 +1,4 @@
-//! Text roles: Plus Jakarta Sans throughout, JetBrains Mono for code.
+//! Text roles: Geist throughout, Geist Mono for code.
 
 use eframe::egui::{FontFamily, FontId};
 

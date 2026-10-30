@@ -14,42 +14,28 @@ use std::sync::Arc;
 pub fn install_fonts(ctx: &egui::Context) {
     let mut fonts = FontDefinitions::default();
     for (name, bytes) in [
-        ("Jakarta", &include_bytes!("../../../assets/fonts/PlusJakartaSans-Regular.ttf")[..]),
-        ("Jakarta-Medium", include_bytes!("../../../assets/fonts/PlusJakartaSans-Medium.ttf")),
-        ("Jakarta-SemiBold", include_bytes!("../../../assets/fonts/PlusJakartaSans-SemiBold.ttf")),
-        ("Jakarta-Bold", include_bytes!("../../../assets/fonts/PlusJakartaSans-Bold.ttf")),
-        ("Jakarta-ExtraBold", include_bytes!("../../../assets/fonts/PlusJakartaSans-ExtraBold.ttf")),
-        // Wider coverage (Cyrillic, Greek, symbols) where Plus Jakarta Sans has no glyph.
+        ("Geist", &include_bytes!("../../../assets/fonts/Geist-Regular.ttf")[..]),
+        ("Geist-Medium", include_bytes!("../../../assets/fonts/Geist-Medium.ttf")),
+        ("Geist-SemiBold", include_bytes!("../../../assets/fonts/Geist-SemiBold.ttf")),
+        ("Geist-Bold", include_bytes!("../../../assets/fonts/Geist-Bold.ttf")),
+        ("Geist-ExtraBold", include_bytes!("../../../assets/fonts/Geist-ExtraBold.ttf")),
+        ("GeistMono", include_bytes!("../../../assets/fonts/GeistMono-Regular.ttf")),
+        // Wider coverage (Cyrillic, Greek, symbols) where Geist has no glyph.
         ("Inter", include_bytes!("../../../assets/fonts/Inter-Regular.ttf")),
-        ("Mono", include_bytes!("../../../assets/fonts/JetBrainsMono-Regular.ttf")),
-        // Monochrome emoji (egui can't paint colour fonts): reactions, message emoji.
+        // Monochrome emoji (egui can't paint colour fonts) where Teams has no picture.
         ("Emoji", include_bytes!("../../../assets/fonts/NotoEmoji-Regular.ttf")),
     ] {
         fonts.font_data.insert(name.into(), Arc::new(FontData::from_static(bytes)));
     }
-    // Trying other faces: DRIFT_FONT_DIR with Regular/Medium/SemiBold/Bold/ExtraBold.ttf.
-    if let Some(dir) = std::env::var_os("DRIFT_FONT_DIR").map(std::path::PathBuf::from) {
-        for (name, file) in [
-            ("Jakarta", "Regular"),
-            ("Jakarta-Medium", "Medium"),
-            ("Jakarta-SemiBold", "SemiBold"),
-            ("Jakarta-Bold", "Bold"),
-            ("Jakarta-ExtraBold", "ExtraBold"),
-        ] {
-            if let Ok(bytes) = std::fs::read(dir.join(format!("{file}.ttf"))) {
-                fonts.font_data.insert(name.into(), Arc::new(FontData::from_owned(bytes)));
-            }
-        }
-    }
     // egui's own fonts stay last in every chain as a final fallback.
     let fallbacks = fonts.families.get(&FontFamily::Proportional).cloned().unwrap_or_default();
     let chain = |first: &str| [vec![first.to_string(), "Inter".to_string(), "Emoji".to_string()], fallbacks.clone()].concat();
-    fonts.families.insert(FontFamily::Proportional, chain("Jakarta"));
-    fonts.families.insert(typography::medium(), chain("Jakarta-Medium"));
-    fonts.families.insert(typography::semibold(), chain("Jakarta-SemiBold"));
-    fonts.families.insert(typography::bold(), chain("Jakarta-Bold"));
-    fonts.families.insert(typography::extrabold(), chain("Jakarta-ExtraBold"));
-    fonts.families.insert(FontFamily::Monospace, chain("Mono"));
+    fonts.families.insert(FontFamily::Proportional, chain("Geist"));
+    fonts.families.insert(typography::medium(), chain("Geist-Medium"));
+    fonts.families.insert(typography::semibold(), chain("Geist-SemiBold"));
+    fonts.families.insert(typography::bold(), chain("Geist-Bold"));
+    fonts.families.insert(typography::extrabold(), chain("Geist-ExtraBold"));
+    fonts.families.insert(FontFamily::Monospace, chain("GeistMono"));
     ctx.set_fonts(fonts);
 }
 

@@ -27,5 +27,5 @@ The first version of drift:
   reactions under them; cards from bots and connectors (pull requests, alerts) as one
   compact row that opens its link
 - Panels floating on a canvas, a dark and a warm light theme (or follow the system),
-  violet accent, Plus Jakarta Sans
+  violet accent, Geist
 - ⌘R / Ctrl+R fetches everything again
