@@ -971,6 +971,9 @@ pub fn composer(ui: &mut Ui, ws: &mut Workspace, rect: Rect, hint: &str, reply: 
     } else {
         egui::scroll_area::ScrollBarVisibility::AlwaysHidden
     };
+    // No fade at its edges: it darkened the line being typed for the frame a new line
+    // takes to grow the box.
+    t.spacing_mut().scroll.fade.strength = 0.0;
     let response = egui::ScrollArea::vertical()
         .id_salt(("composer-scroll", reply))
         .scroll_bar_visibility(bar)
