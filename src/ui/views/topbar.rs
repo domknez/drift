@@ -59,15 +59,7 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace, theme: Appearance) -> Option<Reques
     let mut right = avatar.left() - 12.0;
     // The meeting on now (or next today), from the calendar; a meeting chat active
     // today until the calendar is in.
-    let pill = match ws.next_meeting() {
-        Some(m) => m.join_url.clone().map(|url| (m.subject.clone(), when(m.start, m.end), url)),
-        None if ws.meetings.is_none() => ws.directory.as_ref().and_then(live_meeting).and_then(|c| {
-            let url = c.join_url.clone()?;
-            Some((c.title.clone(), c.last.as_ref().map(|l| time::clock(l.at)).unwrap_or_default(), url))
-        }),
-        None => None,
-    };
-    if let Some((title, label, url)) = pill {
+    if let Some((title, label, url)) = meeting_to_join(ws) {
         right = meeting_pill(ui, &title, &label, &url, right, cy) - 12.0;
     }
 
@@ -81,6 +73,18 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace, theme: Appearance) -> Option<Reques
 }
 
 /// Unread activity, and unread chats (direct messages and meeting chats).
+/// The meeting to join: its subject, when it is ("now", "in 20 min"), and its link.
+pub fn meeting_to_join(ws: &Workspace) -> Option<(String, String, String)> {
+    match ws.next_meeting() {
+        Some(m) => m.join_url.clone().map(|url| (m.subject.clone(), when(m.start, m.end), url)),
+        None if ws.meetings.is_none() => ws.directory.as_ref().and_then(live_meeting).and_then(|c| {
+            let url = c.join_url.clone()?;
+            Some((c.title.clone(), c.last.as_ref().map(|l| time::clock(l.at)).unwrap_or_default(), url))
+        }),
+        None => None,
+    }
+}
+
 /// Chats and meeting chats with something unread (not counting muted ones).
 fn unread_chats(d: &Directory) -> usize {
     d.conversations.iter().filter(|c| matches!(c.kind, Kind::Chat | Kind::Meeting) && c.unread && !c.muted).count()

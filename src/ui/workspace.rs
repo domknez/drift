@@ -111,6 +111,10 @@ pub struct Workspace {
     /// While Activity is shown: up to which item it had been read when it was opened
     /// (newer ones stay marked new while it's looked at, though they're read by then).
     pub activity_new_after: Option<i64>,
+    /// The quick switcher (⌘T), while it's open.
+    pub switcher: Option<super::views::switcher::Switcher>,
+    /// Conversations opened, the latest first.
+    pub recent: Vec<ConversationId>,
     /// The picture shown over the window, by its URL.
     pub viewing: Option<String>,
     /// The conversation last drawn (its first drawing is laid out once unseen, so it
@@ -231,6 +235,8 @@ impl Workspace {
             earlier_from: None,
             scroll_to: None,
             activity_new_after: None,
+            switcher: None,
+            recent: Vec::new(),
             viewing: None,
             drawn: None,
             list_height: None,
@@ -785,6 +791,9 @@ impl Workspace {
             return;
         }
         self.open = Some(id.to_string());
+        self.recent.retain(|r| r != id);
+        self.recent.insert(0, id.to_string());
+        self.recent.truncate(30);
         self.newest = NEWEST;
         self.messages = None;
         self.read_by.clear();

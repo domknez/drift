@@ -4,6 +4,7 @@
 pub mod conversation;
 pub mod list;
 pub mod sign_in;
+pub mod switcher;
 pub mod thread;
 pub mod topbar;
 
@@ -20,6 +21,10 @@ pub fn workspace(ui: &mut egui::Ui, ws: &mut Workspace, theme: Appearance) -> Op
     let mut request = None;
     if ui.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::R))) {
         ws.refresh();
+    }
+    // ⌘T: the quick switcher, to jump to a conversation or a place.
+    if ui.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::T))) {
+        ws.switcher = if ws.switcher.is_some() { None } else { Some(switcher::Switcher::default()) };
     }
     // Pictures dropped on the window go with the next message (in the thread if one is open).
     let dropped = ui.input(|i| i.raw.dropped_files.clone());
@@ -53,6 +58,7 @@ pub fn workspace(ui: &mut egui::Ui, ws: &mut Workspace, theme: Appearance) -> Op
             ws.open(&id);
         }
     });
+    switcher::show(ui.ctx(), ws);
     if let Some(url) = ws.viewing.clone()
         && !super::widgets::lightbox(ui.ctx(), &mut ws.pictures, &url)
     {

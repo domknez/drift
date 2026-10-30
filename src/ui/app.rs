@@ -88,6 +88,10 @@ impl App {
                 let (message, root) = (parts.next(), parts.next());
                 workspace.open_message(&open, message, root);
             }
+            // DRIFT_DEMO_SWITCHER=<query>: the quick switcher open, with that typed.
+            if let Ok(query) = std::env::var("DRIFT_DEMO_SWITCHER") {
+                workspace.switcher = Some(super::views::switcher::Switcher::with(&query));
+            }
             if let Ok(path) = std::env::var("DRIFT_DEMO_ATTACH")
                 && let Ok(bytes) = std::fs::read(&path)
             {

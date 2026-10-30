@@ -572,7 +572,7 @@ fn empty(ui: &mut Ui, text: &str) {
 
 /// What leads a row: a person's photo, a group's, or a tile with a channel's or a
 /// meeting's mark.
-fn lead(ui: &mut Ui, ws: &mut Workspace, c: &Conversation, rect: Rect) {
+pub fn lead(ui: &mut Ui, ws: &mut Workspace, c: &Conversation, rect: Rect) {
     let p = colors();
     let tile = |ui: &mut Ui, icon: Icon| {
         ui.painter().rect_filled(rect, CornerRadius::same(11), p.surface);
