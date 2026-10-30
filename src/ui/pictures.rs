@@ -125,16 +125,49 @@ fn worker(queue: &Queue, tx: &Sender<(String, Option<ColorImage>)>, backend: &dy
     }
 }
 
-/// A picture's width and height, and its MIME type (PNG or JPEG), if it's one.
+/// A picture's width and height, and its MIME type (PNG, GIF or JPEG), if it's one.
 pub fn image_info(bytes: &[u8]) -> Option<(u32, u32, &'static str)> {
     let image = decode(bytes)?;
-    let mime = if bytes.starts_with(b"\x89PNG") { "image/png" } else { "image/jpeg" };
+    let mime = if bytes.starts_with(b"\x89PNG") {
+        "image/png"
+    } else if bytes.starts_with(b"GIF8") {
+        "image/gif"
+    } else {
+        "image/jpeg"
+    };
     Some((image.size[0] as u32, image.size[1] as u32, mime))
 }
 
-/// JPEG or PNG, by their signature.
+/// JPEG, PNG or GIF, by their signature.
 fn decode(bytes: &[u8]) -> Option<ColorImage> {
-    if bytes.starts_with(b"\x89PNG") { decode_png(bytes) } else { decode_jpeg(bytes) }
+    if bytes.starts_with(b"\x89PNG") {
+        decode_png(bytes)
+    } else if bytes.starts_with(b"GIF8") {
+        decode_gif(bytes)
+    } else {
+        decode_jpeg(bytes)
+    }
+}
+
+/// A GIF's first frame, on its canvas.
+fn decode_gif(bytes: &[u8]) -> Option<ColorImage> {
+    let mut options = gif::DecodeOptions::new();
+    options.set_color_output(gif::ColorOutput::RGBA);
+    let mut decoder = options.read_info(std::io::Cursor::new(bytes)).ok()?;
+    let (width, height) = (usize::from(decoder.width()), usize::from(decoder.height()));
+    let frame = decoder.read_next_frame().ok()??;
+    let mut canvas = vec![0u8; width * height * 4];
+    let (left, top, w) = (usize::from(frame.left), usize::from(frame.top), usize::from(frame.width));
+    for (y, row) in frame.buffer.chunks_exact(w * 4).enumerate() {
+        let (y, x) = (top + y, left);
+        if y >= height || x >= width {
+            continue;
+        }
+        let n = (w.min(width - x)) * 4;
+        let at = (y * width + x) * 4;
+        canvas[at..at + n].copy_from_slice(&row[..n]);
+    }
+    image_from(&canvas, [width, height])
 }
 
 fn decode_jpeg(bytes: &[u8]) -> Option<ColorImage> {
@@ -188,6 +221,18 @@ mod tests {
         encoder.set_color(png::ColorType::Rgb);
         encoder.set_depth(png::BitDepth::Eight);
         encoder.write_header().unwrap().write_image_data(&[255, 0, 0, 0, 255, 0]).unwrap();
+        let image = decode(&out).unwrap();
+        assert_eq!(image.size, [2, 1]);
+        assert_eq!(image.pixels[1], egui::Color32::from_rgb(0, 255, 0));
+    }
+
+    #[test]
+    fn decodes_gif() {
+        let mut out = Vec::new();
+        {
+            let mut encoder = gif::Encoder::new(&mut out, 2, 1, &[255, 0, 0, 0, 255, 0]).unwrap();
+            encoder.write_frame(&gif::Frame { width: 2, height: 1, buffer: std::borrow::Cow::Borrowed(&[0, 1]), ..Default::default() }).unwrap();
+        }
         let image = decode(&out).unwrap();
         assert_eq!(image.size, [2, 1]);
         assert_eq!(image.pixels[1], egui::Color32::from_rgb(0, 255, 0));

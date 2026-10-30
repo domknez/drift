@@ -134,18 +134,19 @@ pub fn rich_text(ui: &mut Ui, pictures: &mut Pictures, body: &[Inline], color: C
                 ui.spacing_mut().item_spacing.x = 0.0;
                 for (text, run) in line {
                     let s = &run.span;
-                    // Emoji the service has a picture of are drawn in colour; while the
-                    // picture loads, its place is kept, so the text doesn't move when it comes.
+                    // Emoji the service has a picture of are drawn in colour, the character
+                    // where there's no picture. Either way they take the same square, so the
+                    // text doesn't move when a picture comes (or turns out not to).
                     if let Some(emoji) = s.emoji.as_ref().map(|key| Picture::Emoji(key.clone())) {
-                        let size = vec2(1.0, 1.0) * if line_is_emoji_only { 30.0 } else { 19.0 };
+                        let side = if line_is_emoji_only { 30.0 } else { 19.0 };
+                        let (rect, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
                         if let Some(texture) = pictures.get(&emoji) {
-                            ui.add(egui::Image::new((texture, size)));
-                            continue;
+                            egui::Image::new((texture, rect.size())).paint_at(ui, rect);
+                        } else if !pictures.loading(&emoji) {
+                            let font = egui::FontId::new(side * 0.8, egui::FontFamily::Proportional);
+                            ui.painter().text(rect.center(), Align2::CENTER_CENTER, text, font, color);
                         }
-                        if pictures.loading(&emoji) {
-                            ui.allocate_exact_size(size, Sense::hover());
-                            continue;
-                        }
+                        continue;
                     }
                     let font = if s.code {
                         ty::code()
@@ -410,9 +411,9 @@ pub fn reactions(ui: &mut Ui, pictures: &mut Pictures, reactions: &[Reaction], r
             let count = ui.painter().layout_no_wrap(r.count.to_string(), ty::small_strong(), text);
             let emoji = Picture::Emoji(r.key.clone());
             let picture = pictures.get(&emoji);
-            // While the picture loads, its place is kept.
+            // The emoji takes the same place whether it's a picture, still loading, or the character.
             let glyph = (picture.is_none() && !pictures.loading(&emoji)).then(|| ui.painter().layout_no_wrap(r.emoji(), ty::small_strong(), text));
-            let emoji_w = glyph.as_ref().map_or(17.0, |g| g.size().x);
+            let emoji_w = 17.0;
             let size = vec2(9.0 + emoji_w + 4.0 + count.size().x + 9.0, 24.0);
             let (rect, response) = ui.allocate_exact_size(size, Sense::click());
             // A ring in the panel's colour cuts the pill out of the bubble it overlaps.
@@ -424,7 +425,7 @@ pub fn reactions(ui: &mut Ui, pictures: &mut Pictures, reactions: &[Reaction], r
                 (Some(texture), _) => {
                     egui::Image::new((texture, emoji.size())).paint_at(ui, emoji);
                 }
-                (None, Some(g)) => ui.painter().galley(egui::pos2(emoji.left(), rect.center().y - g.size().y / 2.0), g, text),
+                (None, Some(g)) => ui.painter().galley(emoji.center() - g.size() / 2.0, g, text),
                 (None, None) => {}
             }
             ui.painter().galley(egui::pos2(emoji.right() + 4.0, rect.center().y - count.size().y / 2.0), count, text);

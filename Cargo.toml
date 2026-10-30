@@ -13,6 +13,8 @@ keyring-core = "1"
 # Profile pictures arrive as JPEG, team pictures as PNG.
 png = "0.18"
 zune-jpeg = "0.5"
+# GIFs people pick (their first frame).
+gif = "0.14"
 serde_json = "1"
 ureq = { version = "3", features = ["json"] }
 # Trouter, the websocket Teams pushes changes through; some of its bodies come gzipped.

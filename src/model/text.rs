@@ -219,10 +219,11 @@ impl Builder {
                 return;
             }
             "img"
-                if attr(attrs, "itemtype").is_some_and(|t| t.ends_with("/AMSImage"))
-                    || attr(attrs, "src").is_some_and(|s| s.contains("/v1/objects/")) =>
+                if !attr(attrs, "itemtype").is_some_and(|t| t.ends_with("/Emoji"))
+                    && attr(attrs, "src").is_some_and(|s| s.starts_with("https://") || s.starts_with("http://")) =>
             {
-                // A picture someone pasted or attached.
+                // A picture someone pasted or attached, or a GIF they picked (anything but
+                // an emoji).
                 if let Some(url) = attr(attrs, "src") {
                     let number = |k: &str| attr(attrs, k).and_then(|v| v.trim_end_matches("px").parse::<u32>().ok()).filter(|n| *n > 0);
                     let size = number("width").zip(number("height"));
@@ -610,6 +611,12 @@ mod tests {
     fn reply_quotes_know_their_message() {
         let html = r#"<blockquote itemscope="" itemtype="http://schema.skype.com/Reply" itemid="1698"><strong itemprop="mri">Maya</strong><p itemprop="preview">old</p></blockquote><p>new</p>"#;
         assert!(matches!(&from_html(html)[0], Block::Quote(_, Some(id)) if id == "1698"));
+    }
+
+    #[test]
+    fn gifs_are_pictures() {
+        let html = r#"<p><img itemtype="http://schema.skype.com/Giphy" src="https://media.example.com/a.gif" alt="A GIF" width="200" height="150"></p>"#;
+        assert_eq!(from_html(html), vec![Block::Image { url: "https://media.example.com/a.gif".into(), size: Some((200, 150)) }]);
     }
 
     #[test]

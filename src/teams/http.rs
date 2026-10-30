@@ -93,7 +93,7 @@ pub fn fetch(url: &str, headers: &[(&str, &str)]) -> Result<Vec<u8>> {
     if !(200..300).contains(&status) {
         return Err(if status == 401 { Error::SignedOut } else { Error::Service(format!("HTTP {status}")) });
     }
-    response.into_body().with_config().limit(4 << 20).read_to_vec().map_err(|e| Error::Network(e.to_string()))
+    response.into_body().with_config().limit(16 << 20).read_to_vec().map_err(|e| Error::Network(e.to_string()))
 }
 
 /// What an error answer says, short, for the log (never the whole body).
