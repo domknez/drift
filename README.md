@@ -3,7 +3,6 @@
 **A free and open source, ultra-lightweight desktop client for Microsoft Teams chats
 and channels, written in Rust.**
 
-[![CI](https://github.com/domknez/drift/actions/workflows/ci.yml/badge.svg)](https://github.com/domknez/drift/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)
 
