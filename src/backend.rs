@@ -63,6 +63,10 @@ pub trait Backend: Send + Sync {
     /// Tell the service the conversation is read up to `message` (Teams shows it read too).
     fn mark_read(&self, conversation: &str, message: &str) -> Result<()>;
 
+    /// Up to which message each member of a chat has read: their id, and the id of
+    /// the last message they've seen (message ids are times in ms).
+    fn read_by(&self, conversation: &str) -> Result<Vec<(String, i64)>>;
+
     /// The user's meetings between two times (Unix ms), earliest first.
     fn calendar(&self, from: i64, to: i64) -> Result<Vec<Meeting>>;
 

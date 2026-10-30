@@ -561,6 +561,10 @@ impl Backend for Teams {
         self.chat_write(Method::Put, &path, &serde_json::json!({"consumptionhorizon": format!("{message};{now};{message}")}))
     }
 
+    fn read_by(&self, conversation: &str) -> Result<Vec<(String, i64)>> {
+        Ok(parse::read_positions(&self.chat_service(&format!("/v1/threads/{}/consumptionhorizons", http::encode(conversation)))?))
+    }
+
     fn calendar(&self, from: i64, to: i64) -> Result<Vec<Meeting>> {
         Ok(parse::meetings(&self.calendar_raw(from, to)?))
     }

@@ -329,6 +329,21 @@ fn strip_link(s: &str, link: &mut Option<String>) -> String {
     out.trim().to_string()
 }
 
+/// Each member's read position in a thread: up to which message (its id, a time in
+/// ms) they have read.
+pub fn read_positions(v: &Value) -> Vec<(String, i64)> {
+    v["consumptionhorizons"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|h| {
+            let id = str_of(h, &["id"])?.to_string();
+            let up_to = str_of(h, &["consumptionhorizon"])?.split(';').next()?.parse::<i64>().ok()?;
+            Some((id, up_to))
+        })
+        .collect()
+}
+
 /// Meetings from the middle tier's calendar view, earliest first.
 pub fn meetings(v: &Value) -> Vec<Meeting> {
     let mut list: Vec<Meeting> = v["value"]
@@ -528,6 +543,12 @@ mod tests {
         assert_eq!(card.link.as_deref(), Some("https://dev.example.com/pr/10499"));
         assert_eq!(card.detail, "Active | pm-ui");
         assert_eq!(card.facts.len(), 2);
+    }
+
+    #[test]
+    fn reads_read_positions() {
+        let v = json!({"consumptionhorizons": [{"id": "8:orgid:maya", "consumptionhorizon": "1793304000000;1793304001000;123"}, {"id": "8:orgid:x"}]});
+        assert_eq!(read_positions(&v), [("8:orgid:maya".to_string(), 1_793_304_000_000)]);
     }
 
     #[test]

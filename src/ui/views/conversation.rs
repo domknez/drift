@@ -106,8 +106,15 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace) {
             let me = ws.me_id.clone();
             let open_thread = ws.thread.clone();
             let focus = ws.focus.clone();
-            let mut view =
-                View { me: &me, channel: is_channel, open: open_thread.as_deref(), focus: focus.as_deref(), scrolled: ws.focus_scrolled };
+            let read_by = ws.read_by.clone();
+            let mut view = View {
+                me: &me,
+                read_by: &read_by,
+                channel: is_channel,
+                open: open_thread.as_deref(),
+                focus: focus.as_deref(),
+                scrolled: ws.focus_scrolled,
+            };
             egui::ScrollArea::vertical().id_salt(("messages", &id)).stick_to_bottom(true).auto_shrink([false, false]).show(
                 &mut page,
                 |ui| {
@@ -314,6 +321,8 @@ pub fn day_pill(ui: &mut Ui, at: i64) {
 /// whose thread is open, and a message to bring into view and mark.
 pub struct View<'a> {
     pub me: &'a str,
+    /// In a chat, up to which message each other member has read (for "Seen").
+    pub read_by: &'a [(String, i64)],
     pub channel: bool,
     pub open: Option<&'a str>,
     pub focus: Option<&'a str>,
@@ -332,6 +341,8 @@ pub fn list(ui: &mut Ui, pictures: &mut Pictures, messages: &[Message], view: &m
             None => shown.push(m),
         }
     }
+    // "Seen" goes under the user's newest message.
+    let newest_mine = shown.iter().rev().find(|m| !view.me.is_empty() && m.author.id == view.me).map(|m| m.id.clone());
     let mut action = None;
     for (i, m) in shown.iter().enumerate() {
         let prev = i.checked_sub(1).map(|j| shown[j]);
@@ -347,6 +358,9 @@ pub fn list(ui: &mut Ui, pictures: &mut Pictures, messages: &[Message], view: &m
         let threaded = channel.then_some(thread);
         if let Some(a) = bubble(ui, pictures, m, view, first, last, threaded) {
             action = Some(a);
+        }
+        if newest_mine.as_deref() == Some(m.id.as_str()) && !view.read_by.is_empty() {
+            seen(ui, m, view.read_by);
         }
     }
     action
@@ -538,6 +552,27 @@ pub fn bubble(
         ui.add_space(6.0);
     }
     action
+}
+
+/// Under the user's newest message in a chat: Sent, or Seen (by how many, in a group).
+fn seen(ui: &mut Ui, m: &Message, read_by: &[(String, i64)]) {
+    let p = colors();
+    let Ok(id) = m.id.parse::<i64>() else { return };
+    let readers = read_by.iter().filter(|(_, up_to)| *up_to >= id).count();
+    let total = read_by.len();
+    let (icon, label, color) = match (readers, total) {
+        (0, _) => (Icon::Check, "Sent".to_string(), p.faint),
+        (_, 1) => (Icon::Seen, "Seen".to_string(), p.accent),
+        (r, t) if r == t => (Icon::Seen, "Seen by everyone".to_string(), p.accent),
+        (r, t) => (Icon::Seen, format!("Seen by {r} of {t}"), p.accent),
+    };
+    ui.add_space(-2.0);
+    ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+        ui.add_space(4.0);
+        ui.spacing_mut().item_spacing.x = 4.0;
+        ui.label(RichText::new(label).font(ty::meta()).color(color));
+        widgets::icon(ui, icon, 14.0, color);
+    });
 }
 
 /// "3 replies · Last reply 12 min ago" with the repliers' pictures; true when clicked.

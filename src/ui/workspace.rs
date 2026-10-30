@@ -57,6 +57,10 @@ pub struct Workspace {
     pub open: Option<ConversationId>,
     /// The open conversation's messages, oldest first; None while they load.
     pub messages: Option<Vec<Message>>,
+    /// In a chat, up to which message each other member has read.
+    pub read_by: Vec<(String, i64)>,
+    read_load: Load<(ConversationId, Vec<(String, i64)>), Error>,
+    read_at: Option<Instant>,
     messages_load: Load<(ConversationId, Vec<Message>), Error>,
     messages_at: Option<Instant>,
     /// The last failure, shown until the next success.
@@ -163,6 +167,9 @@ impl Workspace {
             directory_at: None,
             open,
             messages: None,
+            read_by: Vec::new(),
+            read_load: Load::Idle,
+            read_at: None,
             messages_load: Load::Idle,
             messages_at: None,
             error: None,
@@ -513,6 +520,7 @@ impl Workspace {
                 Ok(()) => {
                     self.error = None;
                     self.messages_at = None; // show the sent message right away
+                    self.read_at = None;
                 }
                 Err(Error::SignedOut) => return Some(Outcome::SignedOut),
                 Err(e) => self.failed(e),
@@ -600,6 +608,16 @@ impl Workspace {
                 Err(e) => self.failed(e),
             }
         }
+        if let Some(result) = self.read_load.take() {
+            match result {
+                Ok((id, positions)) if Some(&id) == self.open.as_ref() => {
+                    let me = self.me_id.clone();
+                    self.read_by = positions.into_iter().filter(|(who, _)| *who != me).collect();
+                }
+                Ok(_) => {}
+                Err(e) => log_debug!("read positions: {e}"),
+            }
+        }
         if let Some(result) = self.messages_load.take() {
             match result {
                 Ok((id, messages)) if Some(&id) == self.open.as_ref() => {
@@ -644,6 +662,16 @@ impl Workspace {
             let now = crate::model::time::now_ms();
             self.meetings_load = Load::start(ctx, move || backend.calendar(now - 86_400_000, now + 15 * 86_400_000));
         }
+        // Who has read how far, in a chat (for "Seen").
+        if let Some(id) = self.open.clone()
+            && self.directory.as_ref().and_then(|d| d.conversation(&id)).is_some_and(|c| matches!(c.kind, Kind::Chat | Kind::Meeting))
+            && !self.read_load.is_running()
+            && due(self.read_at, MESSAGES_EVERY)
+        {
+            self.read_at = Some(Instant::now());
+            let backend = self.backend.clone();
+            self.read_load = Load::start(ctx, move || backend.read_by(&id).map(|r| (id, r)));
+        }
         if self.section == Section::Activity
             && !self.activity_load.is_running()
             && due(self.activity_at, MESSAGES_EVERY)
@@ -670,6 +698,8 @@ impl Workspace {
         }
         self.open = Some(id.to_string());
         self.messages = None;
+        self.read_by.clear();
+        self.read_at = None;
         self.messages_load = Load::Idle;
         self.messages_at = None;
         self.thread = None;

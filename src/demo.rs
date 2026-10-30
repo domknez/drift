@@ -362,6 +362,14 @@ impl Backend for Demo {
         Ok(())
     }
 
+    fn read_by(&self, conversation: &str) -> Result<Vec<(String, i64)>> {
+        // Maya has read everything the user sent her.
+        Ok(match conversation {
+            "19:maya" => vec![(ME.to_string(), i64::MAX), ("8:orgid:maya".to_string(), 3007)],
+            _ => Vec::new(),
+        })
+    }
+
     fn calendar(&self, _from: i64, _to: i64) -> Result<Vec<Meeting>> {
         let day = 86_400_000;
         let meeting = |id: &str, subject: &str, start: i64, minutes: i64, organizer: &str, online: bool| Meeting {

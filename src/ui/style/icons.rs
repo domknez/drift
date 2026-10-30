@@ -33,8 +33,10 @@ pub enum Icon {
     Bell,
     /// A cross: close.
     Close,
-    /// A tick: save.
+    /// A tick: save, or sent.
     Check,
+    /// Two ticks: seen.
+    Seen,
     /// A smiling face: emoji.
     Smile,
     /// A paperclip: attach.
@@ -119,6 +121,10 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
         }
         Icon::Check => {
             line(&[(5.0, 12.5), (10.0, 17.5), (19.0, 7.0)]);
+        }
+        Icon::Seen => {
+            line(&[(2.0, 12.5), (7.0, 17.5), (16.0, 7.0)]);
+            line(&[(11.5, 16.0), (13.0, 17.5), (22.0, 7.0)]);
         }
         Icon::Close => {
             line(&[(6.0, 6.0), (18.0, 18.0)]);
