@@ -180,7 +180,7 @@ fn people_panel(ui: &mut Ui, ws: &mut Workspace, d: &Directory, full: Rect) {
 fn chips(ui: &mut Ui, ws: &mut Workspace, at: egui::Pos2) {
     let p = colors();
     let mut x = at.x;
-    for (chip, label) in [(Chip::All, "All"), (Chip::Unread, "Unread"), (Chip::Channels, "Channels"), (Chip::People, "People")] {
+    for (chip, label) in [(Chip::All, "All"), (Chip::Unread, "Unread"), (Chip::People, "People"), (Chip::Meetings, "Meetings")] {
         let galley = ui.painter().layout_no_wrap(label.to_string(), ty::small_strong(), p.text);
         let rect = Rect::from_min_size(pos2(x, at.y), vec2(galley.size().x + 22.0, 28.0));
         let response =
@@ -212,10 +212,11 @@ fn chats(ui: &mut Ui, ws: &mut Workspace, d: &Directory) {
     let fits = |c: &Conversation| match chip {
         Chip::All => true,
         Chip::Unread => c.unread,
-        Chip::Channels => c.kind == Kind::Channel,
+        Chip::Meetings => c.kind == Kind::Meeting,
         Chip::People => c.kind == Kind::Chat,
     };
-    let shown = |c: &&Conversation| c.kind != Kind::Feed && !ws.is_hidden(c) && fits(c) && matches(ws, &c.title);
+    // Chats only: channels are under Teams.
+    let shown = |c: &&Conversation| matches!(c.kind, Kind::Chat | Kind::Meeting) && !ws.is_hidden(c) && fits(c) && matches(ws, &c.title);
     let pinned: Vec<Conversation> = d.conversations.iter().filter(|c| c.pinned).filter(shown).cloned().collect();
     // Recent: chats and channels together, newest first; only a few meeting chats.
     let mut meetings = 0;
@@ -248,7 +249,7 @@ fn chats(ui: &mut Ui, ws: &mut Workspace, d: &Directory) {
     }
     // Hidden ones, folded away at the bottom (to show them again).
     let hidden: Vec<Conversation> =
-        d.conversations.iter().filter(|c| ws.is_hidden(c) && fits(c) && matches(ws, &c.title)).cloned().collect();
+        d.conversations.iter().filter(|c| c.kind != Kind::Channel && ws.is_hidden(c) && fits(c) && matches(ws, &c.title)).cloned().collect();
     if !hidden.is_empty() && section(ui, ws, "hidden", &format!("HIDDEN ({})", hidden.len())) {
         for c in &hidden {
             row(ui, ws, d, c);
@@ -258,12 +259,28 @@ fn chats(ui: &mut Ui, ws: &mut Workspace, d: &Directory) {
 
 fn teams(ui: &mut Ui, ws: &mut Workspace, d: &Directory) {
     let p = colors();
+    // Pinned channels first, then each team with its channels.
+    let wanted = &*ws;
+    let pinned: Vec<Conversation> = d
+        .teams
+        .iter()
+        .flat_map(|team| team.channels.iter().filter(move |c| matches(wanted, &c.name) || matches(wanted, &team.name)))
+        .filter_map(|c| d.conversation(&c.id))
+        .filter(|c| c.pinned)
+        .cloned()
+        .collect();
+    if !pinned.is_empty() && section(ui, ws, "pinned-channels", "PINNED") {
+        for channel in &pinned {
+            row(ui, ws, d, channel);
+        }
+    }
     for team in &d.teams {
         let channels: Vec<Conversation> = team
             .channels
             .iter()
             .filter(|c| matches(ws, &c.name) || matches(ws, &team.name))
             .filter_map(|c| d.conversation(&c.id))
+            .filter(|c| !c.pinned)
             .cloned()
             .collect();
         if channels.is_empty() {

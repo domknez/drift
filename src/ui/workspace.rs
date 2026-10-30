@@ -175,8 +175,8 @@ pub enum Side {
 pub enum Chip {
     All,
     Unread,
-    Channels,
     People,
+    Meetings,
 }
 
 /// What the workspace needs the app to do.

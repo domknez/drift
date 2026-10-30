@@ -449,11 +449,11 @@ impl Backend for Teams {
             .collect();
         let names = self.names_of(&member_ids);
 
-        // Channels' fresh state (newest message, unread) from the chat service, by id.
-        let channel_state: std::collections::HashMap<String, (Option<crate::model::Preview>, bool)> = listed
+        // Channels' fresh state (newest message, unread, pinned in drift) from the chat service, by id.
+        let channel_state: std::collections::HashMap<String, (Option<crate::model::Preview>, bool, bool)> = listed
             .iter()
             .filter(|c| c.kind == Kind::Channel || channel_ids.contains(c.id.as_str()))
-            .map(|c| (c.id.clone(), (c.last.clone(), c.unread)))
+            .map(|c| (c.id.clone(), (c.last.clone(), c.unread, c.pinned)))
             .collect();
 
         let mut conversations: Vec<Conversation> = listed
@@ -491,7 +491,8 @@ impl Backend for Teams {
         // Channels come from the roster's teams; the chat service says what's new.
         for team in &teams {
             for channel in &team.channels {
-                let (last, unread) = channel_state.get(&channel.id).cloned().unwrap_or((channel.last.clone(), channel.unread));
+                let (last, unread, favorite) =
+                    channel_state.get(&channel.id).cloned().unwrap_or((channel.last.clone(), channel.unread, false));
                 conversations.push(Conversation {
                     id: channel.id.clone(),
                     kind: Kind::Channel,
@@ -499,7 +500,7 @@ impl Backend for Teams {
                     last: last.or_else(|| channel.last.clone()),
                     unread: unread || channel.unread,
                     read_up_to: None,
-                    pinned: channel.pinned,
+                    pinned: channel.pinned || favorite,
                     muted: channel.muted,
                     join_url: None,
                     picture: None,

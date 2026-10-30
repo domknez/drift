@@ -33,7 +33,8 @@ pub fn teams(roster: &Value) -> Vec<Team> {
                         id: cid,
                         general,
                         unread: !c["isMessageRead"].as_bool().unwrap_or(true),
-                        pinned: c["isFavorite"].as_bool().unwrap_or(false) || c["isPinned"].as_bool().unwrap_or(false),
+                        // isFavorite on a channel is whether it's shown in its team's list, not a pin.
+                        pinned: c["isPinned"].as_bool().unwrap_or(false),
                         muted: c["isMuted"].as_bool().unwrap_or(false),
                         last: preview(&c["lastMessage"]),
                     })
