@@ -1,7 +1,7 @@
 //! What the UI asks of a chat service. Teams is the one there is (`crate::teams`);
 //! the UI only sees this trait and the `model` types.
 
-use crate::model::{Directory, Message};
+use crate::model::{Directory, Message, Picture};
 use std::fmt;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -31,9 +31,15 @@ pub trait Backend: Send + Sync {
     /// The signed-in user's name.
     fn me(&self) -> String;
 
+    /// The signed-in user's id, as messages name their authors.
+    fn me_id(&self) -> String;
+
     /// Teams with their channels, and the chats, newest first.
     fn directory(&self) -> Result<Directory>;
 
     /// The newest messages of a conversation, oldest first.
     fn messages(&self, conversation: &str) -> Result<Vec<Message>>;
+
+    /// A picture's image file (JPEG or PNG).
+    fn picture(&self, picture: &Picture) -> Result<Vec<u8>>;
 }

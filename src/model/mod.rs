@@ -4,7 +4,7 @@
 pub mod text;
 pub mod time;
 
-pub use text::Inline;
+pub use text::{Block, Inline};
 
 /// A conversation's id as the service knows it (`19:…@thread.v2`, `48:mentions`, …).
 pub type ConversationId = String;
@@ -31,6 +31,40 @@ pub struct Conversation {
     pub last: Option<Preview>,
     /// Something arrived after what was last read.
     pub unread: bool,
+    /// Pinned to the top of the list (a favourite in Teams).
+    pub pinned: bool,
+    pub muted: bool,
+    /// The meeting's join link, for meeting chats.
+    pub join_url: Option<String>,
+    pub picture: Option<Picture>,
+}
+
+/// A picture the service has: a person's photo, a team's, or a group chat's made
+/// of its members'.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum Picture {
+    Person {
+        id: String,
+        name: String,
+    },
+    Team {
+        group: String,
+        etag: String,
+        name: String,
+    },
+    /// Members' ids and names, a few of them.
+    Group(Vec<(String, String)>),
+}
+
+impl Picture {
+    /// The same for the same picture: the cache's key.
+    pub fn key(&self) -> String {
+        match self {
+            Picture::Person { id, .. } => format!("person:{id}"),
+            Picture::Team { group, etag, .. } => format!("team:{group}:{etag}"),
+            Picture::Group(members) => format!("group:{}", members.iter().map(|(id, _)| id.as_str()).collect::<Vec<_>>().join(",")),
+        }
+    }
 }
 
 /// The newest message of a conversation, for the sidebar.
@@ -46,6 +80,7 @@ pub struct Preview {
 pub struct Team {
     pub id: String,
     pub name: String,
+    pub picture: Option<Picture>,
     pub channels: Vec<Channel>,
 }
 
@@ -55,6 +90,11 @@ pub struct Channel {
     pub id: ConversationId,
     pub name: String,
     pub general: bool,
+    pub unread: bool,
+    /// A favourite: listed first.
+    pub pinned: bool,
+    pub muted: bool,
+    pub last: Option<Preview>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -65,7 +105,7 @@ pub struct Message {
     pub author: Author,
     /// Unix milliseconds.
     pub at: i64,
-    pub body: Vec<Inline>,
+    pub body: Vec<Block>,
     /// A card a bot or connector posted (a pull request, an alert, …).
     pub card: Option<Card>,
     pub edited: bool,
@@ -97,24 +137,46 @@ pub struct Reaction {
 }
 
 impl Reaction {
-    /// The emoji drawn for a reaction key; unknown keys show their name.
-    pub fn emoji(&self) -> &str {
-        match self.key.as_str() {
-            "like" | "yes" => "👍",
-            "heart" => "❤️",
-            "laugh" => "😆",
-            "surprised" => "😮",
-            "sad" => "😢",
-            "angry" => "😠",
-            "eyes" => "👀",
-            "pray" => "🙏",
-            "fire" => "🔥",
-            "clap" => "👏",
-            "tada" => "🎉",
-            "100" => "💯",
-            key => key,
+    /// The emoji drawn for a reaction key. Keys are names (`like`), or start with
+    /// the emoji's code points (`1f440_eyes`); a `-tone<n>` suffix picks a skin tone.
+    pub fn emoji(&self) -> String {
+        let (name, tone) = match self.key.rsplit_once("-tone") {
+            Some((name, t)) => (name, t.parse::<u32>().ok().filter(|t| (1..=5).contains(t))),
+            None => (self.key.as_str(), None),
+        };
+        let base = match name {
+            "like" | "yes" => "👍".to_string(),
+            "heart" => "❤️".into(),
+            "laugh" => "😆".into(),
+            "cwl" => "😂".into(),
+            "surprised" => "😮".into(),
+            "sad" => "😢".into(),
+            "angry" => "😠".into(),
+            "eyes" => "👀".into(),
+            "pray" => "🙏".into(),
+            "fire" => "🔥".into(),
+            "clap" => "👏".into(),
+            "tada" => "🎉".into(),
+            "100" => "💯".into(),
+            "smile" => "🙂".into(),
+            "wink" => "😉".into(),
+            "rofl" => "🤣".into(),
+            "thinking" => "🤔".into(),
+            "nod" | "ok" => "👌".into(),
+            name => code_points(name).unwrap_or_else(|| name.to_string()),
+        };
+        // Skin tones: U+1F3FB (light) to U+1F3FF (dark).
+        match tone.and_then(|t| char::from_u32(0x1F3FA + t)) {
+            Some(modifier) => format!("{base}{modifier}"),
+            None => base,
         }
     }
+}
+
+/// `1f440_eyes` → 👀; `2714_heavycheckmark` → ✔; `1f468-200d-1f4bb_…` → 👨‍💻.
+fn code_points(key: &str) -> Option<String> {
+    let hex = key.split('_').next()?;
+    hex.split('-').map(|h| u32::from_str_radix(h, 16).ok().filter(|c| *c >= 0x20).and_then(char::from_u32)).collect()
 }
 
 /// Everything listed in the sidebar.
@@ -137,5 +199,24 @@ impl Directory {
     /// The team and channel a conversation belongs to, if it's a channel.
     pub fn channel(&self, id: &str) -> Option<(&Team, &Channel)> {
         self.teams.iter().find_map(|t| t.channels.iter().find(|c| c.id == id).map(|c| (t, c)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Reaction;
+
+    fn emoji(key: &str) -> String {
+        Reaction { key: key.into(), count: 1, mine: false }.emoji()
+    }
+
+    #[test]
+    fn draws_reaction_keys_as_emoji() {
+        assert_eq!(emoji("like"), "👍");
+        assert_eq!(emoji("1f440_eyes"), "👀");
+        assert_eq!(emoji("2714_heavycheckmark"), "✔");
+        assert_eq!(emoji("yes-tone1"), "👍🏻");
+        assert_eq!(emoji("cwl"), "😂");
+        assert_eq!(emoji("somethingnew"), "somethingnew");
     }
 }

@@ -10,6 +10,7 @@
 
 mod app;
 mod load;
+mod pictures;
 mod style;
 mod views;
 mod widgets;

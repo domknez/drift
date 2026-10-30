@@ -847,11 +847,13 @@ dependencies = [
  "eframe",
  "keyring-core",
  "libc",
+ "png",
  "serde_json",
  "tao",
  "ureq",
  "windows-native-keyring-store",
  "wry",
+ "zune-jpeg",
 ]
 
 [[package]]

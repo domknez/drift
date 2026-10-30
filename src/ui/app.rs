@@ -57,7 +57,9 @@ impl App {
         style::install_fonts(&cc.egui_ctx);
         let prefs = Prefs::load();
         let screen = match Session::stored() {
-            Some(session) => Screen::Signed(Box::new(Workspace::new(Arc::new(Teams::new(session)), prefs.conversation.clone()))),
+            Some(session) => {
+                Screen::Signed(Box::new(Workspace::new(&cc.egui_ctx, Arc::new(Teams::new(session)), prefs.conversation.clone())))
+            }
             None => Screen::SignIn(SignIn::new(None)),
         };
         App { prefs, dark: None, screen }
@@ -97,7 +99,7 @@ impl eframe::App for App {
                 if let Some(result) = sign_in.pending.take() {
                     match result {
                         Ok(backend) => {
-                            self.screen = Screen::Signed(Box::new(Workspace::new(backend, self.prefs.conversation.clone())));
+                            self.screen = Screen::Signed(Box::new(Workspace::new(&ctx, backend, self.prefs.conversation.clone())));
                             ctx.request_repaint();
                             return;
                         }

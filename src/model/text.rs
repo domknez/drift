@@ -1,11 +1,14 @@
-//! Message bodies: the HTML the service sends, reduced to runs of styled text the UI
-//! can lay out. Anything it doesn't know keeps its text and loses its markup.
+//! Message bodies: the HTML the service sends, reduced to blocks (paragraphs, tables,
+//! quotes, code) of styled runs the UI can lay out. Anything it doesn't know keeps
+//! its text and loses its markup.
 
 /// How a run of text is drawn.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Span {
     pub bold: bool,
     pub italic: bool,
+    pub strike: bool,
+    pub underline: bool,
     pub code: bool,
     pub mention: bool,
     pub link: Option<String>,
@@ -18,72 +21,67 @@ pub struct Inline {
     pub span: Span,
 }
 
+/// One block of a message.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Block {
+    Text(Vec<Inline>),
+    /// Rows of cells; the first row is a header when `header` is set.
+    Table {
+        rows: Vec<Vec<Vec<Inline>>>,
+        header: bool,
+    },
+    /// A quote, or the message a reply quotes.
+    Quote(Vec<Inline>),
+    /// Preformatted text, spaces kept.
+    Code(String),
+}
+
 /// Plain text, as it is.
-pub fn plain(text: &str) -> Vec<Inline> {
-    if text.is_empty() { Vec::new() } else { vec![Inline { text: text.to_string(), span: Span::default() }] }
+pub fn plain(text: &str) -> Vec<Block> {
+    if text.trim().is_empty() {
+        Vec::new()
+    } else {
+        vec![Block::Text(vec![Inline { text: text.trim().to_string(), span: Span::default() }])]
+    }
 }
 
 /// The text alone, on one line (for previews and notifications).
-pub fn flatten(body: &[Inline]) -> String {
-    let joined: String = body.iter().map(|i| i.text.as_str()).collect();
-    joined.split_whitespace().collect::<Vec<_>>().join(" ")
+pub fn flatten(body: &[Block]) -> String {
+    let mut words = Vec::new();
+    for block in body {
+        match block {
+            Block::Text(runs) | Block::Quote(runs) => words.extend(runs.iter().map(|r| r.text.as_str())),
+            Block::Table { rows, .. } => words.extend(rows.iter().flatten().flatten().map(|r| r.text.as_str())),
+            Block::Code(text) => words.push(text),
+        }
+    }
+    words.join(" ").split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// Styled runs from a message's HTML.
-pub fn from_html(html: &str) -> Vec<Inline> {
-    let mut out = Out::default();
-    let mut stack: Vec<Open> = Vec::new();
+/// Blocks from a message's HTML.
+pub fn from_html(html: &str) -> Vec<Block> {
+    let mut b = Builder::default();
     let mut rest = html;
     while !rest.is_empty() {
         let Some(lt) = rest.find('<') else {
-            out.text(&decode(rest), &stack);
+            b.text(&decode(rest));
             break;
         };
-        out.text(&decode(&rest[..lt]), &stack);
+        b.text(&decode(&rest[..lt]));
         rest = &rest[lt..];
         let Some(gt) = rest.find('>') else {
-            out.text(&decode(rest), &stack);
+            b.text(&decode(rest));
             break;
         };
         let tag = Tag::parse(&rest[1..gt]);
         rest = &rest[gt + 1..];
         match tag {
-            Tag::Open { name, attrs } => {
-                if is_block(&name) {
-                    out.block();
-                }
-                match name.as_str() {
-                    "br" => out.text("\n", &stack),
-                    "img" => {
-                        // Emoji come as images with the character in alt.
-                        if let Some(alt) = attr(&attrs, "alt") {
-                            out.text(&decode(&alt), &stack);
-                        }
-                    }
-                    "li" => {
-                        stack.push(Open { name, link: None });
-                        out.text("• ", &stack);
-                    }
-                    "hr" => out.block(),
-                    _ => {
-                        let link = (name == "a").then(|| attr(&attrs, "href").map(|h| decode(&h))).flatten();
-                        let mention = attr(&attrs, "itemtype").is_some_and(|t| t.ends_with("/Mention"));
-                        stack.push(Open { name: if mention { "mention".into() } else { name }, link });
-                    }
-                }
-            }
-            Tag::Close(name) => {
-                if let Some(at) = stack.iter().rposition(|o| o.name == name || (name == "span" && o.name == "mention")) {
-                    stack.truncate(at);
-                }
-                if is_block(&name) {
-                    out.block();
-                }
-            }
+            Tag::Open { name, attrs } => b.open(name, &attrs),
+            Tag::Close(name) => b.close(&name),
             Tag::Other => {}
         }
     }
-    out.finish()
+    b.finish()
 }
 
 struct Open {
@@ -91,32 +89,206 @@ struct Open {
     link: Option<String>,
 }
 
-fn span_of(stack: &[Open]) -> Span {
-    let has = |names: &[&str]| stack.iter().any(|o| names.contains(&o.name.as_str()));
-    Span {
-        bold: has(&["b", "strong", "h1", "h2", "h3"]),
-        italic: has(&["i", "em"]),
-        code: has(&["code", "pre"]),
-        mention: has(&["mention"]),
-        link: stack.iter().rev().find_map(|o| o.link.clone()),
+#[derive(Default)]
+struct Table {
+    rows: Vec<Vec<Vec<Inline>>>,
+    header: bool,
+    /// A `<td>` or `<th>` is open.
+    in_cell: bool,
+}
+
+#[derive(Default)]
+struct Builder {
+    blocks: Vec<Block>,
+    stack: Vec<Open>,
+    /// The paragraph, quote or cell being written.
+    runs: Runs,
+    table: Option<Table>,
+    /// Inside a `<blockquote>` (depth).
+    quote: usize,
+    /// Inside a `<pre>`: its text so far.
+    pre: Option<String>,
+}
+
+impl Builder {
+    fn span(&self) -> Span {
+        let has = |names: &[&str]| self.stack.iter().any(|o| names.contains(&o.name.as_str()));
+        Span {
+            bold: has(&["b", "strong", "h1", "h2", "h3", "th"]),
+            italic: has(&["i", "em"]),
+            strike: has(&["s", "strike", "del"]),
+            underline: has(&["u", "ins"]),
+            code: has(&["code"]),
+            mention: has(&["mention"]),
+            link: self.stack.iter().rev().find_map(|o| o.link.clone()),
+        }
+    }
+
+    fn text(&mut self, text: &str) {
+        if let Some(pre) = &mut self.pre {
+            pre.push_str(text);
+            return;
+        }
+        let span = self.span();
+        self.runs.text(text, span);
+    }
+
+    fn open(&mut self, name: String, attrs: &str) {
+        match name.as_str() {
+            "br" => {
+                if let Some(pre) = &mut self.pre {
+                    pre.push('\n');
+                } else {
+                    self.runs.text("\n", Span::default());
+                }
+                return;
+            }
+            "img" => {
+                // Emoji come as images with the character in alt.
+                if let Some(alt) = attr(attrs, "alt") {
+                    self.text(&decode(&alt));
+                }
+                return;
+            }
+            "hr" => {
+                self.end_paragraph();
+                return;
+            }
+            "pre" => {
+                self.end_paragraph();
+                self.pre = Some(String::new());
+            }
+            "table" => {
+                self.end_paragraph();
+                self.table.get_or_insert_default();
+            }
+            "tr" => {
+                self.end_cell();
+                if let Some(t) = &mut self.table {
+                    t.rows.push(Vec::new());
+                }
+            }
+            "td" | "th" => {
+                self.end_cell();
+                if let Some(t) = &mut self.table {
+                    if t.rows.is_empty() {
+                        t.rows.push(Vec::new());
+                    }
+                    if name == "th" && t.rows.len() == 1 {
+                        t.header = true;
+                    }
+                    t.in_cell = true;
+                }
+            }
+            "blockquote" => {
+                self.end_paragraph();
+                self.quote += 1;
+            }
+            "li" => {
+                self.runs.block();
+                self.stack.push(Open { name, link: None });
+                self.runs.text("• ", Span::default());
+                return;
+            }
+            n if is_block(n) => self.runs.block(),
+            _ => {}
+        }
+        let link = (name == "a").then(|| attr(attrs, "href").map(|h| decode(&h))).flatten();
+        let mention = attr(attrs, "itemtype").is_some_and(|t| t.ends_with("/Mention"));
+        self.stack.push(Open { name: if mention { "mention".into() } else { name }, link });
+    }
+
+    fn close(&mut self, name: &str) {
+        if let Some(at) = self.stack.iter().rposition(|o| o.name == name || (name == "span" && o.name == "mention")) {
+            self.stack.truncate(at);
+        }
+        match name {
+            "pre" => {
+                if let Some(code) = self.pre.take() {
+                    let code = code.trim_matches('\n').to_string();
+                    if !code.trim().is_empty() {
+                        self.blocks.push(Block::Code(code));
+                    }
+                }
+            }
+            "td" | "th" => self.end_cell(),
+            "table" => {
+                self.end_cell();
+                if let Some(t) = self.table.take() {
+                    let rows: Vec<_> = t.rows.into_iter().filter(|r| !r.is_empty()).collect();
+                    if !rows.is_empty() {
+                        self.blocks.push(Block::Table { rows, header: t.header });
+                    }
+                }
+            }
+            "blockquote" => {
+                self.end_paragraph();
+                self.quote = self.quote.saturating_sub(1);
+            }
+            n if is_block(n) => self.runs.block(),
+            _ => {}
+        }
+    }
+
+    /// Put what was written so far into the open cell, if one is open.
+    fn end_cell(&mut self) {
+        let Some(t) = &mut self.table else { return };
+        let runs = std::mem::take(&mut self.runs).finish();
+        if !t.in_cell {
+            return;
+        }
+        t.in_cell = false;
+        match t.rows.last_mut() {
+            Some(row) => row.push(runs),
+            None => t.rows.push(vec![runs]),
+        }
+    }
+
+    fn end_paragraph(&mut self) {
+        if self.table.is_some() {
+            return;
+        }
+        let runs = std::mem::take(&mut self.runs).finish();
+        if runs.is_empty() {
+            return;
+        }
+        self.blocks.push(if self.quote > 0 { Block::Quote(runs) } else { Block::Text(runs) });
+    }
+
+    fn finish(mut self) -> Vec<Block> {
+        if let Some(code) = self.pre.take() {
+            self.blocks.push(Block::Code(code));
+        }
+        self.end_cell();
+        if let Some(t) = self.table.take()
+            && !t.rows.is_empty()
+        {
+            self.blocks.push(Block::Table { rows: t.rows, header: t.header });
+        }
+        self.end_paragraph();
+        self.blocks
     }
 }
 
 fn is_block(name: &str) -> bool {
-    matches!(name, "p" | "div" | "ul" | "ol" | "li" | "pre" | "blockquote" | "h1" | "h2" | "h3" | "table" | "tr")
+    matches!(name, "p" | "div" | "ul" | "ol" | "li" | "h1" | "h2" | "h3" | "h4")
 }
 
+/// Runs being written, merging neighbours of one style.
 #[derive(Default)]
-struct Out {
+struct Runs {
     runs: Vec<Inline>,
     /// A paragraph ended: the next text starts on a new line.
     pending_break: bool,
 }
 
-impl Out {
-    fn text(&mut self, text: &str, stack: &[Open]) {
-        let in_pre = stack.iter().any(|o| o.name == "pre");
-        let text = if in_pre { text.to_string() } else { collapse(text) };
+impl Runs {
+    fn text(&mut self, text: &str, span: Span) {
+        if text == "\n" {
+            self.push("\n", Span::default());
+            return;
+        }
+        let text = collapse(text);
         if text.is_empty() || (text == " " && self.at_line_start()) {
             return;
         }
@@ -127,7 +299,7 @@ impl Out {
             }
         }
         let text = if self.at_line_start() { text.trim_start().to_string() } else { text };
-        self.push(&text, span_of(stack));
+        self.push(&text, span);
     }
 
     fn push(&mut self, text: &str, span: Span) {
@@ -157,6 +329,9 @@ impl Out {
             } else {
                 break;
             }
+        }
+        while self.runs.first().is_some_and(|r| r.text.trim().is_empty()) {
+            self.runs.remove(0);
         }
         self.runs
     }
@@ -276,31 +451,47 @@ pub fn decode(s: &str) -> String {
 mod tests {
     use super::*;
 
-    fn texts(runs: &[Inline]) -> Vec<&str> {
-        runs.iter().map(|r| r.text.as_str()).collect()
+    fn texts(blocks: &[Block]) -> Vec<Vec<&str>> {
+        blocks
+            .iter()
+            .map(|b| match b {
+                Block::Text(r) | Block::Quote(r) => r.iter().map(|r| r.text.as_str()).collect(),
+                Block::Code(c) => vec![c.as_str()],
+                Block::Table { .. } => vec!["<table>"],
+            })
+            .collect()
+    }
+
+    fn runs(blocks: &[Block]) -> &[Inline] {
+        match &blocks[0] {
+            Block::Text(r) => r,
+            b => panic!("not text: {b:?}"),
+        }
     }
 
     #[test]
     fn paragraphs_become_lines() {
-        let runs = from_html("<p>First line</p><p>Second&nbsp;one &amp; more</p>");
-        assert_eq!(flatten(&runs), "First line Second one & more");
-        assert_eq!(texts(&runs), ["First line\nSecond one & more"]);
+        let blocks = from_html("<p>First line</p><p>Second&nbsp;one &amp; more</p>");
+        assert_eq!(flatten(&blocks), "First line Second one & more");
+        assert_eq!(texts(&blocks), [["First line\nSecond one & more"]]);
     }
 
     #[test]
     fn keeps_styles_links_and_mentions() {
-        let html = r#"<div>Hi <span itemtype="http://schema.skype.com/Mention" itemscope itemid="0">Maya</span>, see <a href="https://example.com/pr/1?a=1&amp;b=2">the PR</a> and <code>run()</code> <b>now</b></div>"#;
-        let runs = from_html(html);
-        assert_eq!(texts(&runs), ["Hi ", "Maya", ", see ", "the PR", " and ", "run()", " ", "now"]);
-        assert!(runs[1].span.mention);
-        assert_eq!(runs[3].span.link.as_deref(), Some("https://example.com/pr/1?a=1&b=2"));
-        assert!(runs[5].span.code && runs[7].span.bold);
+        let html = r#"<div>Hi <span itemtype="http://schema.skype.com/Mention" itemscope itemid="0">Maya</span>, see <a href="https://example.com/pr/1?a=1&amp;b=2">the PR</a> and <code>run()</code> <b>now</b> <s>not</s></div>"#;
+        let blocks = from_html(html);
+        let r = runs(&blocks);
+        assert_eq!(
+            r.iter().map(|r| r.text.as_str()).collect::<Vec<_>>(),
+            ["Hi ", "Maya", ", see ", "the PR", " and ", "run()", " ", "now", " ", "not"]
+        );
+        assert!(r[1].span.mention && r[5].span.code && r[7].span.bold && r[9].span.strike);
+        assert_eq!(r[3].span.link.as_deref(), Some("https://example.com/pr/1?a=1&b=2"));
     }
 
     #[test]
     fn emoji_images_become_their_character() {
-        let runs = from_html(r#"<p>ok <img alt="🙂" itemtype="http://schema.skype.com/Emoji" src="x"></p>"#);
-        assert_eq!(flatten(&runs), "ok 🙂");
+        assert_eq!(flatten(&from_html(r#"<p>ok <img alt="🙂" itemtype="http://schema.skype.com/Emoji" src="x"></p>"#)), "ok 🙂");
     }
 
     #[test]
@@ -310,6 +501,28 @@ mod tests {
 
     #[test]
     fn lists_get_bullets() {
-        assert_eq!(texts(&from_html("<ul><li>one</li><li>two</li></ul>")), ["• one\n• two"]);
+        assert_eq!(texts(&from_html("<ul><li>one</li><li>two</li></ul>")), [["• one\n• two"]]);
+    }
+
+    #[test]
+    fn tables_keep_rows_and_cells() {
+        let html = "<p>Tickets:</p><table><tbody><tr><th>Prio</th><th>Ticket</th></tr><tr><td>1</td><td><s>#1413</s></td></tr><tr><td>2</td><td>#8771</td></tr></tbody></table><p>Done</p>";
+        let blocks = from_html(html);
+        assert_eq!(texts(&blocks), [vec!["Tickets:"], vec!["<table>"], vec!["Done"]]);
+        let Block::Table { rows, header } = &blocks[1] else { panic!() };
+        assert!(*header);
+        let cell = |r: usize, c: usize| rows[r][c].iter().map(|i| i.text.as_str()).collect::<String>();
+        assert_eq!((rows.len(), rows[1].len()), (3, 2));
+        assert_eq!((cell(0, 1), cell(1, 1), cell(2, 0)), ("Ticket".into(), "#1413".into(), "2".into()));
+        assert!(rows[1][1][0].span.strike && rows[0][0][0].span.bold);
+    }
+
+    #[test]
+    fn quotes_and_code_blocks() {
+        let html = "<blockquote><p>original</p></blockquote><p>answer</p><pre><code>fn main() {\n    run();\n}</code></pre>";
+        let blocks = from_html(html);
+        assert!(matches!(&blocks[0], Block::Quote(r) if r[0].text == "original"));
+        assert!(matches!(&blocks[1], Block::Text(r) if r[0].text == "answer"));
+        assert_eq!(blocks[2], Block::Code("fn main() {\n    run();\n}".into()));
     }
 }

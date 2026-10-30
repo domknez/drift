@@ -2,7 +2,8 @@
 //! cards with their replies folded in under them; chats show messages in a row,
 //! grouped by author.
 
-use crate::model::{Directory, Kind, Message, time};
+use crate::model::{Directory, Kind, Message, Picture, time};
+use crate::ui::pictures::Pictures;
 use crate::ui::style::{colors, metrics, typography as ty};
 use crate::ui::widgets;
 use crate::ui::workspace::Workspace;
@@ -57,7 +58,7 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace) {
                         } else if is_channel {
                             posts(ui, ws, &messages);
                         } else {
-                            chat(ui, &messages);
+                            chat(ui, &mut ws.pictures, &messages, &ws.me);
                         }
                     });
             });
@@ -114,7 +115,7 @@ fn posts(ui: &mut Ui, ws: &mut Workspace, messages: &[Message]) {
             .inner_margin(Margin::symmetric(16, 14))
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
-                message(ui, post, metrics::AVATAR, true);
+                message(ui, &mut ws.pictures, post, metrics::AVATAR, true);
                 let thread = replies.get(post.id.as_str()).map(Vec::as_slice).unwrap_or(&[]);
                 if !thread.is_empty() {
                     ui.add_space(10.0);
@@ -134,7 +135,7 @@ fn posts(ui: &mut Ui, ws: &mut Workspace, messages: &[Message]) {
                     }
                     for reply in &thread[hidden..] {
                         ui.add_space(6.0);
-                        message(ui, reply, metrics::REPLY_AVATAR, true);
+                        message(ui, &mut ws.pictures, reply, metrics::REPLY_AVATAR, true);
                     }
                 }
             });
@@ -143,30 +144,58 @@ fn posts(ui: &mut Ui, ws: &mut Workspace, messages: &[Message]) {
 }
 
 /// A chat: messages in a row, a header only where the author or the hour changes.
-fn chat(ui: &mut Ui, messages: &[Message]) {
+fn chat(ui: &mut Ui, pictures: &mut Pictures, messages: &[Message], me: &str) {
     let p = colors();
     let now = time::now_ms();
-    let mut previous: Option<&Message> = None;
-    for m in messages {
-        let new_day = previous.is_none_or(|prev| time::day_number(prev.at) != time::day_number(m.at));
-        if new_day {
-            ui.add_space(14.0);
-            ui.label(RichText::new(time::day(m.at, now).to_uppercase()).font(ty::meta()).color(p.faint));
+    // Runs of messages by one author, close together on one day, share a card.
+    let mut runs: Vec<&[Message]> = Vec::new();
+    let mut start = 0;
+    for i in 1..=messages.len() {
+        let ends = i == messages.len() || {
+            let (prev, m) = (&messages[i - 1], &messages[i]);
+            prev.author.id != m.author.id || m.at - prev.at >= metrics::GROUP_GAP || time::day_number(prev.at) != time::day_number(m.at)
+        };
+        if ends {
+            runs.push(&messages[start..i]);
+            start = i;
         }
-        let grouped = !new_day && previous.is_some_and(|prev| prev.author.id == m.author.id && m.at - prev.at < metrics::GROUP_GAP);
-        ui.add_space(if grouped { 2.0 } else { 10.0 });
-        message(ui, m, metrics::AVATAR, !grouped);
-        previous = Some(m);
+    }
+    let mut day = None;
+    for run in runs {
+        let first = &run[0];
+        if day != Some(time::day_number(first.at)) {
+            day = Some(time::day_number(first.at));
+            ui.add_space(14.0);
+            ui.label(RichText::new(time::day(first.at, now).to_uppercase()).font(ty::meta()).color(p.faint));
+            ui.add_space(4.0);
+        }
+        let mine = !me.is_empty() && first.author.name == me;
+        Frame::new()
+            .fill(if mine { p.selected.gamma_multiply(0.55) } else { p.surface })
+            .stroke(Stroke::new(1.0, p.line))
+            .corner_radius(CornerRadius::same(metrics::POST_RADIUS))
+            .inner_margin(Margin::symmetric(16, 12))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                for (i, m) in run.iter().enumerate() {
+                    if i > 0 {
+                        ui.add_space(6.0);
+                    }
+                    message(ui, pictures, m, metrics::AVATAR, i == 0);
+                }
+            });
+        ui.add_space(8.0);
     }
 }
 
 /// One message: avatar, author and time (unless it continues the one above), text,
 /// card and reactions.
-fn message(ui: &mut Ui, m: &Message, avatar: f32, header: bool) {
+fn message(ui: &mut Ui, pictures: &mut Pictures, m: &Message, avatar: f32, header: bool) {
     let p = colors();
     ui.horizontal_top(|ui| {
         if header {
-            widgets::avatar(ui, &m.author.id, &m.author.name, avatar);
+            let picture = pictures.get(&Picture::Person { id: m.author.id.clone(), name: m.author.name.clone() });
+            widgets::avatar(ui, &m.author.id, &m.author.name, avatar, picture);
         } else {
             ui.add_space(avatar);
         }
@@ -185,7 +214,7 @@ fn message(ui: &mut Ui, m: &Message, avatar: f32, header: bool) {
                 });
             }
             if !m.body.is_empty() {
-                widgets::rich_text(ui, &m.body, p.text);
+                widgets::blocks(ui, &m.body);
             }
             if let Some(card) = &m.card {
                 widgets::card(ui, card);

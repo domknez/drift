@@ -9,9 +9,10 @@
 pub mod auth;
 mod http;
 mod parse;
+pub mod shape;
 
 use crate::backend::{Backend, Error, Result};
-use crate::model::{Conversation, Directory, Kind, Message};
+use crate::model::{Conversation, Directory, Kind, Message, Picture};
 use auth::{CHAT_AGGREGATOR, SPACES, Session};
 use http::{Body, Method};
 use serde_json::Value;
@@ -114,9 +115,47 @@ impl Teams {
     }
 }
 
+impl Teams {
+    /// The structure of the roster, the conversation list and the messages of the
+    /// newest chat and channel (see [`shape`]).
+    pub fn shape(&self) -> Result<String> {
+        let roster = self.roster()?;
+        let list = self.chat_service(&format!("/v1/users/ME/conversations?view=msnp24Equivalent&pageSize=500&startTime=0&{TARGETS}"))?;
+        let mut out = format!("== roster\n{}\n== conversations\n{}", shape::describe(&roster, 7), shape::describe(&list, 6));
+        let me = Picture::Person { id: self.my_id(), name: Backend::me(self) };
+        match self.picture(&me) {
+            Ok(bytes) => out.push_str(&format!("== own picture: {} bytes, starts {:02x?}\n", bytes.len(), &bytes[..bytes.len().min(4)])),
+            Err(e) => out.push_str(&format!("== own picture: {e}\n")),
+        }
+        if let Some(team) = parse::teams(&roster).into_iter().find_map(|t| t.picture) {
+            match self.picture(&team) {
+                Ok(bytes) => {
+                    out.push_str(&format!("== a team picture: {} bytes, starts {:02x?}\n", bytes.len(), &bytes[..bytes.len().min(4)]))
+                }
+                Err(e) => out.push_str(&format!("== a team picture: {e}\n")),
+            }
+        }
+        let listed = parse::conversations(&list);
+        for kind in [Kind::Chat, Kind::Channel, Kind::Meeting] {
+            if let Some(c) = listed.iter().filter(|c| c.kind == kind).max_by_key(|c| c.last.as_ref().map_or(0, |l| l.at)) {
+                let path = format!(
+                    "/v1/users/ME/conversations/{}/messages?view=msnp24Equivalent|supportsMessageProperties&pageSize={PAGE}&startTime=1",
+                    http::encode(&c.id)
+                );
+                out.push_str(&format!("== messages of the newest {kind:?}\n{}", shape::describe(&self.chat_service(&path)?, 7)));
+            }
+        }
+        Ok(out)
+    }
+}
+
 impl Backend for Teams {
     fn me(&self) -> String {
         self.session().identity().map(|i| i.name.clone()).unwrap_or_default()
+    }
+
+    fn me_id(&self) -> String {
+        self.my_id()
     }
 
     fn directory(&self) -> Result<Directory> {
@@ -148,20 +187,29 @@ impl Backend for Teams {
                 if c.title.is_empty() {
                     c.title = chat_title(&members, &me, &names, &c);
                 }
+                c.picture = chat_picture(&members, &me, &names);
                 c
             })
             .collect();
 
-        // Channels: their names from the roster, their state from the chat service.
+        // Channels: what the roster says, the chat service's newest message if newer.
         for team in &teams {
             for channel in &team.channels {
                 let known = by_id.get(channel.id.as_str());
+                let last = match (channel.last.clone(), known.and_then(|k| k.last.clone())) {
+                    (Some(a), Some(b)) => Some(if b.at > a.at { b } else { a }),
+                    (a, b) => a.or(b),
+                };
                 conversations.push(Conversation {
                     id: channel.id.clone(),
                     kind: Kind::Channel,
                     title: channel.name.clone(),
-                    last: known.and_then(|k| k.last.clone()),
-                    unread: known.is_some_and(|k| k.unread),
+                    last,
+                    unread: channel.unread || known.is_some_and(|k| k.unread),
+                    pinned: channel.pinned,
+                    muted: channel.muted,
+                    join_url: None,
+                    picture: None,
                 });
             }
         }
@@ -175,6 +223,46 @@ impl Backend for Teams {
             http::encode(conversation)
         );
         Ok(parse::messages(&self.chat_service(&path)?, &self.my_id()))
+    }
+
+    fn picture(&self, picture: &Picture) -> Result<Vec<u8>> {
+        let (skype, token) = {
+            let mut session = self.session();
+            (session.skype()?, session.access(SPACES)?)
+        };
+        let me = self.my_id();
+        let object_id = me.strip_prefix("8:orgid:").unwrap_or(&me);
+        let base = &skype.middle_tier;
+        let url = match picture {
+            Picture::Person { id, name } => {
+                format!("{base}/beta/users/{}/profilepicturev2?displayname={}&size=HR64x64", http::encode(id), http::encode(name))
+            }
+            Picture::Team { group, etag, name } => format!(
+                "{base}/beta/users/{object_id}/profilepicturev2/teams/{group}?etag={}&displayName={}",
+                http::encode(etag),
+                http::encode(name)
+            ),
+            Picture::Group(members) => {
+                let users: Value = members.iter().map(|(id, name)| serde_json::json!({"userId": id, "displayName": name})).collect();
+                format!("{base}/beta/users/{object_id}/mergedProfilePicturev2?usersInfo={}&size=HR64x64", http::encode(&users.to_string()))
+            }
+        };
+        let bearer = format!("Bearer {token}");
+        http::fetch(&url, &[("Authorization", &bearer)])
+    }
+}
+
+/// A chat's picture: the other person's photo, or a few members' photos together.
+fn chat_picture(members: &[String], me: &str, names: &HashMap<String, String>) -> Option<Picture> {
+    let others: Vec<(String, String)> =
+        members.iter().filter(|m| *m != me).map(|m| (m.clone(), names.get(m).cloned().unwrap_or_default())).take(4).collect();
+    match others.len() {
+        0 => None,
+        1 => {
+            let (id, name) = others.into_iter().next()?;
+            Some(Picture::Person { id, name })
+        }
+        _ => Some(Picture::Group(others)),
     }
 }
 
@@ -206,6 +294,10 @@ mod tests {
             title: String::new(),
             last: Some(Preview { author: "Lea".into(), text: "hi".into(), at: 1 }),
             unread: false,
+            pinned: false,
+            muted: false,
+            join_url: None,
+            picture: None,
         };
         let ids = |l: &[&str]| l.iter().map(|s| s.to_string()).collect::<Vec<_>>();
         assert_eq!(chat_title(&ids(&["8:orgid:me", "8:orgid:a"]), "8:orgid:me", &names, &chat), "Maya");

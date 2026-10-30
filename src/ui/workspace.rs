@@ -2,6 +2,7 @@
 //! messages, and keeping both fresh.
 
 use super::load::Load;
+use super::pictures::Pictures;
 use crate::backend::{Backend, Error};
 use crate::model::{ConversationId, Directory, Message};
 use eframe::egui;
@@ -17,6 +18,9 @@ const MESSAGES_EVERY: Duration = Duration::from_secs(20);
 pub struct Workspace {
     pub backend: Arc<dyn Backend>,
     pub me: String,
+    /// The signed-in user's id (for their picture).
+    pub me_id: String,
+    pub pictures: Pictures,
     /// What the sidebar lists; None until the first load.
     pub directory: Option<Directory>,
     directory_load: Load<Directory, Error>,
@@ -43,9 +47,11 @@ pub enum Outcome {
 }
 
 impl Workspace {
-    pub fn new(backend: Arc<dyn Backend>, open: Option<ConversationId>) -> Workspace {
+    pub fn new(ctx: &egui::Context, backend: Arc<dyn Backend>, open: Option<ConversationId>) -> Workspace {
         Workspace {
             me: backend.me(),
+            me_id: backend.me_id(),
+            pictures: Pictures::new(ctx, backend.clone()),
             backend,
             directory: None,
             directory_load: Load::Idle,
@@ -64,11 +70,13 @@ impl Workspace {
 
     /// Collect finished loads and start the ones that are due.
     pub fn tick(&mut self, ctx: &egui::Context) -> Option<Outcome> {
+        self.pictures.begin_frame();
         if let Some(result) = self.directory_load.take() {
             match result {
                 Ok(directory) => {
                     if self.me.is_empty() {
                         self.me = self.backend.me();
+                        self.me_id = self.backend.me_id();
                     }
                     self.directory = Some(directory);
                     self.error = None;

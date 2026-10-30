@@ -2,21 +2,29 @@
 
 use super::style::icons::{self, Icon};
 use super::style::{colors, metrics, palette, typography as ty};
-use crate::model::{Card, Inline, Reaction};
-use eframe::egui::{self, Align2, Color32, CornerRadius, Frame, Margin, Rect, Response, RichText, Sense, Stroke, Ui, vec2};
+use crate::model::{Block, Card, Inline, Reaction};
+use eframe::egui::{self, Align2, Color32, CornerRadius, Frame, Margin, Rect, Response, RichText, Sense, Stroke, TextureId, Ui, vec2};
 
-/// A round avatar with the person's initials.
-pub fn avatar(ui: &mut Ui, id: &str, name: &str, size: f32) -> Response {
+/// A round avatar: the picture once it's loaded, the initials until then.
+pub fn avatar(ui: &mut Ui, id: &str, name: &str, size: f32, picture: Option<TextureId>) -> Response {
     let (rect, response) = ui.allocate_exact_size(vec2(size, size), Sense::hover());
+    if let Some(texture) = picture {
+        egui::Image::new((texture, vec2(size, size))).corner_radius(size / 2.0).paint_at(ui, rect);
+        return response;
+    }
     let painter = ui.painter();
     painter.circle_filled(rect.center(), size / 2.0, palette::avatar(id));
     painter.text(rect.center(), Align2::CENTER_CENTER, initials(name), ty::initials(size), Color32::WHITE);
     response
 }
 
-/// A team's tile: its initial on a rounded square.
-pub fn tile(ui: &mut Ui, id: &str, name: &str, size: f32) {
+/// A team's tile: its picture, or its initial on a rounded square.
+pub fn tile(ui: &mut Ui, id: &str, name: &str, size: f32, picture: Option<TextureId>) {
     let (rect, _) = ui.allocate_exact_size(vec2(size, size), Sense::hover());
+    if let Some(texture) = picture {
+        egui::Image::new((texture, vec2(size, size))).corner_radius(5).paint_at(ui, rect);
+        return;
+    }
     ui.painter().rect_filled(rect, CornerRadius::same(5), palette::avatar(id));
     let initial: String = name.chars().find(|c| c.is_alphanumeric()).map(|c| c.to_uppercase().collect()).unwrap_or_default();
     ui.painter().text(rect.center(), Align2::CENTER_CENTER, initial, ty::initials(size * 1.3), Color32::WHITE);
@@ -89,6 +97,12 @@ pub fn rich_text(ui: &mut Ui, body: &[Inline], color: Color32) {
                     if s.italic {
                         rich = rich.italics();
                     }
+                    if s.strike {
+                        rich = rich.strikethrough();
+                    }
+                    if s.underline {
+                        rich = rich.underline();
+                    }
                     if s.code {
                         rich = rich.background_color(p.code);
                     }
@@ -103,6 +117,72 @@ pub fn rich_text(ui: &mut Ui, body: &[Inline], color: Color32) {
                 }
             });
         }
+    });
+}
+
+/// A message's blocks: paragraphs, tables, quotes and code.
+pub fn blocks(ui: &mut Ui, blocks: &[Block]) {
+    let p = colors();
+    for block in blocks {
+        match block {
+            Block::Text(runs) => rich_text(ui, runs, p.text),
+            Block::Quote(runs) => {
+                let response = Frame::new()
+                    .inner_margin(Margin { left: 12, right: 0, top: 2, bottom: 2 })
+                    .show(ui, |ui| rich_text(ui, runs, p.dim))
+                    .response;
+                let bar = Rect::from_min_size(response.rect.min, vec2(3.0, response.rect.height()));
+                ui.painter().rect_filled(bar, CornerRadius::same(2), p.border);
+            }
+            Block::Code(code) => {
+                Frame::new().fill(p.code).corner_radius(CornerRadius::same(metrics::RADIUS)).inner_margin(Margin::symmetric(12, 10)).show(
+                    ui,
+                    |ui| {
+                        ui.set_width(ui.available_width());
+                        egui::ScrollArea::horizontal().id_salt(code.as_ptr()).show(ui, |ui| {
+                            ui.add(egui::Label::new(RichText::new(code).font(ty::code()).color(p.text)).extend());
+                        });
+                    },
+                );
+            }
+            Block::Table { rows, header } => table(ui, rows, *header),
+        }
+    }
+}
+
+/// A table with hairlines between its cells; wide ones scroll sideways.
+fn table(ui: &mut Ui, rows: &[Vec<Vec<Inline>>], header: bool) {
+    let p = colors();
+    let columns = rows.iter().map(Vec::len).max().unwrap_or(0);
+    Frame::new().stroke(Stroke::new(1.0, p.line)).corner_radius(CornerRadius::same(metrics::RADIUS)).show(ui, |ui| {
+        egui::ScrollArea::horizontal().id_salt(rows.as_ptr()).show(ui, |ui| {
+            let id = ui.next_auto_id();
+            egui::Grid::new(id).spacing(vec2(0.0, 0.0)).min_col_width(40.0).max_col_width(320.0).show(ui, |ui| {
+                for (r, row) in rows.iter().enumerate() {
+                    let is_header = header && r == 0;
+                    for c in 0..columns {
+                        let response = Frame::new()
+                            .fill(if is_header { p.hover } else { egui::Color32::TRANSPARENT })
+                            .inner_margin(Margin::symmetric(10, 6))
+                            .show(ui, |ui| match row.get(c) {
+                                Some(cell) if !cell.is_empty() => rich_text(ui, cell, p.text),
+                                _ => {
+                                    ui.label("");
+                                }
+                            })
+                            .response;
+                        let r = response.rect;
+                        if c > 0 {
+                            ui.painter().vline(r.left(), r.y_range(), Stroke::new(1.0, p.line));
+                        }
+                        if !std::ptr::eq(row, rows.last().expect("a row")) {
+                            ui.painter().hline(r.x_range(), r.bottom(), Stroke::new(1.0, p.line));
+                        }
+                    }
+                    ui.end_row();
+                }
+            });
+        });
     });
 }
 

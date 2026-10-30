@@ -69,6 +69,20 @@ pub fn request(method: Method, url: &str, headers: &[(&str, &str)], body: Body) 
     }
 }
 
+/// GET a file (an image): its bytes.
+pub fn fetch(url: &str, headers: &[(&str, &str)]) -> Result<Vec<u8>> {
+    let mut req = AGENT.get(url);
+    for (k, v) in headers {
+        req = req.header(*k, *v);
+    }
+    let response = req.call().map_err(|e| Error::Network(e.to_string()))?;
+    let status = response.status().as_u16();
+    if !(200..300).contains(&status) {
+        return Err(if status == 401 { Error::SignedOut } else { Error::Service(format!("HTTP {status}")) });
+    }
+    response.into_body().with_config().limit(4 << 20).read_to_vec().map_err(|e| Error::Network(e.to_string()))
+}
+
 /// What an error answer says, short, for the log (never the whole body).
 fn error_text(json: &Value, raw: &str) -> String {
     let said = ["error_description", "message", "errorCode", "error"].iter().find_map(|k| match &json[*k] {

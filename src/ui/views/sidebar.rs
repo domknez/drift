@@ -1,15 +1,17 @@
 //! The sidebar: search, teams with their channels, chats, meeting chats, and the
 //! account row at the bottom.
 
-use crate::model::{Conversation, Directory, Kind};
+use crate::model::{Conversation, Directory, Kind, Picture};
 use crate::settings::Appearance;
 use crate::ui::app::Request;
 use crate::ui::style::icons::Icon;
 use crate::ui::style::{colors, metrics, typography as ty};
 use crate::ui::widgets;
 use crate::ui::workspace::Workspace;
-use eframe::egui::{self, Align, CornerRadius, Layout, Margin, Rect, RichText, Sense, Ui, vec2};
+use eframe::egui::{self, Align, CornerRadius, Layout, Margin, Rect, RichText, Sense, TextureId, Ui, vec2};
 
+/// The account row at the bottom.
+const FOOTER: f32 = 60.0;
 /// Meeting chats listed when unfolded (the newest).
 const MEETINGS_SHOWN: usize = 12;
 
@@ -30,8 +32,7 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace, theme: Appearance) -> Option<Reques
     });
     ui.add_space(6.0);
 
-    let bottom = 52.0;
-    let list_height = (ui.available_height() - bottom).max(0.0);
+    let list_height = (ui.available_height() - FOOTER).max(0.0);
     egui::ScrollArea::vertical().max_height(list_height).auto_shrink([false, false]).show(ui, |ui| {
         ui.add_space(4.0);
         match ws.directory.clone() {
@@ -47,32 +48,34 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace, theme: Appearance) -> Option<Reques
         ui.add_space(12.0);
     });
 
-    ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
-        ui.add_space(10.0);
-        egui::Frame::new().inner_margin(Margin::symmetric(12, 0)).show(ui, |ui| {
-            ui.horizontal(|ui| {
-                widgets::avatar(ui, &ws.me, &ws.me, 28.0);
-                ui.add(egui::Label::new(RichText::new(&ws.me).font(ty::item_strong()).color(p.text)).truncate());
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if widgets::icon_button(ui, Icon::SignOut, "Sign out").clicked() {
-                        request = Some(Request::SignOut);
-                    }
-                    let (icon, next, hint) = match theme {
-                        Appearance::Dark => (Icon::Moon, Appearance::Light, "Dark theme (click for light)"),
-                        Appearance::Light => (Icon::Sun, Appearance::System, "Light theme (click to follow the system)"),
-                        Appearance::System => (
-                            if ui.visuals().dark_mode { Icon::Moon } else { Icon::Sun },
-                            Appearance::Dark,
-                            "Following the system (click for dark)",
-                        ),
-                    };
-                    if widgets::icon_button(ui, icon, hint).clicked() {
-                        request = Some(Request::Theme(next));
-                    }
-                });
-            });
+    // The account row: who's signed in, the theme and signing out.
+    let full = ui.max_rect();
+    let footer = Rect::from_min_max(egui::pos2(full.left(), full.bottom() - FOOTER), full.max);
+    ui.painter().hline(footer.x_range(), footer.top(), egui::Stroke::new(1.0, p.line));
+    let mut row =
+        ui.new_child(egui::UiBuilder::new().max_rect(footer.shrink2(vec2(16.0, 0.0))).layout(Layout::left_to_right(Align::Center)));
+    let me = Picture::Person { id: ws.me_id.clone(), name: ws.me.clone() };
+    let picture = if ws.me_id.is_empty() { None } else { ws.pictures.get(&me) };
+    widgets::avatar(&mut row, &ws.me_id, &ws.me, 30.0, picture);
+    row.add_space(2.0);
+    row.with_layout(Layout::right_to_left(Align::Center), |ui| {
+        ui.spacing_mut().item_spacing.x = 2.0;
+        if widgets::icon_button(ui, Icon::SignOut, "Sign out").clicked() {
+            request = Some(Request::SignOut);
+        }
+        let (icon, next, hint) = match theme {
+            Appearance::Dark => (Icon::Moon, Appearance::Light, "Dark theme (click for light)"),
+            Appearance::Light => (Icon::Sun, Appearance::System, "Light theme (click to follow the system)"),
+            Appearance::System => {
+                (if ui.visuals().dark_mode { Icon::Moon } else { Icon::Sun }, Appearance::Dark, "Following the system (click for dark)")
+            }
+        };
+        if widgets::icon_button(ui, icon, hint).clicked() {
+            request = Some(Request::Theme(next));
+        }
+        ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+            ui.add(egui::Label::new(RichText::new(&ws.me).font(ty::item_strong()).color(p.text)).truncate());
         });
-        ui.separator();
     });
     request
 }
@@ -80,6 +83,18 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace, theme: Appearance) -> Option<Reques
 fn list(ui: &mut Ui, ws: &mut Workspace, directory: &Directory) {
     let filter = ws.filter.trim().to_lowercase();
     let matches = |title: &str| filter.is_empty() || title.to_lowercase().contains(&filter);
+
+    // Favourites first, as in Teams: pinned chats and favourite channels.
+    let pinned: Vec<&Conversation> = directory.conversations.iter().filter(|c| c.pinned && matches(&c.title)).collect();
+    if !pinned.is_empty()
+        && section(ui, ws, "pinned", |ui| {
+            ui.label(RichText::new("Pinned").font(ty::label()).color(colors().dim));
+        })
+    {
+        for c in pinned {
+            row(ui, ws, c);
+        }
+    }
 
     for team in &directory.teams {
         let channels: Vec<&Conversation> = team
@@ -93,28 +108,25 @@ fn list(ui: &mut Ui, ws: &mut Workspace, directory: &Directory) {
         }
         let key = format!("team:{}", team.id);
         let unread = channels.iter().any(|c| c.unread);
+        let picture = team.picture.as_ref().and_then(|p| ws.pictures.get(p));
         if section(ui, ws, &key, |ui| {
-            widgets::tile(ui, &team.id, &team.name, 18.0);
+            widgets::tile(ui, &team.id, &team.name, 18.0, picture);
             ui.label(RichText::new(&team.name).font(ty::label()).color(if unread { colors().text } else { colors().dim }));
         }) {
             for channel in channels {
-                row(ui, ws, channel, |ui| {
-                    widgets::icon(ui, Icon::Hash, 15.0, colors().faint);
-                });
+                row(ui, ws, channel);
             }
         }
     }
 
-    let chats: Vec<&Conversation> = directory.chats().filter(|c| matches(&c.title)).collect();
+    let chats: Vec<&Conversation> = directory.chats().filter(|c| !c.pinned && matches(&c.title)).collect();
     if !chats.is_empty()
         && section(ui, ws, "chats", |ui| {
             ui.label(RichText::new("Chats").font(ty::label()).color(colors().dim));
         })
     {
         for chat in chats {
-            row(ui, ws, chat, |ui| {
-                widgets::avatar(ui, &chat.id, &chat.title, 22.0);
-            });
+            row(ui, ws, chat);
         }
     }
 
@@ -126,9 +138,22 @@ fn list(ui: &mut Ui, ws: &mut Workspace, directory: &Directory) {
         })
     {
         for meeting in meetings {
-            row(ui, ws, meeting, |ui| {
-                widgets::icon(ui, Icon::Calendar, 15.0, colors().faint);
-            });
+            row(ui, ws, meeting);
+        }
+    }
+}
+
+/// What leads a row: a channel's mark, a meeting's calendar, a chat's avatar.
+fn lead(ui: &mut Ui, c: &Conversation, picture: Option<TextureId>) {
+    match c.kind {
+        Kind::Channel => {
+            widgets::icon(ui, Icon::Hash, 15.0, colors().faint);
+        }
+        Kind::Meeting => {
+            widgets::icon(ui, Icon::Calendar, 15.0, colors().faint);
+        }
+        Kind::Chat | Kind::Feed => {
+            widgets::avatar(ui, &c.id, &c.title, 22.0, picture);
         }
     }
 }
@@ -158,7 +183,7 @@ fn section(ui: &mut Ui, ws: &mut Workspace, key: &str, label: impl FnOnce(&mut U
 }
 
 /// A conversation's row: its leading mark, title and unread dot.
-fn row(ui: &mut Ui, ws: &mut Workspace, conversation: &Conversation, lead: impl FnOnce(&mut Ui)) {
+fn row(ui: &mut Ui, ws: &mut Workspace, conversation: &Conversation) {
     let p = colors();
     let selected = ws.open.as_deref() == Some(conversation.id.as_str());
     let width = ui.available_width() - 2.0 * metrics::SIDE_PAD;
@@ -169,7 +194,8 @@ fn row(ui: &mut Ui, ws: &mut Workspace, conversation: &Conversation, lead: impl 
     }
     let mut inner =
         ui.new_child(egui::UiBuilder::new().max_rect(rect.shrink2(vec2(10.0, 0.0))).layout(Layout::left_to_right(Align::Center)));
-    lead(&mut inner);
+    let picture = conversation.picture.as_ref().and_then(|p| ws.pictures.get(p));
+    lead(&mut inner, conversation, picture);
     inner.add_space(2.0);
     let (font, color) = if conversation.unread {
         (ty::item_strong(), p.text)

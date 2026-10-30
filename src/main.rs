@@ -19,5 +19,25 @@ fn main() -> eframe::Result {
         login::run_window();
         return Ok(());
     }
+    if std::env::args().nth(1).as_deref() == Some("shape") {
+        shape();
+        return Ok(());
+    }
     ui::run()
+}
+
+/// `drift shape`: the structure of what Teams answers, for troubleshooting (no
+/// names or message text).
+fn shape() {
+    let Some(session) = teams::auth::Session::stored() else {
+        eprintln!("drift: not signed in");
+        std::process::exit(1);
+    };
+    match teams::Teams::new(session).shape() {
+        Ok(text) => print!("{text}"),
+        Err(e) => {
+            eprintln!("drift: {e}");
+            std::process::exit(1);
+        }
+    }
 }

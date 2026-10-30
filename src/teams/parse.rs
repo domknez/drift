@@ -1,7 +1,7 @@
 //! The services' JSON as `model` types. Fields are read leniently: the web client's
 //! API isn't documented, and what's missing gets a default rather than an error.
 
-use crate::model::{Author, Card, Channel, Conversation, Kind, Message, Preview, Reaction, Team, text, time};
+use crate::model::{Author, Card, Channel, Conversation, Kind, Message, Picture, Preview, Reaction, Team, text, time};
 use serde_json::Value;
 
 fn str_of<'a>(v: &'a Value, keys: &[&str]) -> Option<&'a str> {
@@ -30,12 +30,22 @@ pub fn teams(roster: &Value) -> Vec<Team> {
                         name: str_of(c, &["displayName"]).unwrap_or(if general { "General" } else { "Channel" }).to_string(),
                         id: cid,
                         general,
+                        unread: !c["isMessageRead"].as_bool().unwrap_or(true),
+                        pinned: c["isFavorite"].as_bool().unwrap_or(false) || c["isPinned"].as_bool().unwrap_or(false),
+                        muted: c["isMuted"].as_bool().unwrap_or(false),
+                        last: preview(&c["lastMessage"]),
                     })
                 })
                 .collect();
-            // General first, the rest by name.
-            channels.sort_by_key(|c| (!c.general, c.name.to_lowercase()));
-            Some(Team { name: str_of(t, &["displayName"]).unwrap_or("Team").to_string(), id, channels })
+            // General first, then favourites, the rest by name.
+            channels.sort_by_key(|c| (!c.general, !c.pinned, c.name.to_lowercase()));
+            let name = str_of(t, &["displayName"]).unwrap_or("Team").to_string();
+            let picture = str_of(&t["teamSiteInformation"], &["groupId"]).map(|group| Picture::Team {
+                group: group.to_string(),
+                etag: str_of(t, &["pictureETag"]).unwrap_or("").to_string(),
+                name: name.clone(),
+            });
+            Some(Team { name, id, channels, picture })
         })
         .collect();
     teams.sort_by_key(|t| t.name.to_lowercase());
@@ -52,8 +62,8 @@ pub fn chats(roster: &Value) -> Vec<(Conversation, Vec<String>)> {
         .filter(|c| !c["hidden"].as_bool().unwrap_or(false))
         .filter_map(|c| {
             let id = str_of(c, &["id"])?.to_string();
-            let meeting =
-                [c["chatType"].as_str(), c["threadType"].as_str()].contains(&Some("meeting")) || c["meetingInformation"].is_object();
+            // Recurring chats carry meeting details too; only the type tells a meeting's chat.
+            let meeting = [c["chatType"].as_str(), c["threadType"].as_str()].contains(&Some("meeting"));
             let members = c["members"].as_array().into_iter().flatten().filter_map(|m| m["mri"].as_str().map(str::to_string)).collect();
             let conversation = Conversation {
                 id,
@@ -61,6 +71,10 @@ pub fn chats(roster: &Value) -> Vec<(Conversation, Vec<String>)> {
                 title: str_of(c, &["title"]).unwrap_or("").to_string(),
                 last: preview(&c["lastMessage"]),
                 unread: !c["isRead"].as_bool().unwrap_or(true),
+                pinned: c["isSticky"].as_bool().unwrap_or(false),
+                muted: c["isMuted"].as_bool().unwrap_or(false),
+                join_url: str_of(&c["meetingInformation"], &["meetingJoinUrl"]).map(str::to_string),
+                picture: None,
             };
             Some((conversation, members))
         })
@@ -89,7 +103,17 @@ pub fn conversations(v: &Value) -> Vec<Conversation> {
             let read_up_to = c["properties"]["consumptionhorizon"].as_str().and_then(|h| h.split(';').next()?.parse::<i64>().ok());
             let last_id = c["lastMessage"]["id"].as_str().and_then(|i| i.parse::<i64>().ok());
             let unread = matches!((last_id, read_up_to), (Some(l), Some(r)) if l > r);
-            Some(Conversation { id, kind, title: str_of(props, &["topic"]).unwrap_or("").to_string(), last, unread })
+            Some(Conversation {
+                id,
+                kind,
+                title: str_of(props, &["topic"]).unwrap_or("").to_string(),
+                last,
+                unread,
+                pinned: false,
+                muted: false,
+                join_url: None,
+                picture: None,
+            })
         })
         .collect()
 }
@@ -124,9 +148,12 @@ fn message(m: &Value, me: &str) -> Option<Message> {
         return None;
     }
     let at = str_of(m, &["originalarrivaltime", "composetime"]).and_then(time::parse_iso).unwrap_or(0);
-    // Channel replies name their post: `…@thread.tacv2;messageid=<post id>`.
-    let root = str_of(m, &["conversationLink", "conversationid"])
-        .and_then(|l| l.rsplit_once(";messageid=").map(|(_, r)| r.to_string()))
+    // Channel replies name their post (`rootMessageId`, or `…;messageid=<post id>` in the link).
+    let root = str_of(m, &["rootMessageId"])
+        .map(str::to_string)
+        .or_else(|| {
+            str_of(m, &["conversationLink", "conversationid"]).and_then(|l| l.rsplit_once(";messageid=").map(|(_, r)| r.to_string()))
+        })
         .filter(|r| *r != id);
     let from = str_of(m, &["from"]).unwrap_or("");
     let author = Author {
