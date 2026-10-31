@@ -508,12 +508,25 @@ fn hover_bar(
     let room = ui.clip_rect().shrink(6.0);
     let x = x.min(room.right() - size.x).max(room.left());
     let bar = Rect::from_min_size(pos2(x, bubble.top() - size.y + 10.0), size);
+    // One bar at a time: a bar reaches over the bubble above, and the pointer on it
+    // is on both. The bar shown last frame keeps it.
+    let shown_id = egui::Id::unique("hover-bar");
+    let frame = ui.ctx().cumulative_frame_nr();
+    let shown: Option<(String, Rect)> = ui
+        .ctx()
+        .data(|d| d.get_temp::<(String, Rect, u64)>(shown_id))
+        .filter(|(_, _, at)| frame.saturating_sub(*at) <= 1)
+        .map(|(id, r, _)| (id, r));
+    let pointer = ui.ctx().pointer_hover_pos();
+    let on_other_bar = shown.as_ref().is_some_and(|(id, r)| *id != m.id && pointer.is_some_and(|at| r.contains(at)));
+    let on_own_bar = shown.as_ref().is_some_and(|(id, _)| *id == m.id) && pointer.is_some_and(|at| bar.contains(at));
     // DRIFT_DEMO_HOVER=<message>: the bar shown over that message, as if pointed at.
-    let over = ui.ctx().pointer_hover_pos().is_some_and(|at| bubble.contains(at) || bar.contains(at))
+    let over = !on_other_bar && (pointer.is_some_and(|at| bubble.contains(at)) || on_own_bar)
         || std::env::var("DRIFT_DEMO_HOVER").is_ok_and(|id| id == m.id);
     if !(over || menu_open) || ui.is_sizing_pass() {
         return None;
     }
+    ui.ctx().data_mut(|d| d.insert_temp(shown_id, (m.id.clone(), bar, frame)));
     ui.painter().add(
         egui::Shadow { offset: [0, 3], blur: 10, spread: 0, color: egui::Color32::from_black_alpha(30) }
             .as_shape(bar, CornerRadius::same(10)),
