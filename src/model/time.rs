@@ -119,9 +119,50 @@ pub fn day_number(ms: i64) -> i64 {
     days_from_civil(c.year, c.month, c.day)
 }
 
+/// A card's date and time functions (`{{DATE(2026-10-30T16:48:44Z, SHORT)}}`,
+/// `{{TIME(2026-10-30T16:48:44Z)}}`) as the local date and time; Teams fills them in
+/// the same way. Anything it can't read stays as it was.
+pub fn card_functions(s: &str) -> String {
+    let mut out = String::new();
+    let mut rest = s;
+    while let Some(open) = rest.find("{{") {
+        let Some(close) = rest[open..].find("}}").map(|c| open + c) else { break };
+        out.push_str(&rest[..open]);
+        let inner = &rest[open + 2..close];
+        match card_function(inner) {
+            Some(text) => out.push_str(&text),
+            None => out.push_str(&rest[open..close + 2]),
+        }
+        rest = &rest[close + 2..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// `DATE(<iso>[, COMPACT|SHORT|LONG])` or `TIME(<iso>)`.
+fn card_function(f: &str) -> Option<String> {
+    let (name, args) = f.trim().strip_suffix(')')?.split_once('(')?;
+    let mut args = args.split(',').map(str::trim);
+    let ms = parse_iso(args.next()?)?;
+    let c = local(ms);
+    let d = days_from_civil(c.year, c.month, c.day);
+    match (name.trim(), args.next().unwrap_or("COMPACT")) {
+        ("TIME", _) => Some(clock(ms)),
+        ("DATE", "SHORT") => Some(format!("{}, {} {} {}", &weekday(d)[..3], c.day, month_name(c.month), c.year)),
+        ("DATE", "LONG") => Some(format!("{}, {} {} {}", weekday(d), c.day, month_full(c.month), c.year)),
+        ("DATE", "COMPACT") => Some(format!("{}/{}/{}", c.day, c.month, c.year)),
+        _ => None,
+    }
+}
+
 fn weekday(days: i64) -> &'static str {
     // 1970-01-01 was a Thursday.
     ["Thursday", "Friday", "Saturday", "Sunday", "Monday", "Tuesday", "Wednesday"][days.rem_euclid(7) as usize]
+}
+
+fn month_full(m: u32) -> &'static str {
+    ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+        [(m.clamp(1, 12) - 1) as usize]
 }
 
 fn month_name(m: u32) -> &'static str {
@@ -145,5 +186,16 @@ mod tests {
     fn knows_the_weekday() {
         assert_eq!(weekday(days_from_civil(2026, 10, 30)), "Friday");
         assert_eq!(civil(1_793_304_000), Civil { year: 2026, month: 10, day: 29, hour: 20, minute: 0 });
+    }
+
+    #[test]
+    fn fills_card_functions() {
+        // Noon UTC: the same day in nearly every time zone.
+        let at = "2026-10-30T12:00:00Z";
+        let time = clock(parse_iso(at).unwrap());
+        assert_eq!(card_functions(&format!("{{{{DATE({at}, SHORT)}}}} {{{{TIME({at})}}}}")), format!("Fri, 30 Oct 2026 {time}"));
+        assert_eq!(card_functions(&format!("{{{{DATE({at}, LONG)}}}}")), "Friday, 30 October 2026");
+        assert_eq!(card_functions(&format!("{{{{DATE({at})}}}}")), "30/10/2026");
+        assert_eq!(card_functions("{{NAME(x)}} and {{"), "{{NAME(x)}} and {{");
     }
 }

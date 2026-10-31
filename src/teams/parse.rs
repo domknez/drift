@@ -300,10 +300,10 @@ fn walk(v: &Value, found: &mut Found) {
             if matches!(kind, "TextBlock" | "TextRun") {
                 if let Some(t) = text("text") {
                     let strong = text("weight") == Some("bolder") || matches!(text("size"), Some("medium" | "large" | "extraLarge"));
-                    found.lines.push((text::flatten(&text::from_html(t)), strong));
+                    found.lines.push((time::card_functions(&text::flatten(&text::from_html(t))), strong));
                 }
             } else if let (Some(t), Some(value)) = (text("title"), text("value")) {
-                found.facts.push((t.to_string(), value.to_string()));
+                found.facts.push((t.to_string(), time::card_functions(value)));
             } else if let Some(t) = text("title").filter(|_| kind.is_empty()) {
                 found.lines.push((t.to_string(), true));
             }
