@@ -503,6 +503,10 @@ fn hover_bar(
     let cells = QUICK_REACTIONS.len() + 2;
     let size = vec2(CELL * cells as f32 + 8.0, CELL + 6.0);
     let x = if mine { bubble.left() + 8.0 } else { (bubble.right() - size.x - 8.0).max(bubble.left() + 8.0) };
+    // Inside the list, whatever the bubble's width (a short one of the user's sits at
+    // the right edge, and the bar would run past it).
+    let room = ui.clip_rect().shrink(6.0);
+    let x = x.min(room.right() - size.x).max(room.left());
     let bar = Rect::from_min_size(pos2(x, bubble.top() - size.y + 10.0), size);
     // DRIFT_DEMO_HOVER=<message>: the bar shown over that message, as if pointed at.
     let over = ui.ctx().pointer_hover_pos().is_some_and(|at| bubble.contains(at) || bar.contains(at))
