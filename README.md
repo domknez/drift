@@ -71,8 +71,9 @@ a fraction of the memory the official app keeps busy doing nothing.
 
 Download drift from the [latest release](https://github.com/domknez/drift/releases/latest):
 
-- **macOS** (Apple silicon and Intel): unzip `drift-<version>-macos-universal.zip` and
-  drag `drift.app` to Applications. The app isn't notarized yet, so macOS stops it the
+- **macOS**: unzip `drift-<version>-macos-arm64.zip` (Apple silicon),
+  `drift-<version>-macos-x86_64.zip` (Intel) or `drift-<version>-macos-universal.zip`
+  (both) and drag `drift.app` to Applications. The app isn't notarized yet, so macOS stops it the
   first time: open it with right-click → Open, or run
   `xattr -dr com.apple.quarantine /Applications/drift.app` once.
 - **Linux** (x86_64): unpack `drift-<version>-linux-x86_64.tar.gz` and run `drift`. It

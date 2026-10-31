@@ -28,7 +28,7 @@ jobs:
       fail-fast: true
       matrix:
         include:
-          - { name: macos-universal, os: macos-latest }
+          - { name: macos, os: macos-latest }
           - { name: linux-x86_64, os: ubuntu-latest }
           - { name: windows-x86_64, os: windows-latest }
     runs-on: ${{ matrix.os }}
@@ -53,7 +53,7 @@ jobs:
           ./scripts/set-version.sh "$TAG"
           echo "VERSION=${TAG#v}" >> "$GITHUB_ENV"
 
-      - name: Build (macOS, Apple silicon and Intel in one app)
+      - name: Build (macOS: Apple silicon, Intel, and both in one app)
         if: runner.os == 'macOS'
         env:
           MACOSX_DEPLOYMENT_TARGET: '11.0'
@@ -63,9 +63,14 @@ jobs:
           mkdir -p target/universal
           lipo -create -output target/universal/drift \
             target/aarch64-apple-darwin/release/drift target/x86_64-apple-darwin/release/drift
-          DRIFT_BINARY=target/universal/drift ./scripts/bundle-macos.sh
           mkdir -p out
-          ditto -c -k --keepParent dist/drift.app "out/drift-$VERSION-macos-universal.zip"
+          # One app for both, and a smaller one for each.
+          for build in universal:target/universal aarch64:target/aarch64-apple-darwin/release x86_64:target/x86_64-apple-darwin/release; do
+            name=${build%%:*}
+            [ "$name" = aarch64 ] && name=arm64
+            DRIFT_BINARY="${build#*:}/drift" ./scripts/bundle-macos.sh
+            ditto -c -k --keepParent dist/drift.app "out/drift-$VERSION-macos-$name.zip"
+          done
       - name: Build (Linux)
         if: runner.os == 'Linux'
         run: |
@@ -113,7 +118,7 @@ jobs:
             echo
             echo "### Install"
             echo
-            echo "- **macOS** (Apple silicon and Intel): unzip \`drift-${TAG#v}-macos-universal.zip\` and drag \`drift.app\` to Applications. It isn't notarized yet: open it the first time with right-click → Open, or run \`xattr -dr com.apple.quarantine /Applications/drift.app\`."
+            echo "- **macOS**: unzip \`drift-${TAG#v}-macos-universal.zip\` (Apple silicon and Intel; or the smaller \`-macos-arm64\` for Apple silicon, \`-macos-x86_64\` for Intel) and drag \`drift.app\` to Applications. It isn't notarized yet: open it the first time with right-click → Open, or run \`xattr -dr com.apple.quarantine /Applications/drift.app\`."
             echo "- **Linux** (x86_64): unpack the \`.tar.gz\` and run \`drift\`; it needs GTK 3, WebKitGTK 4.1 and D-Bus."
             echo "- **Windows** (x86_64): unzip and run \`drift.exe\`."
           } > notes.md

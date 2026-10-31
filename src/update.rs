@@ -2,7 +2,8 @@
 //! file for this platform, check it against the release's `SHA256SUMS.txt`, swap it
 //! in, and relaunch.
 //!
-//! - macOS: the `.zip` with `drift.app`, which replaces the running bundle.
+//! - macOS: the `.zip` with `drift.app` for this processor (or the universal one),
+//!   which replaces the running bundle.
 //! - Linux and Windows: the archive's `drift` (`drift.exe`), which takes the place of
 //!   the running executable (renamed aside first; both systems allow that while it
 //!   runs).
@@ -44,9 +45,10 @@ impl Release {
 
     /// The file this platform installs from, if the release has it.
     fn package(&self) -> Option<(String, &str)> {
-        let name = package_name(&self.version)?;
-        let url = self.asset(&name)?;
-        Some((name, url))
+        package_names(&self.version).into_iter().find_map(|name| {
+            let url = self.asset(&name)?;
+            Some((name, url))
+        })
     }
 }
 
@@ -68,17 +70,19 @@ impl Target {
 /// What to start once the new version is in place.
 pub struct Restart(PathBuf);
 
-/// The release file for this platform, as `release.yml` names it.
-fn package_name(version: &str) -> Option<String> {
+/// The release files for this platform, as `release.yml` names them, the best first:
+/// on macOS the app for this processor alone, else the universal one.
+fn package_names(version: &str) -> Vec<String> {
     let arch = std::env::consts::ARCH;
     if cfg!(target_os = "macos") {
-        Some(format!("drift-{version}-macos-universal.zip"))
+        let mac = if arch == "aarch64" { "arm64" } else { arch };
+        vec![format!("drift-{version}-macos-{mac}.zip"), format!("drift-{version}-macos-universal.zip")]
     } else if cfg!(windows) {
-        Some(format!("drift-{version}-windows-{arch}.zip"))
+        vec![format!("drift-{version}-windows-{arch}.zip")]
     } else if cfg!(target_os = "linux") {
-        Some(format!("drift-{version}-linux-{arch}.tar.gz"))
+        vec![format!("drift-{version}-linux-{arch}.tar.gz")]
     } else {
-        None
+        Vec::new()
     }
 }
 
@@ -357,6 +361,16 @@ mod tests {
         assert_eq!(expected_sha256(sums, "drift-0.2.0-windows-x86_64.zip").as_deref(), Some("def456"));
         assert_eq!(expected_sha256(sums, "drift-0.2.0-macos-universal.zip").as_deref(), Some("abc123"));
         assert_eq!(expected_sha256(sums, "drift-0.2.0-linux-x86_64.tar.gz"), None);
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn prefers_the_app_for_this_processor() {
+        let mac = if std::env::consts::ARCH == "aarch64" { "arm64" } else { "x86_64" };
+        let names = ["drift-0.2.0-macos-universal.zip".to_string(), format!("drift-0.2.0-macos-{mac}.zip")];
+        let release =
+            Release { version: "0.2.0".into(), page: String::new(), assets: names.iter().map(|n| (n.clone(), n.clone())).collect() };
+        assert_eq!(release.package().map(|(name, _)| name), Some(names[1].clone()));
     }
 
     #[test]
