@@ -93,9 +93,11 @@ fn unread_chats(d: &Directory) -> usize {
     d.conversations.iter().filter(|c| matches!(c.kind, Kind::Chat | Kind::Meeting) && c.unread && !c.muted).count()
 }
 
-/// Whether a channel the user follows has something unread (not counting muted ones).
+/// Whether a channel listed under Teams has something unread (not counting muted
+/// ones). Read from the channels' conversations, as the list marks them: the
+/// roster's own unread flag can disagree.
 fn unread_channels(d: &Directory) -> bool {
-    d.teams.iter().flat_map(|t| &t.channels).any(|c| c.unread && !c.muted)
+    d.teams.iter().flat_map(|t| &t.channels).filter_map(|c| d.conversation(&c.id)).any(|c| c.unread && !c.muted)
 }
 
 /// What a tab shows of what's unread.
