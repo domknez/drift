@@ -28,12 +28,15 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace, theme: Appearance) -> Option<Reques
     x += word_w + 34.0;
 
     // Tabs.
+    // A count where each item matters (activity, chats); a dot for channels, as
+    // there are many and most are only looked in on.
     let counts = (ws.activity_unread(), ws.directory.as_ref().map_or(0, unread_chats));
+    let channels = ws.directory.as_ref().is_some_and(unread_channels);
     let tabs = [
-        (Section::Activity, Icon::Bell, "Activity", counts.0),
-        (Section::Chats, Icon::Chat, "Chats", counts.1),
-        (Section::Teams, Icon::Members, "Teams", 0),
-        (Section::Meetings, Icon::Calendar, "Calendar", 0),
+        (Section::Activity, Icon::Bell, "Activity", Badge::Count(counts.0)),
+        (Section::Chats, Icon::Chat, "Chats", Badge::Count(counts.1)),
+        (Section::Teams, Icon::Members, "Teams", Badge::Dot(channels)),
+        (Section::Meetings, Icon::Calendar, "Calendar", Badge::Count(0)),
     ];
     let widths: Vec<f32> = tabs.iter().map(|t| tab_width(ui, t.2, t.3)).collect();
     let group = Rect::from_min_size(
@@ -42,9 +45,9 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace, theme: Appearance) -> Option<Reques
     );
     ui.painter().rect_filled(group, CornerRadius::same(12), p.panel);
     let mut tx = group.left() + 4.0;
-    for (i, ((section, icon, label, count), w)) in tabs.into_iter().zip(widths).enumerate() {
+    for (i, ((section, icon, label, badge), w)) in tabs.into_iter().zip(widths).enumerate() {
         let rect = Rect::from_min_size(pos2(tx, group.top() + 4.0), vec2(w, group.height() - 8.0));
-        if tab(ui, rect, icon, label, count, ws.section == section).on_hover_text(format!("⌘{}", i + 1)).clicked() {
+        if tab(ui, rect, icon, label, badge, ws.section == section).on_hover_text(format!("⌘{}", i + 1)).clicked() {
             ws.section = section;
             ws.filter.clear();
         }
@@ -90,18 +93,37 @@ fn unread_chats(d: &Directory) -> usize {
     d.conversations.iter().filter(|c| matches!(c.kind, Kind::Chat | Kind::Meeting) && c.unread && !c.muted).count()
 }
 
+/// Whether a channel the user follows has something unread (not counting muted ones).
+fn unread_channels(d: &Directory) -> bool {
+    d.teams.iter().flat_map(|t| &t.channels).any(|c| c.unread && !c.muted)
+}
+
+/// What a tab shows of what's unread.
+#[derive(Clone, Copy)]
+enum Badge {
+    Count(usize),
+    Dot(bool),
+}
+
+/// Room for a dot after the label.
+const DOT_ROOM: f32 = 12.0;
+
 fn count_text(count: usize) -> String {
     if count > 99 { "99+".into() } else { count.to_string() }
 }
 
-fn tab_width(ui: &Ui, label: &str, count: usize) -> f32 {
+fn tab_width(ui: &Ui, label: &str, badge: Badge) -> f32 {
     let text = ui.painter().layout_no_wrap(label.to_string(), ty::tab(), colors().text).size().x;
-    let badge = if count > 0 { ui.painter().layout_no_wrap(count_text(count), ty::badge(), colors().text).size().x + 18.0 } else { 0.0 };
+    let badge = match badge {
+        Badge::Count(count) if count > 0 => ui.painter().layout_no_wrap(count_text(count), ty::badge(), colors().text).size().x + 18.0,
+        Badge::Dot(true) => DOT_ROOM,
+        _ => 0.0,
+    };
     14.0 + 16.0 + 7.0 + text + badge + 14.0
 }
 
-/// One tab: icon, label, and a count; filled with the accent when it's the one shown.
-fn tab(ui: &mut Ui, rect: Rect, icon: Icon, label: &str, count: usize, on: bool) -> egui::Response {
+/// One tab: icon, label, and a count or a dot; filled with the accent when it's the one shown.
+fn tab(ui: &mut Ui, rect: Rect, icon: Icon, label: &str, badge: Badge, on: bool) -> egui::Response {
     let p = colors();
     let response = ui.interact(rect, ui.scope_id().with(("tab", label)), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
     let (fill, fg) = if on {
@@ -119,7 +141,12 @@ fn tab(ui: &mut Ui, rect: Rect, icon: Icon, label: &str, count: usize, on: bool)
     let tw = text.size().x;
     ui.painter().galley(pos2(x, rect.center().y - text.size().y / 2.0), text, fg);
     x += tw + 7.0;
-    if count > 0 {
+    if let Badge::Dot(true) = badge {
+        ui.painter().circle_filled(pos2(x + 3.5, rect.center().y), 3.5, if on { p.on_accent } else { p.accent });
+    }
+    if let Badge::Count(count) = badge
+        && count > 0
+    {
         let (bg, color) = if on { (egui::Color32::from_white_alpha(60), p.on_accent) } else { (p.selected, p.accent) };
         let galley = ui.painter().layout_no_wrap(count_text(count), ty::badge(), color);
         let badge = Rect::from_min_size(pos2(x, rect.center().y - 8.0), vec2(galley.size().x + 12.0, 16.0));
