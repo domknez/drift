@@ -146,10 +146,12 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace) {
                 scrolled: ws.focus_scrolled,
                 newest: ws.newest,
                 conversation: &id,
+                top_at: None,
             };
             let mut area = egui::ScrollArea::vertical().id_salt(("messages", &id)).stick_to_bottom(true).auto_shrink([false, false]);
             if let Some(y) = ws.scroll_to.take() {
-                area = area.vertical_scroll_offset(y);
+                // Not pulled back to the bottom while it was there.
+                area = area.vertical_scroll_offset(y).stick_to_bottom(false);
             }
             let scrolled = area.show(&mut page, |ui| {
                 Frame::new().inner_margin(Margin::symmetric(metrics::PAGE_PAD as i8, 10)).show(ui, |ui| {
@@ -175,6 +177,16 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace) {
                 ui.ctx().request_discard("the message list changed height");
             }
             ws.list_height = Some((id.clone(), height));
+            // Scrolled up: the day of the message on top, floating over the list.
+            let offset = scrolled.state.clamped_offset().y;
+            let from_bottom = height - scrolled.inner_rect.height() - offset;
+            if (offset - ws.scrolled_at.0).abs() > 0.5 && from_bottom > 40.0 {
+                ws.scrolled_at.1 = Some(std::time::Instant::now());
+            }
+            ws.scrolled_at.0 = offset;
+            if let (Some(at), Some(since)) = (view.top_at, ws.scrolled_at.1) {
+                floating_day(ui, scrolled.inner_rect, at, since.elapsed().as_secs_f32());
+            }
             // The focused message is in the main list unless it's a reply (then the thread scrolls).
             if ws.thread.is_none() || !is_channel {
                 ws.focus_scrolled |= view.scrolled;
@@ -362,6 +374,32 @@ pub fn day_pill(ui: &mut Ui, at: i64) {
     ui.add_space(4.0);
 }
 
+/// How long the floating day stays after scrolling stops, and its fade.
+const FLOATING_DAY_STAYS: f32 = 1.2;
+const FLOATING_DAY_FADE: f32 = 0.3;
+
+/// The day of the message on top of the list, in a pill floating at the top while
+/// the user scrolls through older messages.
+fn floating_day(ui: &Ui, list: Rect, at: i64, since: f32) {
+    let alpha = 1.0 - ((since - FLOATING_DAY_STAYS) / FLOATING_DAY_FADE).clamp(0.0, 1.0);
+    if alpha <= 0.0 {
+        return;
+    }
+    ui.ctx().request_repaint();
+    let p = colors();
+    let galley = ui.painter().layout_no_wrap(time::day(at, time::now_ms()), ty::pill(), p.dim.gamma_multiply(alpha));
+    let pill = Rect::from_center_size(pos2(list.center().x, list.top() + 22.0), vec2(galley.size().x + 24.0, 24.0));
+    let painter = ui.painter().with_clip_rect(list);
+    painter.rect(
+        pill,
+        CornerRadius::same(12),
+        p.panel.gamma_multiply(alpha),
+        Stroke::new(1.0, p.border.gamma_multiply(alpha)),
+        egui::StrokeKind::Inside,
+    );
+    painter.galley(pill.center() - galley.size() / 2.0, galley, p.dim.gamma_multiply(alpha));
+}
+
 /// The messages: in a channel its posts (replies are in their threads), in a chat
 /// all of them; grouped by author into runs of bubbles.
 /// How a list of messages is shown: whose they are, whether it's a channel, the post
@@ -379,6 +417,8 @@ pub struct View<'a> {
     pub newest: usize,
     /// The conversation's id (for links to its messages).
     pub conversation: &'a str,
+    /// When the message at the top of the visible part was sent (set by [`list`]).
+    pub top_at: Option<i64>,
 }
 
 /// Whether `focus` is one of the replies to `m`.
@@ -421,6 +461,9 @@ pub fn list(ui: &mut Ui, pictures: &mut Pictures, messages: &[Message], view: &m
         let next = shown.get(i + 1).copied();
         let thread = replies.get(m.id.as_str()).map(Vec::as_slice).unwrap_or(&[]);
         let new_day = prev.is_none_or(|prev| time::day_number(prev.at) != time::day_number(m.at));
+        if ui.cursor().top() <= ui.clip_rect().top() + 40.0 {
+            view.top_at = Some(m.at);
+        }
         if new_day {
             day_pill(ui, m.at);
         }

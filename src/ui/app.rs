@@ -172,6 +172,13 @@ impl App {
         if std::env::var_os("DRIFT_DEMO_DRAFT").is_some() {
             ctx.memory_mut(|m| m.request_focus(egui::Id::unique("composer")));
         }
+        // DRIFT_DEMO_SCROLL=<points>: the list scrolled up there just before the shot.
+        if capture.frames == 20
+            && let Screen::Signed(ws) = &mut self.screen
+            && let Some(y) = std::env::var("DRIFT_DEMO_SCROLL").ok().and_then(|y| y.parse().ok())
+        {
+            ws.scroll_to = Some(y);
+        }
         if capture.frames == 30 && !capture.requested {
             capture.requested = true;
             let path = capture.path.clone();

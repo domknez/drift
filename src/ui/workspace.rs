@@ -139,6 +139,9 @@ pub struct Workspace {
     pub earlier_from: Option<f32>,
     /// A scroll position for the message list's next drawing.
     pub scroll_to: Option<f32>,
+    /// The message list's scroll position last frame, and when the user last scrolled
+    /// it away from the newest (the day of what's on top shows meanwhile).
+    pub scrolled_at: (f32, Option<std::time::Instant>),
     /// While Activity is shown: up to which item it had been read when it was opened
     /// (newer ones stay marked new while it's looked at, though they're read by then).
     pub activity_new_after: Option<i64>,
@@ -283,6 +286,7 @@ impl Workspace {
             clicked: std::sync::mpsc::channel(),
             newest: NEWEST,
             earlier_from: None,
+            scrolled_at: (0.0, None),
             scroll_to: None,
             activity_new_after: None,
             switcher: None,
