@@ -117,6 +117,9 @@ jobs:
             echo "- **Linux** (x86_64): unpack the \`.tar.gz\` and run \`drift\`; it needs GTK 3, WebKitGTK 4.1 and D-Bus."
             echo "- **Windows** (x86_64): unzip and run \`drift.exe\`."
           } > notes.md
+      - name: Checksums
+        # drift checks the file it updates itself from against these.
+        run: cd out && sha256sum -- * > SHA256SUMS.txt && cat SHA256SUMS.txt
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}

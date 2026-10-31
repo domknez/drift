@@ -8,12 +8,14 @@
 //! - [`pictures`]: people's and teams' pictures
 //! - [`style`]: palette, type, metrics and icons
 //! - [`load`]: background work
+//! - [`updates`]: new versions, downloaded in the background
 
 mod app;
 mod load;
 mod pictures;
 mod style;
 mod toasts;
+mod updates;
 mod views;
 mod widgets;
 mod workspace;
@@ -25,6 +27,7 @@ use style::metrics;
 pub fn run() -> eframe::Result {
     crate::log::to_file();
     log_info!("drift {} starting ({} {})", env!("CARGO_PKG_VERSION"), std::env::consts::OS, std::env::consts::ARCH);
+    crate::update::clean_up();
     let viewport = egui::ViewportBuilder::default()
         .with_title("drift")
         .with_inner_size(metrics::WINDOW_SIZE)

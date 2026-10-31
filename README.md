@@ -62,6 +62,7 @@ a fraction of the memory the official app keeps busy doing nothing.
 - **Messages as written:** bold, italics, strikethrough, code, tables, quotes, links,
   mentions and emoji; reactions under them; cards from bots and connectors (pull
   requests, alerts) as one compact row that opens its link
+- **Updates itself** from the GitHub releases, installing on restart
 - **Modern UI:** panels floating on a canvas, a deep ink dark and a warm paper light
   theme (or follow the system) with one violet accent, Geist and Geist Mono
 - Runs on macOS, Linux and Windows
@@ -78,7 +79,10 @@ Download drift from the [latest release](https://github.com/domknez/drift/releas
   needs GTK 3, WebKitGTK 4.1 and D-Bus.
 - **Windows** (x86_64): unzip `drift-<version>-windows-x86_64.zip` and run `drift.exe`.
 
-drift tells you when there's a newer version (the menu under your picture).
+drift keeps itself up to date: it checks for a new release now and then, downloads it
+in the background (checked against the release's SHA-256 sums) and offers *Restart to
+update* in the top bar; quitting installs it too. Turn it off under your picture
+(*Update automatically*), or update from a terminal with `drift update`.
 
 ## Releases
 
@@ -141,6 +145,7 @@ src/
 ├── login.rs       "Sign in with Microsoft" webview helper (its own process)
 ├── credentials.rs the sign-in in one OS keychain item
 ├── settings.rs    settings file
+├── update.rs      new versions from GitHub releases: check, download, install
 └── log.rs         DRIFT_LOG levels and the log file
 ```
 

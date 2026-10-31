@@ -6,13 +6,14 @@ use crate::settings::Appearance;
 use crate::ui::app::Request;
 use crate::ui::style::icons::{self, Icon};
 use crate::ui::style::{colors, metrics, typography as ty};
+use crate::ui::updates::Updates;
 use crate::ui::widgets;
 use crate::ui::workspace::{Section, Workspace};
 use eframe::egui::{self, Align2, CornerRadius, Frame, Margin, Rect, RichText, Sense, Stroke, Ui, pos2, vec2};
 
 const PILL_HEIGHT: f32 = 36.0;
 
-pub fn show(ui: &mut Ui, ws: &mut Workspace, theme: Appearance) -> Option<Request> {
+pub fn show(ui: &mut Ui, ws: &mut Workspace, theme: Appearance, updates: &Updates) -> Option<Request> {
     let p = colors();
     let full = ui.max_rect();
     super::drag_area(ui, full, "topbar-drag");
@@ -55,11 +56,18 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace, theme: Appearance) -> Option<Reques
     }
     x = group.right() + 16.0;
 
-    // The user's menu at the far right, then today's meeting before it.
+    // The user's menu at the far right, a new version before it, then today's meeting.
     let size = 32.0;
     let avatar = Rect::from_min_size(pos2(full.right() - 16.0 - size, cy - size / 2.0), vec2(size, size));
-    let request = user_menu(ui, ws, avatar, theme);
+    let mut request = user_menu(ui, ws, avatar, theme, updates);
     let mut right = avatar.left() - 12.0;
+    if let Some(offer) = updates.offer() {
+        let (left, clicked) = update_pill(ui, &offer, right, cy);
+        if clicked {
+            request = Some(Request::InstallUpdate);
+        }
+        right = left - 12.0;
+    }
     // The meeting on now (or next today), from the calendar; a meeting chat active
     // today until the calendar is in.
     if let Some((title, label, url)) = meeting_to_join(ws) {
@@ -277,6 +285,30 @@ fn meeting_pill(ui: &mut Ui, title: &str, label: &str, url: &str, right: f32, cy
     rect.left()
 }
 
+/// A new version, ending at `right`: "Restart to update" (in the accent), or the
+/// version that's out. Returns its left edge, and whether it was clicked.
+fn update_pill(ui: &mut Ui, offer: &crate::ui::updates::Offer, right: f32, cy: f32) -> (f32, bool) {
+    let p = colors();
+    let text = if offer.installs { p.on_accent } else { p.accent };
+    let label = ui.painter().layout_no_wrap(offer.label.clone(), ty::small_strong(), text);
+    let width = 12.0 + 15.0 + 8.0 + label.size().x + 14.0;
+    let rect = Rect::from_min_size(pos2(right - width, cy - PILL_HEIGHT / 2.0), vec2(width, PILL_HEIGHT));
+    let response = ui
+        .interact(rect, ui.scope_id().with("update"), Sense::click())
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .on_hover_text(&offer.hint);
+    let fill = match (offer.installs, response.hovered()) {
+        (true, true) => p.accent,
+        (true, false) => p.accent_fill,
+        (false, true) => p.hover,
+        (false, false) => p.panel,
+    };
+    ui.painter().rect_filled(rect, CornerRadius::same(12), fill);
+    icons::paint(ui.painter(), Rect::from_min_size(pos2(rect.left() + 12.0, cy - 7.5), vec2(15.0, 15.0)), Icon::Download, text);
+    ui.painter().galley(pos2(rect.left() + 35.0, cy - label.size().y / 2.0), label, text);
+    (rect.left(), response.clicked())
+}
+
 /// When a meeting is, said briefly: "now", "in 12 min", or its time.
 pub fn when(start: i64, end: i64) -> String {
     let now = time::now_ms();
@@ -300,6 +332,25 @@ fn divider(ui: &mut Ui) {
     ui.painter().hline(rect.x_range(), rect.center().y, Stroke::new(1.0, colors().line));
 }
 
+/// A row of the menu with a switch: its name, a line under it, and whether it's on.
+/// Returns whether it was clicked.
+fn switch_row(ui: &mut Ui, name: &str, detail: &str, on: bool) -> bool {
+    let p = colors();
+    let (row, response) = ui.allocate_exact_size(vec2(ui.available_width(), 46.0), Sense::click());
+    let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
+    if response.hovered() {
+        ui.painter().rect_filled(row.shrink2(vec2(2.0, 2.0)), CornerRadius::same(8), p.hover);
+    }
+    ui.painter().text(pos2(row.left() + 10.0, row.top() + 15.0), egui::Align2::LEFT_CENTER, name, ty::small_strong(), p.text);
+    ui.painter().text(pos2(row.left() + 10.0, row.top() + 32.0), egui::Align2::LEFT_CENTER, detail, ty::meta(), p.faint);
+    let switch = Rect::from_min_size(pos2(row.right() - 10.0 - 34.0, row.center().y - 10.0), vec2(34.0, 20.0));
+    let t = ui.ctx().animate_bool_responsive(ui.scope_id().with((name, "switch")), on);
+    ui.painter().rect_filled(switch, CornerRadius::same(10), p.border.lerp_to_gamma(p.accent_fill, t));
+    let knob = pos2(egui::lerp(switch.left() + 10.0..=switch.right() - 10.0, t), switch.center().y);
+    ui.painter().circle_filled(knob, 7.5, egui::Color32::WHITE);
+    response.clicked()
+}
+
 /// A small heading in the menu.
 fn menu_label(ui: &mut Ui, text: &str) {
     ui.add_space(4.0);
@@ -310,7 +361,7 @@ fn menu_label(ui: &mut Ui, text: &str) {
     ui.add_space(8.0);
 }
 
-fn user_menu(ui: &mut Ui, ws: &mut Workspace, rect: Rect, theme: Appearance) -> Option<Request> {
+fn user_menu(ui: &mut Ui, ws: &mut Workspace, rect: Rect, theme: Appearance, updates: &Updates) -> Option<Request> {
     let p = colors();
     let me = Picture::Person { id: ws.me_id.clone(), name: ws.me.clone() };
     let picture = if ws.me_id.is_empty() { None } else { ws.pictures.get(&me) };
@@ -418,32 +469,7 @@ fn user_menu(ui: &mut Ui, ws: &mut Workspace, rect: Rect, theme: Appearance) -> 
         ui.add_space(12.0);
         divider(ui);
 
-        // Notifications, as a switch.
-        let (row, response) = ui.allocate_exact_size(vec2(ui.available_width(), 46.0), Sense::click());
-        let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
-        if response.hovered() {
-            ui.painter().rect_filled(row.shrink2(vec2(2.0, 2.0)), CornerRadius::same(8), p.hover);
-        }
-        ui.painter().text(
-            pos2(row.left() + 10.0, row.top() + 15.0),
-            egui::Align2::LEFT_CENTER,
-            "Notifications",
-            ty::small_strong(),
-            p.text,
-        );
-        ui.painter().text(
-            pos2(row.left() + 10.0, row.top() + 32.0),
-            egui::Align2::LEFT_CENTER,
-            "For new messages, when drift is behind",
-            ty::meta(),
-            p.faint,
-        );
-        let switch = Rect::from_min_size(pos2(row.right() - 10.0 - 34.0, row.center().y - 10.0), vec2(34.0, 20.0));
-        let t = ui.ctx().animate_bool_responsive(ui.scope_id().with("notifications-switch"), ws.notifications);
-        ui.painter().rect_filled(switch, CornerRadius::same(10), p.border.lerp_to_gamma(p.accent_fill, t));
-        let knob = pos2(egui::lerp(switch.left() + 10.0..=switch.right() - 10.0, t), switch.center().y);
-        ui.painter().circle_filled(knob, 7.5, egui::Color32::WHITE);
-        if response.clicked() {
+        if switch_row(ui, "Notifications", "For new messages, when drift is behind", ws.notifications) {
             request = Some(Request::Notifications(!ws.notifications));
         }
         ui.add_space(4.0);
@@ -454,39 +480,36 @@ fn user_menu(ui: &mut Ui, ws: &mut Workspace, rect: Rect, theme: Appearance) -> 
         ui.painter().text(
             pos2(row.left() + 10.0, row.top() + 15.0),
             egui::Align2::LEFT_CENTER,
-            format!("drift {}", crate::update::current()),
+            format!("drift {}", crate::update::CURRENT),
             ty::small_strong(),
             p.text,
         );
-        let (status, color) = match &ws.update_found {
-            _ if ws.update.is_running() => ("Checking…".to_string(), p.faint),
-            Some(Ok(crate::update::Found::Current)) => ("You have the latest version".into(), p.faint),
-            Some(Ok(crate::update::Found::NoReleases)) => ("No releases published yet".into(), p.faint),
-            Some(Ok(crate::update::Found::Newer { version, .. })) => (format!("Version {version} is available"), p.accent),
-            Some(Err(_)) => ("Couldn't check for updates".into(), p.danger),
-            None => ("Free and open source".into(), p.faint),
+        let color = match updates.notable() {
+            Some(true) => p.accent,
+            Some(false) => p.danger,
+            None => p.faint,
         };
-        ui.painter().text(pos2(row.left() + 10.0, row.top() + 32.0), egui::Align2::LEFT_CENTER, status, ty::meta(), color);
-        let (label, newer) = match &ws.update_found {
-            Some(Ok(crate::update::Found::Newer { page, .. })) => ("Download", Some(page.clone())),
-            _ => ("Check", None),
+        ui.painter().text(pos2(row.left() + 10.0, row.top() + 32.0), egui::Align2::LEFT_CENTER, updates.status(), ty::meta(), color);
+        let (label, on_click, strong) = match updates.offer() {
+            Some(offer) if offer.installs => ("Restart", Request::InstallUpdate, true),
+            Some(_) => ("Download", Request::InstallUpdate, true),
+            None => ("Check", Request::CheckForUpdates, false),
         };
-        let text_color = if newer.is_some() { p.on_accent } else { p.text };
+        let text_color = if strong { p.on_accent } else { p.text };
         let galley = ui.painter().layout_no_wrap(label.into(), ty::small_strong(), text_color);
         let button = Rect::from_min_size(
             pos2(row.right() - 10.0 - galley.size().x - 24.0, row.center().y - 14.0),
             vec2(galley.size().x + 24.0, 28.0),
         );
         let click = ui.interact(button, ui.scope_id().with("update"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
-        let fill = if newer.is_some() { p.accent_fill } else { p.surface };
+        let fill = if strong { p.accent_fill } else { p.surface };
         ui.painter().rect_filled(button, CornerRadius::same(8), if click.hovered() { p.hover.lerp_to_gamma(fill, 0.5) } else { fill });
         ui.painter().galley(button.center() - galley.size() / 2.0, galley, text_color);
-        if click.clicked() {
-            match newer {
-                Some(page) => ui.ctx().open_url(egui::OpenUrl::new_tab(page)),
-                None if !ws.update.is_running() => ws.check_for_update(ui.ctx()),
-                None => {}
-            }
+        if click.clicked() && !updates.checking() {
+            request = Some(on_click);
+        }
+        if switch_row(ui, "Update automatically", "Installs new versions when drift restarts", updates.auto) {
+            request = Some(Request::AutoUpdate(!updates.auto));
         }
         ui.add_space(4.0);
         divider(ui);

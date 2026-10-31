@@ -152,9 +152,6 @@ pub struct Workspace {
     pub muted_here: Option<HashSet<String>>,
     /// The height of the text in the composer and in the thread's (as last drawn).
     pub composer_text: [f32; 2],
-    /// A check for a newer drift, while it runs, and what the last one found.
-    pub update: Load<crate::update::Found, String>,
-    pub update_found: Option<Result<crate::update::Found, String>>,
     /// The picture shown over the window, by its URL.
     pub viewing: Option<String>,
     /// The conversation last drawn (its first drawing is laid out once unseen, so it
@@ -293,8 +290,6 @@ impl Workspace {
             muted_here: None,
             hidden: None,
             composer_text: [20.0; 2],
-            update: Load::Idle,
-            update_found: None,
             viewing: None,
             drawn: None,
             list_height: None,
@@ -651,11 +646,6 @@ impl Workspace {
         person(c).and_then(|id| self.presence.get(id)).copied()
     }
 
-    /// Ask GitHub whether there's a newer drift.
-    pub fn check_for_update(&mut self, ctx: &egui::Context) {
-        self.update = Load::start(ctx, crate::update::check);
-    }
-
     /// Mark the open conversation unread from `message` on.
     pub fn unread_from(&mut self, ctx: &egui::Context, message: &str) {
         let (Some(id), Ok(at)) = (self.open.clone(), message.parse::<i64>()) else { return };
@@ -872,12 +862,6 @@ impl Workspace {
                 Ok(status) => self.status = Some(status),
                 Err(e) => log_debug!("status: {e}"),
             }
-        }
-        if let Some(found) = self.update.take() {
-            if let Err(e) = &found {
-                log_warn!("checking for updates: {e}");
-            }
-            self.update_found = Some(found);
         }
         if let Some(result) = self.read_load.take() {
             match result {

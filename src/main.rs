@@ -36,7 +36,35 @@ fn main() -> eframe::Result {
         listen();
         return Ok(());
     }
+    if std::env::args().nth(1).as_deref() == Some("update") {
+        self_update();
+        return Ok(());
+    }
     ui::run()
+}
+
+/// `drift update`: install the latest release in place of this copy.
+fn self_update() {
+    let release = match update::check() {
+        Ok(Some(release)) => release,
+        Ok(None) => return println!("drift {} is the latest version", update::CURRENT),
+        Err(e) => {
+            eprintln!("drift: couldn't check for updates: {e}");
+            std::process::exit(1);
+        }
+    };
+    if !update::can_install(&release) {
+        println!("drift {} is out; this copy can't update itself, get it from {}", release.version, release.page);
+        return;
+    }
+    let progress = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+    match update::install(&release, &progress) {
+        Ok(_) => println!("installed drift {}", release.version),
+        Err(e) => {
+            eprintln!("drift: update failed: {e}");
+            std::process::exit(1);
+        }
+    }
 }
 
 /// `drift listen`: connect to the push service and print what kind of change each

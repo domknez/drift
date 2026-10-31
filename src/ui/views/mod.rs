@@ -11,13 +11,14 @@ pub mod topbar;
 
 use super::app::Request;
 use super::style::{colors, metrics};
+use super::updates::Updates;
 use super::workspace::Workspace;
 use crate::settings::Appearance;
 use eframe::egui::{self, CornerRadius, Frame, Rect, ViewportCommand, pos2, vec2};
 
 /// The signed-in window: the top bar, then the list, the conversation, and the
 /// thread when one is open, as panels on the canvas.
-pub fn workspace(ui: &mut egui::Ui, ws: &mut Workspace, theme: Appearance) -> Option<Request> {
+pub fn workspace(ui: &mut egui::Ui, ws: &mut Workspace, theme: Appearance, updates: &Updates) -> Option<Request> {
     let p = colors();
     let mut request = None;
     if ui.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::R))) {
@@ -54,7 +55,7 @@ pub fn workspace(ui: &mut egui::Ui, ws: &mut Workspace, theme: Appearance) -> Op
     egui::CentralPanel::default().frame(Frame::new().fill(p.canvas)).show(ui, |ui| {
         let full = ui.max_rect();
         let bar = Rect::from_min_size(full.min, vec2(full.width(), metrics::TOP_BAR));
-        request = topbar::show(&mut child(ui, bar), ws, theme);
+        request = topbar::show(&mut child(ui, bar), ws, theme, updates);
 
         let gap = metrics::GAP;
         let body = Rect::from_min_max(pos2(full.left() + gap, bar.bottom()), pos2(full.right() - gap, full.bottom() - gap));

@@ -20,6 +20,8 @@ ureq = { version = "3", features = ["json"] }
 # Trouter, the websocket Teams pushes changes through; some of its bodies come gzipped.
 tungstenite = { version = "0.28", default-features = false, features = ["handshake", "rustls-tls-webpki-roots"] }
 flate2 = "1"
+# Checking a downloaded update against its release's checksums.
+sha2 = "0.11"
 # The system's file dialog, for attaching pictures.
 rfd = "0.15"
 # The Microsoft sign-in page, shown in a helper process (see login.rs).

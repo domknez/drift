@@ -43,6 +43,8 @@ pub enum Icon {
     Clip,
     /// A picture: an attached image.
     Image,
+    /// An arrow down into a tray: a new version.
+    Download,
 }
 
 /// Paint `icon` into the square `rect`.
@@ -147,6 +149,11 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
                 (13.5, 21.0),
                 (20.0, 14.5),
             ]);
+        }
+        Icon::Download => {
+            line(&[(12.0, 3.5), (12.0, 15.0)]);
+            line(&[(7.0, 10.5), (12.0, 15.5), (17.0, 10.5)]);
+            line(&[(4.0, 15.0), (4.0, 19.5), (20.0, 19.5), (20.0, 15.0)]);
         }
         Icon::Image => {
             painter.rect_stroke(Rect::from_min_max(at(3.5, 4.5), at(20.5, 19.5)), 2.0 * s, stroke, eframe::egui::StrokeKind::Middle);

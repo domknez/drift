@@ -2,6 +2,7 @@
 
 use super::load::Load;
 use super::style;
+use super::updates::Updates;
 use super::views;
 use super::workspace::{Outcome, Section, Workspace};
 use crate::backend::Backend;
@@ -17,6 +18,7 @@ pub struct App {
     /// The theme last applied.
     dark: Option<bool>,
     screen: Screen,
+    updates: Updates,
     /// `DRIFT_SCREENSHOT=<file.png>`: save the window once it has loaded, then quit.
     capture: Option<Capture>,
 }
@@ -60,6 +62,11 @@ impl SignIn {
 pub enum Request {
     Theme(Appearance),
     Notifications(bool),
+    /// Turn updating automatically on or off.
+    AutoUpdate(bool),
+    CheckForUpdates,
+    /// The update offer was clicked: install and restart, or open the release page.
+    InstallUpdate,
     SignOut,
 }
 
@@ -131,7 +138,7 @@ impl App {
                 Ok("meetings") => Section::Meetings,
                 _ => Section::Chats,
             };
-            return App { prefs, dark: None, screen: Screen::Signed(Box::new(workspace)), capture };
+            return App { prefs, dark: None, screen: Screen::Signed(Box::new(workspace)), updates: Updates::demo(), capture };
         }
         let prefs = Prefs::load();
         let screen = match Session::stored() {
@@ -140,7 +147,8 @@ impl App {
             }
             None => Screen::SignIn(SignIn::new(None)),
         };
-        App { prefs, dark: None, screen, capture }
+        let updates = Updates::new(prefs.auto_update);
+        App { prefs, dark: None, screen, updates, capture }
     }
 
     /// Take the screenshot once the workspace has loaded, save it and quit.
@@ -189,10 +197,21 @@ impl App {
         }
     }
 
-    fn handle(&mut self, request: Request) {
+    fn handle(&mut self, ctx: &egui::Context, request: Request) {
         match request {
             Request::Theme(theme) => self.prefs.update(|p| p.theme = theme),
             Request::Notifications(on) => self.prefs.update(|p| p.notifications = on),
+            Request::AutoUpdate(on) => {
+                self.updates.auto = on;
+                self.prefs.update(|p| p.auto_update = on);
+            }
+            Request::CheckForUpdates => self.updates.check_now(ctx),
+            Request::InstallUpdate => {
+                if let Some(restart) = self.updates.act(ctx) {
+                    crate::update::relaunch(&restart);
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                }
+            }
             Request::SignOut => {
                 Session::sign_out();
                 self.prefs.update(|p| p.conversation = None);
@@ -203,9 +222,14 @@ impl App {
 }
 
 impl eframe::App for App {
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.updates.apply_on_exit();
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.apply_theme(&ctx);
+        self.updates.poll(&ctx);
         let mut request = None;
         match &mut self.screen {
             Screen::SignIn(sign_in) => {
@@ -244,7 +268,7 @@ impl eframe::App for App {
                 let folded_before = workspace.folded.clone();
                 let muted_before = workspace.muted_here.clone();
                 let hidden_before = workspace.hidden.clone();
-                request = views::workspace(ui, workspace, self.prefs.theme);
+                request = views::workspace(ui, workspace, self.prefs.theme, &self.updates);
                 if workspace.open != before {
                     let open = workspace.open.clone();
                     self.prefs.update(|p| p.conversation = open);
@@ -267,7 +291,7 @@ impl eframe::App for App {
             }
         }
         if let Some(request) = request {
-            self.handle(request);
+            self.handle(&ctx, request);
         }
         self.capture(&ctx);
     }

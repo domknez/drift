@@ -56,6 +56,8 @@ pub struct Prefs {
     /// Conversations hidden in drift, each with when (Unix ms): they're listed again
     /// once something newer comes.
     pub hidden: Vec<(String, i64)>,
+    /// Check for new versions now and then, and download them to install on restart.
+    pub auto_update: bool,
     /// The settings file changes are saved to; None keeps them in memory.
     file: Option<PathBuf>,
 }
@@ -75,6 +77,7 @@ impl Prefs {
             theme: get("theme").and_then(Appearance::from_key).unwrap_or(Appearance::System),
             conversation: get("conversation").map(str::to_string),
             notifications: get("notifications") != Some("false"),
+            auto_update: get("auto_update") != Some("false"),
             hidden: get("hidden")
                 .map(|v| {
                     v.split(',')
@@ -108,8 +111,9 @@ impl Prefs {
         }
     }
 
-    fn values(&self) -> [(&'static str, String); 6] {
+    fn values(&self) -> [(&'static str, String); 7] {
         [
+            ("auto_update", if self.auto_update { "true" } else { "false" }.into()),
             ("conversation", self.conversation.clone().unwrap_or_default()),
             (
                 "folded",
@@ -147,19 +151,20 @@ fn merge(text: &str, changes: &[(&str, String)]) -> String {
 mod tests {
     use super::*;
 
-    const SAVED: &str = "conversation=19:abc@thread.v2\nfolded=meetings,team:19:t@thread.tacv2\nhidden=19:old@thread.v2|1793000000000\nmuted=19:x@thread.v2,19:y\nnotifications=false\ntheme=light\n";
+    const SAVED: &str = "auto_update=false\nconversation=19:abc@thread.v2\nfolded=meetings,team:19:t@thread.tacv2\nhidden=19:old@thread.v2|1793000000000\nmuted=19:x@thread.v2,19:y\nnotifications=false\ntheme=light\n";
 
     #[test]
     fn reads_a_saved_file() {
         let p = Prefs::parse(SAVED);
         assert_eq!(p.theme, Appearance::Light);
         assert_eq!(p.conversation.as_deref(), Some("19:abc@thread.v2"));
+        assert!(!p.auto_update);
     }
 
     #[test]
     fn missing_or_odd_values_get_defaults() {
         let p = Prefs::parse("theme=blue\nconversation=\n");
-        assert_eq!((p.theme, p.conversation), (Appearance::System, None));
+        assert_eq!((p.theme, p.conversation, p.auto_update), (Appearance::System, None, true));
     }
 
     #[test]
