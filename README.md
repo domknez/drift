@@ -52,6 +52,11 @@ a fraction of the memory the official app keeps busy doing nothing.
   and replies (Activity); a click opens the conversation. Muted chats and the one on
   screen stay quiet; the Dock icon shows how many chats are unread. Off in the menu
   under your picture
+- **Your status:** available, busy, do not disturb, be right back, appear away or
+  appear offline, from the menu under your picture; a dot on the avatar of everyone
+  you chat with shows theirs (out of office too)
+- **Live:** new messages arrive as they're sent, pushed by Teams
+- **Quick switcher (⌘T)** to jump to any chat, channel or tab; ⌘1–⌘4 for the tabs
 - **Pin and unpin** chats and channels from their right-click menu
 - **Read here, read in Teams:** opening a conversation marks it read for Teams too
 - **Messages as written:** bold, italics, strikethrough, code, tables, quotes, links,
@@ -60,6 +65,16 @@ a fraction of the memory the official app keeps busy doing nothing.
 - **Modern UI:** panels floating on a canvas, a deep ink dark and a warm paper light
   theme (or follow the system) with one violet accent, Geist and Geist Mono
 - Runs on macOS, Linux and Windows
+
+## Install
+
+On macOS (Apple silicon), download `drift-<version>-macos-arm64.zip` from the
+[latest release](https://github.com/domknez/drift/releases/latest), unzip it and drag
+`drift.app` to Applications. The app isn't notarized yet, so macOS stops it the first
+time: open it with right-click → Open, or run
+`xattr -dr com.apple.quarantine /Applications/drift.app` once.
+
+On Linux and Windows, build it from source for now (below).
 
 ## Build
 
