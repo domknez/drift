@@ -1,0 +1,60 @@
+# After each commit to main passes CI: tag it with the next patch version (v1.2.3
+# after v1.2.2) and release it.
+#
+# A version tag set by hand (v1.3.0) starts its own release (release.yml) and is
+# where the next patch versions count from. A commit that already has a version tag,
+# or whose message says [skip release], isn't tagged again.
+name: Tag
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: tag
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      !contains(github.event.workflow_run.head_commit.message, '[skip release]')
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.next.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+      - id: next
+        name: Next version
+        run: |
+          if git tag --points-at HEAD | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "This commit already has a version: $(git tag --points-at HEAD | tr '\n' ' ')"
+            exit 0
+          fi
+          latest=$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -1)
+          IFS=. read -r major minor patch <<< "${latest#v}"
+          tag="v${major:-0}.${minor:-0}.$(( ${patch:-0} + 1 ))"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$tag" -m "drift ${tag#v}"
+          git push origin "$tag"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Tagged $tag"
+
+  release:
+    needs: tag
+    if: needs.tag.outputs.tag != ''
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.tag.outputs.tag }}
+    permissions:
+      contents: write

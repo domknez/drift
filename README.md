@@ -68,13 +68,36 @@ a fraction of the memory the official app keeps busy doing nothing.
 
 ## Install
 
-On macOS (Apple silicon), download `drift-<version>-macos-arm64.zip` from the
-[latest release](https://github.com/domknez/drift/releases/latest), unzip it and drag
-`drift.app` to Applications. The app isn't notarized yet, so macOS stops it the first
-time: open it with right-click → Open, or run
-`xattr -dr com.apple.quarantine /Applications/drift.app` once.
+Download drift from the [latest release](https://github.com/domknez/drift/releases/latest):
 
-On Linux and Windows, build it from source for now (below).
+- **macOS** (Apple silicon and Intel): unzip `drift-<version>-macos-universal.zip` and
+  drag `drift.app` to Applications. The app isn't notarized yet, so macOS stops it the
+  first time: open it with right-click → Open, or run
+  `xattr -dr com.apple.quarantine /Applications/drift.app` once.
+- **Linux** (x86_64): unpack `drift-<version>-linux-x86_64.tar.gz` and run `drift`. It
+  needs GTK 3, WebKitGTK 4.1 and D-Bus.
+- **Windows** (x86_64): unzip `drift-<version>-windows-x86_64.zip` and run `drift.exe`.
+
+drift tells you when there's a newer version (the menu under your picture).
+
+## Releases
+
+Every commit to `main` that passes CI is tagged with the next patch version
+(`v0.1.0` → `v0.1.1`) and released for all three platforms, by
+`.github/workflows/tag.yml` and `release.yml`. A commit whose message contains
+`[skip release]` isn't released.
+
+For a bigger step, tag the commit by hand and push the tag; the next automatic
+versions count on from it:
+
+```sh
+git tag -a v0.2.0 -m "drift 0.2.0" <commit>
+git push origin v0.2.0
+```
+
+To release a new commit under a version of your choosing, push it together with its
+tag (`git push --atomic origin main v0.2.0`) so it isn't also given the next patch
+version.
 
 ## Build
 

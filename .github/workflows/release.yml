@@ -1,0 +1,128 @@
+# Build drift for macOS, Linux and Windows and publish them as a GitHub release.
+#
+# Runs for a version tag pushed by hand (v1.2.0), and from tag.yml for the tag it
+# makes after each commit to main.
+name: Release
+
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+  workflow_call:
+    inputs:
+      tag:
+        description: The tag to release, like v1.2.3
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  TAG: ${{ inputs.tag || github.ref_name }}
+
+jobs:
+  build:
+    name: build (${{ matrix.name }})
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { name: macos-universal, os: macos-latest }
+          - { name: linux-x86_64, os: ubuntu-latest }
+          - { name: windows-x86_64, os: windows-latest }
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.TAG }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.os == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+      - name: System libraries (Linux)
+        if: runner.os == 'Linux'
+        run: ./.github/linux-deps.sh
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release
+      - name: Version from the tag
+        run: |
+          ./scripts/set-version.sh "$TAG"
+          echo "VERSION=${TAG#v}" >> "$GITHUB_ENV"
+
+      - name: Build (macOS, Apple silicon and Intel in one app)
+        if: runner.os == 'macOS'
+        env:
+          MACOSX_DEPLOYMENT_TARGET: '11.0'
+        run: |
+          cargo build --release --locked --target aarch64-apple-darwin
+          cargo build --release --locked --target x86_64-apple-darwin
+          mkdir -p target/universal
+          lipo -create -output target/universal/drift \
+            target/aarch64-apple-darwin/release/drift target/x86_64-apple-darwin/release/drift
+          DRIFT_BINARY=target/universal/drift ./scripts/bundle-macos.sh
+          mkdir -p out
+          ditto -c -k --keepParent dist/drift.app "out/drift-$VERSION-macos-universal.zip"
+      - name: Build (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          cargo build --release --locked
+          mkdir -p "pkg/drift-$VERSION-linux-x86_64" out
+          cp target/release/drift README.md LICENSE "pkg/drift-$VERSION-linux-x86_64/"
+          tar -C pkg -czf "out/drift-$VERSION-linux-x86_64.tar.gz" "drift-$VERSION-linux-x86_64"
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          cargo build --release --locked
+          mkdir -p "pkg/drift-$VERSION-windows-x86_64" out
+          cp target/release/drift.exe README.md LICENSE "pkg/drift-$VERSION-windows-x86_64/"
+          cd pkg && 7z a "../out/drift-$VERSION-windows-x86_64.zip" "drift-$VERSION-windows-x86_64" > /dev/null
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: drift-${{ matrix.name }}
+          path: out/*
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v8
+        with:
+          path: out
+          merge-multiple: true
+      - name: Release notes
+        run: |
+          # What changed since the version before this one.
+          previous=$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=v:refname | grep -B1 -x "$TAG" | grep -vx "$TAG" || true)
+          {
+            echo "### Changes"
+            echo
+            if [ -n "$previous" ]; then
+              git log --no-merges --format='- %s' "$previous..$TAG"
+            else
+              git log --no-merges --format='- %s' "$TAG"
+            fi
+            echo
+            echo "### Install"
+            echo
+            echo "- **macOS** (Apple silicon and Intel): unzip \`drift-${TAG#v}-macos-universal.zip\` and drag \`drift.app\` to Applications. It isn't notarized yet: open it the first time with right-click → Open, or run \`xattr -dr com.apple.quarantine /Applications/drift.app\`."
+            echo "- **Linux** (x86_64): unpack the \`.tar.gz\` and run \`drift\`; it needs GTK 3, WebKitGTK 4.1 and D-Bus."
+            echo "- **Windows** (x86_64): unzip and run \`drift.exe\`."
+          } > notes.md
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" out/* --clobber
+          else
+            gh release create "$TAG" out/* --verify-tag --title "drift ${TAG#v}" --notes-file notes.md
+          fi

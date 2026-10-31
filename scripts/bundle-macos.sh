@@ -2,6 +2,9 @@
 # Build dist/drift.app for this Mac: the release binary, the icon, and an identity of
 # its own (io.github.domknez.drift), which macOS needs to show drift's notifications.
 # The app is signed ad hoc; macOS asks once before opening it.
+#
+# DRIFT_BINARY=<path> bundles that binary instead of building one (the release
+# workflow's universal build).
 set -e
 cd "$(dirname "$0")/.."
 
@@ -9,10 +12,14 @@ version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
 app=dist/drift.app
 export MACOSX_DEPLOYMENT_TARGET=11.0
 
-cargo build --release --locked
+binary=${DRIFT_BINARY:-}
+if [ -z "$binary" ]; then
+  cargo build --release --locked
+  binary=target/release/drift
+fi
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
-cp target/release/drift "$app/Contents/MacOS/drift"
+cp "$binary" "$app/Contents/MacOS/drift"
 cp assets/icon/drift.icns "$app/Contents/Resources/drift.icns"
 
 cat > "$app/Contents/Info.plist" <<PLIST
