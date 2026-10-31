@@ -4,6 +4,7 @@
 pub mod conversation;
 pub mod list;
 pub mod sign_in;
+mod splash;
 pub mod switcher;
 pub mod thread;
 pub mod topbar;
@@ -72,12 +73,67 @@ pub fn workspace(ui: &mut egui::Ui, ws: &mut Workspace, theme: Appearance) -> Op
         }
     });
     switcher::show(ui.ctx(), ws);
+    start_up(ui.ctx(), ws);
     if let Some(url) = ws.viewing.clone()
         && !super::widgets::lightbox(ui.ctx(), &mut ws.pictures, &url)
     {
         ws.viewing = None;
     }
     request
+}
+
+/// The longest the start-up screen waits, whatever is still missing.
+const START_UP_LONGEST: f32 = 15.0;
+/// The shortest it shows (no flash when everything is in at once), and its fade.
+const START_UP_SHORTEST: f32 = 0.6;
+const START_UP_FADE: f32 = 0.35;
+
+/// The start-up screen, over the workspace until the list, the open conversation
+/// and the user's picture are in (or something failed), then fading out.
+fn start_up(ctx: &egui::Context, ws: &mut Workspace) {
+    // DRIFT_DEMO_SPLASH: the start-up screen, staying.
+    if std::env::var_os("DRIFT_DEMO_SPLASH").is_some() {
+        splash::show(ctx, "Loading your chats…", 1.0);
+        return;
+    }
+    let ready_at = match ws.ready_at {
+        Some(at) => at,
+        None => {
+            let waiting = waiting_for(ws);
+            let elapsed = ws.started.elapsed().as_secs_f32();
+            let done = waiting.is_none() && elapsed >= START_UP_SHORTEST;
+            if !done && ws.error.is_none() && elapsed < START_UP_LONGEST {
+                splash::show(ctx, waiting.unwrap_or("Almost there…"), 1.0);
+                return;
+            }
+            let now = std::time::Instant::now();
+            ws.ready_at = Some(now);
+            now
+        }
+    };
+    let fading = ready_at.elapsed().as_secs_f32() / START_UP_FADE;
+    if fading < 1.0 {
+        splash::show(ctx, "Almost there…", 1.0 - fading);
+    }
+}
+
+/// What the start-up screen is still waiting for, as it says it; None once
+/// everything is in.
+fn waiting_for(ws: &mut Workspace) -> Option<&'static str> {
+    if ws.me_id.is_empty() {
+        return Some("Signing you in…");
+    }
+    if ws.directory.is_none() {
+        return Some("Loading your chats…");
+    }
+    if ws.open.is_some() && ws.messages.is_none() {
+        return Some("Opening your conversation…");
+    }
+    let me = crate::model::Picture::Person { id: ws.me_id.clone(), name: ws.me.clone() };
+    if ws.pictures.get(&me).is_none() && ws.pictures.loading(&me) {
+        return Some("Loading your profile…");
+    }
+    None
 }
 
 /// A child Ui filling `rect`.

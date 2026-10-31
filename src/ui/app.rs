@@ -146,7 +146,11 @@ impl App {
     /// Take the screenshot once the workspace has loaded, save it and quit.
     fn capture(&mut self, ctx: &egui::Context) {
         let Some(capture) = &mut self.capture else { return };
-        let ready = matches!(&self.screen, Screen::Signed(ws) if ws.directory.is_some() && ws.messages.is_some())
+        // Past the start-up screen (unless it's what to capture).
+        let past_start_up = |ws: &Workspace| {
+            std::env::var_os("DRIFT_DEMO_SPLASH").is_some() || ws.ready_at.is_some_and(|at| at.elapsed().as_secs_f32() > 0.5)
+        };
+        let ready = matches!(&self.screen, Screen::Signed(ws) if ws.directory.is_some() && ws.messages.is_some() && past_start_up(ws))
             || matches!(&self.screen, Screen::SignIn(_));
         if !ready {
             return;

@@ -43,6 +43,10 @@ pub struct Workspace {
     pub meetings: Option<Vec<Meeting>>,
     meetings_load: Load<Vec<Meeting>, Error>,
     meetings_at: Option<Instant>,
+    /// When the workspace opened, and when everything the start-up screen waits for
+    /// was in (it fades out from then).
+    pub started: Instant,
+    pub ready_at: Option<Instant>,
     /// The user's status (None until it's in).
     pub status: Option<Status>,
     status_load: Load<Status, Error>,
@@ -221,6 +225,8 @@ impl Workspace {
             meetings: None,
             meetings_load: Load::Idle,
             meetings_at: None,
+            started: Instant::now(),
+            ready_at: None,
             status: None,
             status_load: Load::Idle,
             status_at: None,
