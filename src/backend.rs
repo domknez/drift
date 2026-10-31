@@ -2,7 +2,7 @@
 //! the UI only sees this trait and the `model` types.
 
 use crate::model::markdown::Outgoing;
-use crate::model::{Availability, ConversationId, Directory, Meeting, Message, Picture, SearchHit, Status};
+use crate::model::{Availability, ConversationId, Directory, Meeting, Message, Picture, Presence, SearchHit, Status};
 use std::fmt;
 use std::sync::Arc;
 
@@ -94,6 +94,12 @@ pub trait Backend: Send + Sync {
     /// Set the user's status, everywhere they're signed in; `None` lets the service
     /// go by activity again.
     fn set_status(&self, to: Option<Availability>) -> Result<()>;
+
+    /// How each of these people shows (by id). A service without presence says nothing.
+    fn presence(&self, people: &[String]) -> Result<Vec<(String, Presence)>> {
+        let _ = people;
+        Ok(Vec::new())
+    }
 
     /// Tell the service drift is running, and whether the user is at the computer:
     /// this is what makes them show as available (or away when idle). A service

@@ -205,6 +205,9 @@ fn head(ui: &mut Ui, ws: &mut Workspace, rect: Rect, directory: &Directory, id: 
             let picture = c.picture.as_ref().and_then(|pic| ws.pictures.get(pic));
             let mut child = ui.new_child(egui::UiBuilder::new().max_rect(pic));
             widgets::avatar(&mut child, &c.id, &c.title, 36.0, picture);
+            if let Some(presence) = ws.presence_of(c) {
+                widgets::presence_dot(ui.painter(), pic.right_bottom() - vec2(4.0, 4.0), 5.0, presence, p.panel);
+            }
         }
         kind => {
             ui.painter().rect_filled(pic, CornerRadius::same(11), p.surface);

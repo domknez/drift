@@ -2,7 +2,7 @@
 
 use super::style::icons::{self, Icon};
 use super::style::{colors, metrics, palette, typography as ty};
-use crate::model::{Availability, Block, Card, Inline, Picture, Reaction};
+use crate::model::{Availability, Block, Card, Inline, Picture, Presence, Reaction};
 use crate::ui::pictures::Pictures;
 use eframe::egui::{self, Align2, Color32, CornerRadius, Frame, Margin, Rect, Response, RichText, Sense, Stroke, TextureId, Ui, vec2};
 
@@ -45,6 +45,21 @@ pub fn status_dot(painter: &egui::Painter, center: egui::Pos2, radius: f32, stat
     if status == Availability::DoNotDisturb {
         let half = radius * 0.5;
         painter.line_segment([center - vec2(half, 0.0), center + vec2(half, 0.0)], Stroke::new(radius * 0.4, Color32::WHITE));
+    }
+}
+
+/// Someone's presence as a dot on their avatar: out of office as a magenta dot with
+/// an arrow (as in Teams), otherwise their availability; nothing when it's unknown.
+pub fn presence_dot(painter: &egui::Painter, center: egui::Pos2, radius: f32, presence: Presence, behind: Color32) {
+    if presence.out_of_office {
+        painter.circle_filled(center, radius + 2.0, behind);
+        painter.circle_filled(center, radius, Color32::from_rgb(0xb4, 0x2b, 0xa8));
+        let (half, stroke) = (radius * 0.5, Stroke::new(radius * 0.32, Color32::WHITE));
+        painter.line_segment([center - vec2(half, 0.0), center + vec2(half, 0.0)], stroke);
+        painter.line_segment([center - vec2(half, 0.0), center + vec2(-half * 0.1, -half * 0.75)], stroke);
+        painter.line_segment([center - vec2(half, 0.0), center + vec2(-half * 0.1, half * 0.75)], stroke);
+    } else if presence.availability != Availability::Unknown {
+        status_dot(painter, center, radius, presence.availability, behind);
     }
 }
 

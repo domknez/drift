@@ -7,7 +7,7 @@ use crate::ui::style::icons::{self, Icon};
 use crate::ui::style::{colors, metrics, typography as ty};
 use crate::ui::widgets;
 use crate::ui::workspace::{Chip, Section, Side, Workspace};
-use eframe::egui::{self, Align, Align2, CornerRadius, Layout, Rect, RichText, Sense, Stroke, TextureId, Ui, pos2, vec2};
+use eframe::egui::{self, Align, Align2, Color32, CornerRadius, Layout, Rect, RichText, Sense, Stroke, TextureId, Ui, pos2, vec2};
 
 /// Meeting chats listed under Recent (the newest); the Meetings tab has them all.
 const MEETINGS_IN_RECENT: usize = 5;
@@ -602,7 +602,9 @@ fn empty(ui: &mut Ui, text: &str) {
 
 /// What leads a row: a person's photo, a group's, or a tile with a channel's or a
 /// meeting's mark.
-pub fn lead(ui: &mut Ui, ws: &mut Workspace, c: &Conversation, rect: Rect) {
+/// A conversation's picture or mark in `rect`; for a one-to-one chat, with the
+/// person's presence cut out of `behind` (the colour around it).
+pub fn lead(ui: &mut Ui, ws: &mut Workspace, c: &Conversation, rect: Rect, behind: Color32) {
     let p = colors();
     let tile = |ui: &mut Ui, icon: Icon| {
         ui.painter().rect_filled(rect, CornerRadius::same(11), p.surface);
@@ -616,6 +618,10 @@ pub fn lead(ui: &mut Ui, ws: &mut Workspace, c: &Conversation, rect: Rect) {
             let picture: Option<TextureId> = c.picture.as_ref().and_then(|pic| ws.pictures.get(pic));
             let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
             widgets::avatar(&mut child, &c.id, &c.title, rect.width(), picture);
+            if let Some(presence) = ws.presence_of(c) {
+                let radius = (rect.width() * 0.14).max(4.0);
+                widgets::presence_dot(ui.painter(), rect.right_bottom() - vec2(radius - 1.0, radius - 1.0), radius, presence, behind);
+            }
         }
     }
 }
@@ -645,7 +651,14 @@ fn row(ui: &mut Ui, ws: &mut Workspace, d: &Directory, c: &Conversation) {
     }
     let size = metrics::LIST_AVATAR;
     let pic = Rect::from_min_size(pos2(rect.left() + 10.0, rect.center().y - size / 2.0), vec2(size, size));
-    lead(ui, ws, c, pic);
+    let behind = if selected {
+        p.selected
+    } else if response.hovered() {
+        p.hover
+    } else {
+        p.panel
+    };
+    lead(ui, ws, c, pic, behind);
 
     // Right column: time, and an unread dot or the mute mark under it.
     let right = rect.right() - 12.0;

@@ -159,7 +159,7 @@ fn draw_row(ui: &mut egui::Ui, ws: &mut Workspace, row: &Row, rect: Rect, on: bo
     let p = colors();
     let mark = Rect::from_min_size(pos2(rect.left() + 10.0, rect.center().y - 13.0), vec2(26.0, 26.0));
     match (&row.conversation, row.icon) {
-        (Some(c), _) => super::list::lead(ui, ws, c, mark),
+        (Some(c), _) => super::list::lead(ui, ws, c, mark, if on { p.hover } else { p.panel }),
         (None, Some(icon)) => {
             ui.painter().rect_filled(mark, CornerRadius::same(8), p.surface);
             icons::paint(ui.painter(), Rect::from_center_size(mark.center(), vec2(15.0, 15.0)), icon, p.dim);

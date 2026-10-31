@@ -2,8 +2,8 @@
 //! API isn't documented, and what's missing gets a default rather than an error.
 
 use crate::model::{
-    Author, Availability, Card, Channel, Conversation, Kind, Meeting, Message, Picture, Preview, Reaction, SearchHit, Source, Status, Team,
-    text, time,
+    Author, Availability, Card, Channel, Conversation, Kind, Meeting, Message, Picture, Presence, Preview, Reaction, SearchHit, Source,
+    Status, Team, text, time,
 };
 use serde_json::Value;
 
@@ -364,6 +364,20 @@ pub fn status(entry: &Value) -> Status {
     }
 }
 
+/// Each person's presence from a presence answer, by id.
+pub fn presences(v: &Value) -> Vec<(String, Presence)> {
+    v.as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| {
+            let presence = &entry["presence"];
+            let availability = Availability::from_key(str_of(presence, &["availability"]).unwrap_or(""));
+            let out_of_office = presence["calendarData"]["isOutOfOffice"].as_bool().unwrap_or(false);
+            Some((str_of(entry, &["mri"])?.to_string(), Presence { availability, out_of_office }))
+        })
+        .collect()
+}
+
 /// Meetings from the middle tier's calendar view, earliest first.
 pub fn meetings(v: &Value) -> Vec<Meeting> {
     let mut list: Vec<Meeting> = v["value"]
@@ -439,6 +453,17 @@ mod tests {
             json!({"presence": {"availability": "Away", "forcedAvailability": {"availability": "Busy", "expiry": "2020-01-01T00:00:00Z"}}});
         assert_eq!(status(&ended), Status { shown: Availability::Away, set: None });
         assert_eq!(status(&json!({"presence": {"availability": "AvailableIdle"}})).shown, Availability::Available);
+        let people = json!([
+            {"mri": "8:orgid:a", "presence": {"availability": "Busy", "calendarData": {"isOutOfOffice": true}}},
+            {"mri": "8:orgid:b", "presence": {"availability": "PresenceUnknown"}},
+        ]);
+        assert_eq!(
+            presences(&people),
+            vec![
+                ("8:orgid:a".into(), Presence { availability: Availability::Busy, out_of_office: true }),
+                ("8:orgid:b".into(), Presence { availability: Availability::Unknown, out_of_office: false }),
+            ]
+        );
     }
 
     const ME: &str = "8:orgid:me";

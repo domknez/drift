@@ -14,7 +14,7 @@ mod trouter;
 
 use crate::backend::{Backend, Error, Push, Result};
 use crate::model::markdown::Outgoing;
-use crate::model::{Availability, Conversation, Directory, Kind, Meeting, Message, Picture, SearchHit, Status};
+use crate::model::{Availability, Conversation, Directory, Kind, Meeting, Message, Picture, Presence, SearchHit, Status};
 use auth::{CHAT_AGGREGATOR, PRESENCE, SEARCH, SPACES, Session};
 use http::{Body, Method};
 use serde_json::Value;
@@ -107,7 +107,7 @@ impl Teams {
     }
 
     /// A request to the presence service, with its bearer and headers.
-    fn presence(&self, method: Method, path: &str, body: Body) -> Result<Value> {
+    fn presence_request(&self, method: Method, path: &str, body: Body) -> Result<Value> {
         let (skype, bearer) = {
             let mut session = self.session();
             (session.skype()?, format!("Bearer {}", session.access(PRESENCE)?))
@@ -130,7 +130,7 @@ impl Teams {
         // The id is known once a token has been fetched.
         self.session().access(PRESENCE)?;
         let body = serde_json::json!([{ "mri": self.my_id() }]);
-        let answer = self.presence(Method::Post, "/v1/presence/getpresence/", Body::Json(&body))?;
+        let answer = self.presence_request(Method::Post, "/v1/presence/getpresence/", Body::Json(&body))?;
         Ok(answer.as_array().and_then(|a| a.first()).cloned().unwrap_or(Value::Null))
     }
 
@@ -645,10 +645,24 @@ impl Backend for Teams {
         match to {
             Some(a) => {
                 let body = serde_json::json!({ "availability": a.key() });
-                self.presence(Method::Put, "/v1/me/forceavailability/", Body::Json(&body)).map(|_| ())
+                self.presence_request(Method::Put, "/v1/me/forceavailability/", Body::Json(&body)).map(|_| ())
             }
-            None => self.presence(Method::Delete, "/v1/me/forceavailability/", Body::None).map(|_| ()),
+            None => self.presence_request(Method::Delete, "/v1/me/forceavailability/", Body::None).map(|_| ()),
         }
+    }
+
+    fn presence(&self, people: &[String]) -> Result<Vec<(String, Presence)>> {
+        let mut all = Vec::new();
+        // The service takes at most 650 at a time.
+        for batch in people.chunks(650) {
+            let body: Vec<Value> = batch.iter().map(|id| serde_json::json!({ "mri": id })).collect();
+            all.extend(parse::presences(&self.presence_request(
+                Method::Post,
+                "/v1/presence/getpresence/",
+                Body::Json(&Value::Array(body)),
+            )?));
+        }
+        Ok(all)
     }
 
     fn report_activity(&self, active: bool) -> Result<()> {
@@ -662,9 +676,9 @@ impl Backend for Teams {
             "activityReporting": "Transport",
             "deviceType": "Desktop",
         });
-        self.presence(Method::Put, "/v1/me/endpoints/", Body::Json(&endpoint))?;
+        self.presence_request(Method::Put, "/v1/me/endpoints/", Body::Json(&endpoint))?;
         let activity = serde_json::json!({ "endpointId": id, "isActive": active });
-        self.presence(Method::Post, "/v1/me/reportmyactivity/", Body::Json(&activity)).map(|_| ())
+        self.presence_request(Method::Post, "/v1/me/reportmyactivity/", Body::Json(&activity)).map(|_| ())
     }
 
     fn listen(self: Arc<Self>, to: Box<dyn Fn(Push) + Send>) {

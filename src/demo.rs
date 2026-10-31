@@ -5,8 +5,8 @@ use crate::backend::{Backend, Error, Result};
 use crate::model::markdown::Outgoing;
 use crate::model::text::{self, Block};
 use crate::model::{
-    Author, Availability, Card, Channel, Conversation, Directory, Kind, Meeting, Message, Picture, Preview, Reaction, SearchHit, Source,
-    Status, Team, time,
+    Author, Availability, Card, Channel, Conversation, Directory, Kind, Meeting, Message, Picture, Presence, Preview, Reaction, SearchHit,
+    Source, Status, Team, time,
 };
 
 pub struct Demo;
@@ -432,6 +432,26 @@ impl Backend for Demo {
 
     fn set_status(&self, _to: Option<Availability>) -> Result<()> {
         Ok(())
+    }
+
+    fn presence(&self, people: &[String]) -> Result<Vec<(String, Presence)>> {
+        // Made up: a spread of them, the same for each person every time.
+        let looks = [
+            (Availability::Available, false),
+            (Availability::Busy, false),
+            (Availability::Away, false),
+            (Availability::Available, true),
+            (Availability::DoNotDisturb, false),
+            (Availability::Offline, false),
+        ];
+        Ok(people
+            .iter()
+            .enumerate()
+            .map(|(i, id)| {
+                let (availability, out_of_office) = looks[i % looks.len()];
+                (id.clone(), Presence { availability, out_of_office })
+            })
+            .collect())
     }
 }
 

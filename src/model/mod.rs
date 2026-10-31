@@ -325,6 +325,13 @@ pub struct Status {
     pub set: Option<Availability>,
 }
 
+/// How someone else shows: their availability, and whether they're out of office.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Presence {
+    pub availability: Availability,
+    pub out_of_office: bool,
+}
+
 /// Everything listed in the sidebar.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Directory {

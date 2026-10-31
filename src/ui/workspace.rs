@@ -5,7 +5,9 @@ use super::load::Load;
 use super::pictures::Pictures;
 use crate::backend::{Backend, Error, Push};
 use crate::model::markdown::{self, Mention};
-use crate::model::{Availability, Conversation, ConversationId, Directory, Kind, Meeting, Message, Picture, SearchHit, Status, text};
+use crate::model::{
+    Availability, Conversation, ConversationId, Directory, Kind, Meeting, Message, Picture, Presence, SearchHit, Status, text,
+};
 use eframe::egui;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -28,6 +30,8 @@ pub const NEWEST: usize = 40;
 const CALENDAR_EVERY: Duration = Duration::from_secs(5 * 60);
 /// How often the user's status is fetched again (it changes in other clients too).
 const STATUS_EVERY: Duration = Duration::from_secs(60);
+/// How often the presence of the people in one-to-one chats is fetched again.
+const PRESENCE_EVERY: Duration = Duration::from_secs(60);
 /// How often drift tells the presence service the user is (or isn't) at the computer.
 const ACTIVITY_EVERY: Duration = Duration::from_secs(120);
 /// Idle this long (s), the user shows as away.
@@ -47,6 +51,10 @@ pub struct Workspace {
     /// was in (it fades out from then).
     pub started: Instant,
     pub ready_at: Option<Instant>,
+    /// How the people in one-to-one chats show, by id.
+    pub presence: HashMap<String, Presence>,
+    presence_load: Load<Vec<(String, Presence)>, Error>,
+    presence_at: Option<Instant>,
     /// The user's status (None until it's in).
     pub status: Option<Status>,
     status_load: Load<Status, Error>,
@@ -225,6 +233,9 @@ impl Workspace {
             meetings: None,
             meetings_load: Load::Idle,
             meetings_at: None,
+            presence: HashMap::new(),
+            presence_load: Load::Idle,
+            presence_at: None,
             started: Instant::now(),
             ready_at: None,
             status: None,
@@ -629,6 +640,17 @@ impl Workspace {
         self.status_set = Load::start(ctx, move || backend.set_status(to));
     }
 
+    /// How the person a one-to-one chat is with shows (the user, for their notes).
+    pub fn presence_of(&self, c: &Conversation) -> Option<Presence> {
+        if let Some(Picture::Person { id, .. }) = &c.picture
+            && *id == self.me_id
+            && c.members.is_empty()
+        {
+            return self.status.map(|s| Presence { availability: s.shown, out_of_office: false });
+        }
+        person(c).and_then(|id| self.presence.get(id)).copied()
+    }
+
     /// Ask GitHub whether there's a newer drift.
     pub fn check_for_update(&mut self, ctx: &egui::Context) {
         self.update = Load::start(ctx, crate::update::check);
@@ -839,6 +861,12 @@ impl Workspace {
         if let Some(Err(e)) = self.activity_report.take() {
             log_debug!("reporting activity: {e}");
         }
+        if let Some(result) = self.presence_load.take() {
+            match result {
+                Ok(people) => self.presence.extend(people),
+                Err(e) => log_debug!("presence: {e}"),
+            }
+        }
         if let Some(result) = self.status_load.take() {
             match result {
                 Ok(status) => self.status = Some(status),
@@ -922,6 +950,15 @@ impl Workspace {
             if came_back {
                 self.status_at = None;
             }
+        }
+        if !self.presence_load.is_running()
+            && due(self.presence_at, PRESENCE_EVERY)
+            && let Some(directory) = self.directory.as_ref()
+        {
+            self.presence_at = Some(Instant::now());
+            let people: Vec<String> = directory.conversations.iter().filter_map(|c| person(c).map(str::to_string)).collect();
+            let backend = self.backend.clone();
+            self.presence_load = Load::start(ctx, move || backend.presence(&people));
         }
         if !self.status_load.is_running() && !self.status_set.is_running() && due(self.status_at, STATUS_EVERY) {
             self.status_at = Some(Instant::now());
@@ -1035,6 +1072,7 @@ impl Workspace {
         self.meetings_at = None;
         self.messages_at = None;
         self.activity_at = None;
+        self.presence_at = None;
     }
 }
 
@@ -1049,4 +1087,12 @@ fn quote_html(m: &Message) -> String {
         name = esc(&m.author.name),
         preview = esc(&preview),
     )
+}
+
+/// Who a one-to-one chat is with.
+fn person(c: &Conversation) -> Option<&str> {
+    match c.members.as_slice() {
+        [one] if c.kind == Kind::Chat => Some(one.id.as_str()),
+        _ => None,
+    }
 }
