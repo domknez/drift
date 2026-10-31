@@ -53,7 +53,7 @@ jobs:
           ./scripts/set-version.sh "$TAG"
           echo "VERSION=${TAG#v}" >> "$GITHUB_ENV"
 
-      - name: Build (macOS: Apple silicon, Intel, and both in one app)
+      - name: Build (macOS, for Apple silicon, Intel and both in one app)
         if: runner.os == 'macOS'
         env:
           MACOSX_DEPLOYMENT_TARGET: '11.0'
