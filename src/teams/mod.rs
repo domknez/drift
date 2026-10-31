@@ -518,17 +518,18 @@ impl Backend for Teams {
             })
             .collect();
 
-        // Channels come from the roster's teams; the chat service says what's new.
+        // Channels come from the roster's teams; the chat service says what's new. The
+        // roster's own read flag isn't used: it stays "unread" for channels the user
+        // never opened (the chat service doesn't list those), whatever happens there.
         for team in &teams {
             for channel in &team.channels {
-                let (last, unread, favorite) =
-                    channel_state.get(&channel.id).cloned().unwrap_or((channel.last.clone(), channel.unread, false));
+                let (last, unread, favorite) = channel_state.get(&channel.id).cloned().unwrap_or((channel.last.clone(), false, false));
                 conversations.push(Conversation {
                     id: channel.id.clone(),
                     kind: Kind::Channel,
                     title: channel.name.clone(),
                     last: last.or_else(|| channel.last.clone()),
-                    unread: unread || channel.unread,
+                    unread,
                     read_up_to: None,
                     pinned: channel.pinned || favorite,
                     muted: channel.muted,
