@@ -378,7 +378,7 @@ pub fn custom_emoji(v: &Value, ams: &str) -> Vec<CustomEmoji> {
             let document = str_of(e, &["documentId"]).or_else(|| key.split_once(';').map(|(_, d)| d))?;
             let name = e["shortcuts"][0].as_str().or_else(|| key.split_once(';').map(|(n, _)| n))?.trim_matches(':').to_string();
             let keywords = e["keywords"].as_array().into_iter().flatten().filter_map(Value::as_str).map(str::to_lowercase).collect();
-            Some(CustomEmoji { src: format!("{ams}/v1/objects/{document}/views/imgo"), key, name, keywords })
+            Some(CustomEmoji { src: format!("{ams}/v1/objects/{document}/views/imgt1_anim"), key, name, keywords })
         })
         .collect()
 }
@@ -473,7 +473,7 @@ mod tests {
         assert_eq!(found[0].key, "wave;0-weu-d1-abc");
         assert_eq!(found[0].name, "wave");
         assert_eq!(found[0].keywords, ["hello"]);
-        assert_eq!(found[0].src, "https://ams.example/v1/objects/0-weu-d1-abc/views/imgo");
+        assert_eq!(found[0].src, "https://ams.example/v1/objects/0-weu-d1-abc/views/imgt1_anim");
     }
 
     #[test]

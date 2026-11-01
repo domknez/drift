@@ -718,7 +718,8 @@ impl Backend for Teams {
             Picture::Emoji(key) if key.contains(';') => {
                 let id = key.rsplit(';').next().unwrap_or("");
                 let ams = self.session().skype()?.ams;
-                return self.ams_get(&format!("{ams}/v1/objects/{id}/views/imgo"));
+                // The animated view is a PNG (with transparency); the original is a JPEG.
+                return self.ams_get(&format!("{ams}/v1/objects/{id}/views/imgt1_anim"));
             }
             Picture::Emoji(key) => return emoji(key),
             Picture::Image(url) => return self.ams_get(url),
