@@ -872,8 +872,12 @@ impl Workspace {
             // What the service makes of it (by activity: what it works out).
             self.status_at = None;
         }
-        if let Some(Err(e)) = self.activity_report.take() {
-            log_debug!("reporting activity: {e}");
+        match self.activity_report.take() {
+            // Shown as offline until the service counts this endpoint (at start-up,
+            // the status is often fetched before the first report is in).
+            Some(Ok(())) if self.status.is_some_and(|s| s.shown == Availability::Offline) => self.status_at = None,
+            Some(Err(e)) => log_debug!("reporting activity: {e}"),
+            _ => {}
         }
         if let Some(result) = self.presence_load.take() {
             match result {

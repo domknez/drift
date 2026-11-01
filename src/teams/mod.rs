@@ -621,6 +621,10 @@ impl Backend for Teams {
     }
 
     fn read_by(&self, conversation: &str) -> Result<Vec<(String, i64)>> {
+        // Your own notes aren't a thread: nobody else reads them.
+        if conversation.starts_with("48:") {
+            return Ok(Vec::new());
+        }
         Ok(parse::read_positions(&self.chat_service(&format!("/v1/threads/{}/consumptionhorizons", http::encode(conversation)))?))
     }
 
