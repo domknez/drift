@@ -332,6 +332,19 @@ pub struct Presence {
     pub out_of_office: bool,
 }
 
+/// An emoji of the user's organisation (a tenant's own, added in Teams).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CustomEmoji {
+    /// The service's key: `<shortcut>;<object id>` (in reactions and messages).
+    pub key: String,
+    /// Its shortcut (`mbai` for `:mbai:`).
+    pub name: String,
+    /// Words it's found by, lowercase.
+    pub keywords: Vec<String>,
+    /// Its picture's address, for the message markup.
+    pub src: String,
+}
+
 /// Everything listed in the sidebar.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Directory {

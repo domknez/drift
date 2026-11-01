@@ -45,8 +45,9 @@ a fraction of the memory the official app keeps busy doing nothing.
 - **In a conversation:** find in its messages (⌘F): every match marked, the list of
   them beside the conversation, ↑ ↓ (or Enter, Shift+Enter) to go from one to the
   next; see who's in it (or who wrote in a channel) and open your chat with them; pick
-  an emoji from Teams' whole set, by category or searched by name; attach pictures (or drop them on the window)
-- **Pictures** in messages, and a tenant's own emoji in reactions
+  an emoji from Teams' whole set or your organization's own, by category or searched by name (the ones you used lately first); attach pictures (or drop them on the window)
+- **Pictures** in messages, and your organization's own emoji in messages and reactions
+  (`:name:` sends one)
 - **Activity:** who mentioned you or replied, what they wrote and where; a click
   opens that very message, marked (in its thread if it's a reply)
 - **Notifications** for new messages in your chats and meeting chats, and for mentions

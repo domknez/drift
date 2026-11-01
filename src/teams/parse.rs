@@ -2,8 +2,8 @@
 //! API isn't documented, and what's missing gets a default rather than an error.
 
 use crate::model::{
-    Author, Availability, Card, Channel, Conversation, Kind, Meeting, Message, Picture, Presence, Preview, Reaction, SearchHit, Source,
-    Status, Team, text, time,
+    Author, Availability, Card, Channel, Conversation, CustomEmoji, Kind, Meeting, Message, Picture, Presence, Preview, Reaction,
+    SearchHit, Source, Status, Team, text, time,
 };
 use serde_json::Value;
 
@@ -364,6 +364,25 @@ pub fn status(entry: &Value) -> Status {
     }
 }
 
+/// The organisation's emoji from the chat aggregator's custom emoji list (deleted
+/// ones left out). `ams` is where their pictures are.
+pub fn custom_emoji(v: &Value, ams: &str) -> Vec<CustomEmoji> {
+    v["categories"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|c| c["emoticons"].as_array().into_iter().flatten())
+        .filter(|e| !e["isDeleted"].as_bool().unwrap_or(false))
+        .filter_map(|e| {
+            let key = str_of(e, &["id"])?.to_string();
+            let document = str_of(e, &["documentId"]).or_else(|| key.split_once(';').map(|(_, d)| d))?;
+            let name = e["shortcuts"][0].as_str().or_else(|| key.split_once(';').map(|(n, _)| n))?.trim_matches(':').to_string();
+            let keywords = e["keywords"].as_array().into_iter().flatten().filter_map(Value::as_str).map(str::to_lowercase).collect();
+            Some(CustomEmoji { src: format!("{ams}/v1/objects/{document}/views/imgo"), key, name, keywords })
+        })
+        .collect()
+}
+
 /// Each person's presence from a presence answer, by id.
 pub fn presences(v: &Value) -> Vec<(String, Presence)> {
     v.as_array()
@@ -443,6 +462,19 @@ pub fn profiles(v: &Value) -> Vec<(String, String)> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn reads_custom_emoji() {
+        let v = json!({"categories": [{"id": "customEmoji", "emoticons": [
+            {"id": "wave;0-weu-d1-abc", "documentId": "0-weu-d1-abc", "shortcuts": ["wave"], "keywords": ["Hello"], "isDeleted": false},
+            {"id": "gone;0-weu-d1-def", "documentId": "0-weu-d1-def", "shortcuts": ["gone"], "isDeleted": true}]}], "continuationToken": "x"});
+        let found = custom_emoji(&v, "https://ams.example");
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].key, "wave;0-weu-d1-abc");
+        assert_eq!(found[0].name, "wave");
+        assert_eq!(found[0].keywords, ["hello"]);
+        assert_eq!(found[0].src, "https://ams.example/v1/objects/0-weu-d1-abc/views/imgo");
+    }
 
     #[test]
     fn reads_status() {

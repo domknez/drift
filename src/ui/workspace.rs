@@ -58,6 +58,9 @@ pub struct Workspace {
     /// The user's status (None until it's in).
     pub status: Option<Status>,
     status_load: Load<Status, Error>,
+    /// The organisation's own emoji, once in (asked for once, after the list).
+    pub custom_emoji: Vec<crate::model::CustomEmoji>,
+    custom_emoji_load: Option<Load<Vec<crate::model::CustomEmoji>, Error>>,
     status_at: Option<Instant>,
     /// Setting the user's status, while it's under way.
     status_set: Load<(), Error>,
@@ -155,6 +158,8 @@ pub struct Workspace {
     pub hidden: Option<HashMap<String, i64>>,
     /// Conversations muted in drift (None until the saved ones are in).
     pub muted_here: Option<HashSet<String>>,
+    /// Emoji picked lately (keys, the latest first; None until the saved ones are in).
+    pub recent_emoji: Option<Vec<String>>,
     /// The height of the text in the composer and in the thread's (as last drawn).
     pub composer_text: [f32; 2],
     /// The picture shown over the window, by its URL.
@@ -242,6 +247,9 @@ impl Workspace {
             ready_at: None,
             status: None,
             status_load: Load::Idle,
+            custom_emoji: Vec::new(),
+            custom_emoji_load: None,
+            recent_emoji: None,
             status_at: None,
             status_set: Load::Idle,
             reported_at: None,
@@ -329,7 +337,8 @@ impl Workspace {
             return;
         }
         self.attachments.retain(|(r, _)| *r != reply);
-        let mut message = if text.is_empty() { markdown::Outgoing::default() } else { markdown::to_html(&text, &self.people()) };
+        let mut message =
+            if text.is_empty() { markdown::Outgoing::default() } else { markdown::to_html_with(&text, &self.people(), &self.custom_emoji) };
         if let Some(quoted) = self.quoting.take_if(|(r, _)| *r == reply).map(|(_, m)| m) {
             message.html = quote_html(&quoted) + &message.html;
         }
@@ -653,6 +662,14 @@ impl Workspace {
         person(c).and_then(|id| self.presence.get(id)).copied()
     }
 
+    /// An emoji was picked: it goes first among the recent ones.
+    pub fn used_emoji(&mut self, key: &str) {
+        let recent = self.recent_emoji.get_or_insert_with(Vec::new);
+        recent.retain(|k| k != key);
+        recent.insert(0, key.to_string());
+        recent.truncate(crate::ui::views::emoji_picker::RECENT);
+    }
+
     /// Mark the open conversation unread from `message` on.
     pub fn unread_from(&mut self, ctx: &egui::Context, message: &str) {
         let (Some(id), Ok(at)) = (self.open.clone(), message.parse::<i64>()) else { return };
@@ -864,6 +881,12 @@ impl Workspace {
                 Err(e) => log_debug!("presence: {e}"),
             }
         }
+        if let Some(result) = self.custom_emoji_load.as_mut().and_then(Load::take) {
+            match result {
+                Ok(found) => self.custom_emoji = found,
+                Err(e) => log_debug!("custom emoji: {e}"),
+            }
+        }
         if let Some(result) = self.status_load.take() {
             match result {
                 Ok(status) => self.status = Some(status),
@@ -950,6 +973,10 @@ impl Workspace {
             let people: Vec<String> = directory.conversations.iter().filter_map(|c| person(c).map(str::to_string)).collect();
             let backend = self.backend.clone();
             self.presence_load = Load::start(ctx, move || backend.presence(&people));
+        }
+        if self.custom_emoji_load.is_none() && self.directory.is_some() {
+            let backend = self.backend.clone();
+            self.custom_emoji_load = Some(Load::start(ctx, move || backend.custom_emoji()));
         }
         if !self.status_load.is_running() && !self.status_set.is_running() && due(self.status_at, STATUS_EVERY) {
             self.status_at = Some(Instant::now());

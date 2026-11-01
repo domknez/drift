@@ -219,7 +219,7 @@ impl Builder {
                 return;
             }
             "img"
-                if !attr(attrs, "itemtype").is_some_and(|t| t.ends_with("/Emoji"))
+                if !attr(attrs, "itemtype").is_some_and(|t| is_emoji(&t))
                     && attr(attrs, "src").is_some_and(|s| s.starts_with("https://") || s.starts_with("http://")) =>
             {
                 // A picture someone pasted or attached, or a GIF they picked (anything but
@@ -233,15 +233,21 @@ impl Builder {
                 return;
             }
             "img" => {
-                // Emoji come as images: their key in itemid, the character in alt.
+                // Emoji come as images: their key in itemid, the character in alt (an
+                // organisation's own: its name, shown as :name: until its picture is in).
                 if let Some(alt) = attr(attrs, "alt") {
-                    let key = attr(attrs, "itemtype").filter(|t| t.ends_with("/Emoji")).and(attr(attrs, "itemid"));
+                    let kind = attr(attrs, "itemtype").filter(|t| is_emoji(t));
+                    let key = kind.as_ref().and(attr(attrs, "itemid"));
+                    let alt = match kind {
+                        Some(t) if t.ends_with("/CustomEmoji") => format!(":{}:", decode(&alt)),
+                        _ => decode(&alt),
+                    };
                     match key {
                         Some(key) if self.pre.is_none() => {
                             let span = Span { emoji: Some(key), ..self.span() };
-                            self.runs.text(&decode(&alt), span);
+                            self.runs.text(&alt, span);
                         }
-                        _ => self.text(&decode(&alt)),
+                        _ => self.text(&alt),
                     }
                 }
                 return;
@@ -486,6 +492,11 @@ impl Tag {
 }
 
 /// An attribute's value from a tag's attribute text.
+/// An emoji's `itemtype`: Teams' own, or an organisation's.
+fn is_emoji(itemtype: &str) -> bool {
+    itemtype.ends_with("/Emoji") || itemtype.ends_with("/CustomEmoji")
+}
+
 fn attr(attrs: &str, key: &str) -> Option<String> {
     let mut rest = attrs;
     while let Some(eq) = rest.find('=') {
@@ -597,6 +608,16 @@ mod tests {
         let blocks = from_html(r#"<p>ok <img alt="🙂" itemtype="http://schema.skype.com/Emoji" itemid="smile" src="x"></p>"#);
         assert_eq!(flatten(&blocks), "ok 🙂");
         assert_eq!(runs(&blocks)[1].span.emoji.as_deref(), Some("smile"));
+    }
+
+    #[test]
+    fn custom_emoji_become_emoji() {
+        let blocks = from_html(
+            r#"<p><span><img alt="wave" itemid="wave;0-weu-d1-abc" itemtype="http://schema.skype.com/CustomEmoji" src="https://us-prod.asyncgw.teams.microsoft.com/v1/objects/0-weu-d1-abc/views/imgt1_anim" style="width:20px; height:20px"></span></p>"#,
+        );
+        let r = runs(&blocks);
+        assert_eq!(r.len(), 1);
+        assert_eq!((r[0].text.as_str(), r[0].span.emoji.as_deref()), (":wave:", Some("wave;0-weu-d1-abc")));
     }
 
     #[test]

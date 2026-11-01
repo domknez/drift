@@ -48,6 +48,8 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace) {
         Frame::new().inner_margin(Margin::symmetric(metrics::PAGE_PAD as i8, 10)).show(ui, |ui| {
             ui.set_width(ui.available_width());
             let focus = ws.focus.clone();
+            let custom_emoji = ws.custom_emoji.clone();
+            let recent_emoji = ws.recent_emoji.clone().unwrap_or_default();
             let mut view = conversation::View {
                 me: &me,
                 read_by: &[],
@@ -58,6 +60,8 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace) {
                 newest: usize::MAX,
                 conversation: &conversation,
                 top_at: None,
+                custom_emoji: &custom_emoji,
+                recent_emoji: &recent_emoji,
             };
             action = conversation::list(ui, &mut ws.pictures, &thread, &mut view);
             ws.focus_scrolled |= view.scrolled;

@@ -2,7 +2,7 @@
 //! the UI only sees this trait and the `model` types.
 
 use crate::model::markdown::Outgoing;
-use crate::model::{Availability, ConversationId, Directory, Meeting, Message, Picture, Presence, SearchHit, Status};
+use crate::model::{Availability, ConversationId, CustomEmoji, Directory, Meeting, Message, Picture, Presence, SearchHit, Status};
 use std::fmt;
 use std::sync::Arc;
 
@@ -98,6 +98,11 @@ pub trait Backend: Send + Sync {
     /// How each of these people shows (by id). A service without presence says nothing.
     fn presence(&self, people: &[String]) -> Result<Vec<(String, Presence)>> {
         let _ = people;
+        Ok(Vec::new())
+    }
+
+    /// The organisation's own emoji. A service without them has none.
+    fn custom_emoji(&self) -> Result<Vec<CustomEmoji>> {
         Ok(Vec::new())
     }
 

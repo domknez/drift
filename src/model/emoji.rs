@@ -61,7 +61,12 @@ pub fn key_of(ch: char) -> Option<&'static str> {
 
 /// The character of an emoji by its key, from Teams' catalog.
 pub fn char_of(key: &str) -> Option<&'static str> {
-    catalog().by_key.get(key).map(|&i| catalog().emoji[i].ch)
+    by_key(key).map(|e| e.ch)
+}
+
+/// An emoji of Teams' catalog by its key.
+pub fn by_key(key: &str) -> Option<&'static Emoji> {
+    catalog().by_key.get(key).map(|&i| &catalog().emoji[i])
 }
 
 /// An emoji of Teams' catalog.

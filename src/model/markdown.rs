@@ -2,6 +2,8 @@
 //! `~~strike~~`, `` `code` ``, fenced code, lists, `>` quotes, links) and mentions
 //! (`@Name` of someone picked from the list) become their Teams markup.
 
+use super::CustomEmoji;
+
 /// Someone mentioned in a message: the service's id and the name shown.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Mention {
@@ -18,7 +20,14 @@ pub struct Outgoing {
 }
 
 /// The HTML for `text`, with `@Name` turned into mentions of `people` it names.
+#[cfg(test)]
 pub fn to_html(text: &str, people: &[Mention]) -> Outgoing {
+    to_html_with(text, people, &[])
+}
+
+/// The HTML for `text`, with `@Name` turned into mentions of `people` it names and
+/// `:name:` of the organisation's own emoji (`custom`) into those emoji.
+pub fn to_html_with(text: &str, people: &[Mention], custom: &[CustomEmoji]) -> Outgoing {
     let mut out = Outgoing::default();
     let mut html = String::new();
     let lines: Vec<&str> = text.trim_matches('\n').lines().collect();
@@ -57,7 +66,7 @@ pub fn to_html(text: &str, people: &[Mention]) -> Outgoing {
             while i < lines.len() {
                 match list_item(lines[i].trim_start()) {
                     Some((ordered, item)) if ordered == kind => {
-                        html.push_str(&format!("<li>{}</li>", inline(item, people, &mut out.mentions)));
+                        html.push_str(&format!("<li>{}</li>", inline(item, people, custom, &mut out.mentions)));
                         i += 1;
                     }
                     _ => break,
@@ -71,13 +80,13 @@ pub fn to_html(text: &str, people: &[Mention]) -> Outgoing {
             let mut quoted = Vec::new();
             while i < lines.len() && lines[i].trim_start().starts_with('>') {
                 let q = lines[i].trim_start()[1..].trim_start();
-                quoted.push(inline(q, people, &mut out.mentions));
+                quoted.push(inline(q, people, custom, &mut out.mentions));
                 i += 1;
             }
             html.push_str(&format!("<blockquote><p>{}</p></blockquote>", quoted.join("<br>")));
             continue;
         }
-        paragraph.push(inline(line, people, &mut out.mentions));
+        paragraph.push(inline(line, people, custom, &mut out.mentions));
         i += 1;
     }
     flush(&mut paragraph, &mut html);
@@ -102,7 +111,7 @@ fn escape(s: &str) -> String {
 }
 
 /// One line's inline markup: code, links, mentions, then emphasis on the plain text.
-fn inline(line: &str, people: &[Mention], mentions: &mut Vec<Mention>) -> String {
+fn inline(line: &str, people: &[Mention], custom: &[CustomEmoji], mentions: &mut Vec<Mention>) -> String {
     let mut out = String::new();
     let mut text = String::new();
     let mut rest = line;
@@ -156,6 +165,23 @@ fn inline(line: &str, people: &[Mention], mentions: &mut Vec<Mention>) -> String
                 escape(&person.name)
             ));
             rest = &rest[1 + person.name.len()..];
+            continue;
+        }
+        // :name: of an organisation's emoji.
+        if c == ':'
+            && let Some(e) = custom
+                .iter()
+                .filter(|e| rest[1..].strip_prefix(e.name.as_str()).is_some_and(|after| after.starts_with(':')))
+                .max_by_key(|e| e.name.len())
+        {
+            flush(&mut text, &mut out);
+            out.push_str(&format!(
+                "<span><img alt=\"{0}\" itemid=\"{1}\" itemtype=\"http://schema.skype.com/CustomEmoji\" src=\"{2}\" style=\"width:20px; height:20px\"></span>",
+                escape(&e.name).replace('"', "&quot;"),
+                escape(&e.key).replace('"', "&quot;"),
+                escape(&e.src).replace('"', "&quot;"),
+            ));
+            rest = &rest[e.name.len() + 2..];
             continue;
         }
         // An emoji Teams has a picture of goes as its Teams emoji.
@@ -406,6 +432,18 @@ mod tests {
         assert!(quoted[0].mark && quoted[2].quote && quoted[7].mark && !quoted[9].mark);
         let fenced = looks("```\nfn a()\n```\nafter");
         assert!(fenced[0].mark && fenced[4].code && !fenced[15].code);
+    }
+
+    #[test]
+    fn custom_emoji_go_by_name() {
+        let wave =
+            CustomEmoji { key: "wave;0-weu-d1-abc".into(), name: "wave".into(), keywords: vec![], src: "https://ams.example/x".into() };
+        let out = to_html_with("hi :wave: and :nope:", &[], &[wave]);
+        assert!(
+            out.html
+                .starts_with("<p>hi <span><img alt=\"wave\" itemid=\"wave;0-weu-d1-abc\" itemtype=\"http://schema.skype.com/CustomEmoji\"")
+        );
+        assert!(out.html.ends_with("</span> and :nope:</p>"));
     }
 
     #[test]

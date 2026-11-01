@@ -53,7 +53,10 @@ pub fn apply(ui: &Ui, ws: &mut Workspace, action: Action, reply: bool) {
             ws.thread = Some(root);
             ws.reply_draft.clear();
         }
-        Action::React { message, key } => ws.react(ui.ctx(), &message, &key),
+        Action::React { message, key } => {
+            ws.used_emoji(&key);
+            ws.react(ui.ctx(), &message, &key);
+        }
         Action::Quote(message) => {
             ws.quote(message, reply);
             focus_composer(ui, reply);
@@ -138,6 +141,8 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace) {
             let open_thread = ws.thread.clone();
             let focus = ws.focus.clone();
             let read_by = ws.read_by.clone();
+            let custom_emoji = ws.custom_emoji.clone();
+            let recent_emoji = ws.recent_emoji.clone().unwrap_or_default();
             let mut view = View {
                 me: &me,
                 read_by: &read_by,
@@ -148,6 +153,8 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace) {
                 newest: ws.newest,
                 conversation: &id,
                 top_at: None,
+                custom_emoji: &custom_emoji,
+                recent_emoji: &recent_emoji,
             };
             let mut area = egui::ScrollArea::vertical().id_salt(("messages", &id)).stick_to_bottom(true).auto_shrink([false, false]);
             if let Some(y) = ws.scroll_to.take() {
@@ -420,6 +427,9 @@ pub struct View<'a> {
     pub conversation: &'a str,
     /// When the message at the top of the visible part was sent (set by [`list`]).
     pub top_at: Option<i64>,
+    /// For reacting with any emoji: the organisation's, and those picked lately.
+    pub custom_emoji: &'a [crate::model::CustomEmoji],
+    pub recent_emoji: &'a [String],
 }
 
 /// Whether `focus` is one of the replies to `m`.
@@ -488,15 +498,8 @@ fn continues(prev: &Message, m: &Message) -> bool {
 
 /// The bar over a message while the pointer's on it: quick reactions, quote, and a
 /// menu of the rest. It stays while its menu is open.
-fn hover_bar(
-    ui: &mut Ui,
-    pictures: &mut Pictures,
-    m: &Message,
-    mine: bool,
-    thread: bool,
-    conversation: &str,
-    bubble: Rect,
-) -> Option<Action> {
+fn hover_bar(ui: &mut Ui, pictures: &mut Pictures, m: &Message, mine: bool, thread: bool, view: &View, bubble: Rect) -> Option<Action> {
+    let conversation = view.conversation;
     const CELL: f32 = 32.0;
     let p = colors();
     let more_id = egui::Id::unique(("message-more", conversation, &m.id));
@@ -564,7 +567,7 @@ fn hover_bar(
     egui::Popup::menu(&others).id(emoji_id).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
         let state = egui::Id::unique(("message-emoji-query", &m.id));
         let mut picker = ui.ctx().data_mut(|d| d.get_temp::<emoji_picker::Picker>(state)).unwrap_or_default();
-        let picked = emoji_picker::show(ui, pictures, &mut picker, &m.id);
+        let picked = emoji_picker::show(ui, pictures, &mut picker, &m.id, view.custom_emoji, view.recent_emoji);
         ui.ctx().data_mut(|d| d.insert_temp(state, picker));
         if let Some(e) = picked {
             action = Some(Action::React { message: m.id.clone(), key: e.key.to_string() });
@@ -767,7 +770,7 @@ pub fn bubble(
         message_menu(ui, m, mine, thread.is_some(), view.conversation, &mut action);
     });
     // Over a message: a bar on its top edge with quick reactions, quote and more.
-    if let Some(a) = hover_bar(ui, pictures, m, mine, thread.is_some(), view.conversation, frame.rect) {
+    if let Some(a) = hover_bar(ui, pictures, m, mine, thread.is_some(), view, frame.rect) {
         action = Some(a);
     }
 
@@ -1147,14 +1150,22 @@ pub fn composer(ui: &mut Ui, ws: &mut Workspace, rect: Rect, hint: &str, reply: 
         picker = picker.open_memory(egui::SetOpenCommand::Bool(true));
     }
     picker.show(|ui| {
-        if let Some(e) = emoji_picker::show(ui, &mut ws.pictures, &mut ws.emoji_picker, if reply { "reply" } else { "composer" }) {
-            emoji = Some(e.ch);
+        let recent = ws.recent_emoji.clone().unwrap_or_default();
+        let salt = if reply { "reply" } else { "composer" };
+        if let Some(e) = emoji_picker::show(ui, &mut ws.pictures, &mut ws.emoji_picker, salt, &ws.custom_emoji, &recent) {
+            emoji = Some(e);
             ws.emoji_picker.query.clear();
             ui.close();
         }
     });
-    if let Some(ch) = emoji {
-        ws.draft_mut(reply).push_str(ch);
+    if let Some(picked) = emoji {
+        ws.used_emoji(&picked.key);
+        // An organisation's emoji goes as :name:, with room around it.
+        let draft = ws.draft_mut(reply);
+        if picked.text.starts_with(':') && !draft.is_empty() && !draft.ends_with(' ') {
+            draft.push(' ');
+        }
+        draft.push_str(&picked.text);
         set_cursor_to_end(ui, id, ws.draft(reply));
         response.request_focus();
     }

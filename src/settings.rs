@@ -56,6 +56,8 @@ pub struct Prefs {
     /// Conversations hidden in drift, each with when (Unix ms): they're listed again
     /// once something newer comes.
     pub hidden: Vec<(String, i64)>,
+    /// Emoji picked lately (their keys), the latest first.
+    pub recent_emoji: Vec<String>,
     /// Check for new versions now and then, and download them to install on restart.
     pub auto_update: bool,
     /// The settings file changes are saved to; None keeps them in memory.
@@ -78,6 +80,9 @@ impl Prefs {
             conversation: get("conversation").map(str::to_string),
             notifications: get("notifications") != Some("false"),
             auto_update: get("auto_update") != Some("false"),
+            recent_emoji: get("recent_emoji")
+                .map(|v| v.split(',').filter(|s| !s.is_empty()).map(str::to_string).collect())
+                .unwrap_or_default(),
             hidden: get("hidden")
                 .map(|v| {
                     v.split(',')
@@ -111,7 +116,7 @@ impl Prefs {
         }
     }
 
-    fn values(&self) -> [(&'static str, String); 7] {
+    fn values(&self) -> [(&'static str, String); 8] {
         [
             ("auto_update", if self.auto_update { "true" } else { "false" }.into()),
             ("conversation", self.conversation.clone().unwrap_or_default()),
@@ -126,6 +131,7 @@ impl Prefs {
             ("hidden", self.hidden.iter().map(|(id, at)| format!("{id}|{at}")).collect::<Vec<_>>().join(",")),
             ("muted", self.muted.join(",")),
             ("notifications", if self.notifications { "true" } else { "false" }.into()),
+            ("recent_emoji", self.recent_emoji.join(",")),
             ("theme", self.theme.key().into()),
         ]
     }
@@ -151,7 +157,7 @@ fn merge(text: &str, changes: &[(&str, String)]) -> String {
 mod tests {
     use super::*;
 
-    const SAVED: &str = "auto_update=false\nconversation=19:abc@thread.v2\nfolded=meetings,team:19:t@thread.tacv2\nhidden=19:old@thread.v2|1793000000000\nmuted=19:x@thread.v2,19:y\nnotifications=false\ntheme=light\n";
+    const SAVED: &str = "auto_update=false\nconversation=19:abc@thread.v2\nfolded=meetings,team:19:t@thread.tacv2\nhidden=19:old@thread.v2|1793000000000\nmuted=19:x@thread.v2,19:y\nnotifications=false\nrecent_emoji=yes,wave;0-weu-d1-abc\ntheme=light\n";
 
     #[test]
     fn reads_a_saved_file() {

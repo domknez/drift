@@ -267,6 +267,9 @@ impl eframe::App for App {
                 if workspace.muted_here.is_none() {
                     workspace.muted_here = Some(self.prefs.muted.iter().cloned().collect());
                 }
+                if workspace.recent_emoji.is_none() {
+                    workspace.recent_emoji = Some(self.prefs.recent_emoji.clone());
+                }
                 if workspace.hidden.is_none() {
                     workspace.hidden = Some(self.prefs.hidden.iter().cloned().collect());
                 }
@@ -278,6 +281,7 @@ impl eframe::App for App {
                 }
                 let folded_before = workspace.folded.clone();
                 let muted_before = workspace.muted_here.clone();
+                let recent_before = workspace.recent_emoji.clone();
                 let hidden_before = workspace.hidden.clone();
                 request = views::workspace(ui, workspace, self.prefs.theme, &self.updates);
                 if workspace.open != before {
@@ -293,6 +297,10 @@ impl eframe::App for App {
                     let mut hidden: Vec<(String, i64)> = workspace.hidden.iter().flatten().map(|(id, at)| (id.clone(), *at)).collect();
                     hidden.sort();
                     self.prefs.update(|p| p.hidden = hidden);
+                }
+                if workspace.recent_emoji != recent_before {
+                    let recent = workspace.recent_emoji.clone().unwrap_or_default();
+                    self.prefs.update(|p| p.recent_emoji = recent);
                 }
                 if workspace.muted_here != muted_before {
                     let mut muted: Vec<String> = workspace.muted_here.iter().flatten().cloned().collect();

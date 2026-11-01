@@ -14,7 +14,7 @@ mod trouter;
 
 use crate::backend::{Backend, Error, Push, Result};
 use crate::model::markdown::Outgoing;
-use crate::model::{Availability, Conversation, Directory, Kind, Meeting, Message, Picture, Presence, SearchHit, Status};
+use crate::model::{Availability, Conversation, CustomEmoji, Directory, Kind, Meeting, Message, Picture, Presence, SearchHit, Status};
 use auth::{CHAT_AGGREGATOR, PRESENCE, SEARCH, SPACES, Session};
 use http::{Body, Method};
 use serde_json::Value;
@@ -664,6 +664,20 @@ impl Backend for Teams {
             )?));
         }
         Ok(all)
+    }
+
+    fn custom_emoji(&self) -> Result<Vec<CustomEmoji>> {
+        let (skype, bearer) = {
+            let mut session = self.session();
+            (session.skype()?, format!("Bearer {}", session.access(CHAT_AGGREGATOR)?))
+        };
+        let answer = http::request(
+            Method::Get,
+            &format!("{}/api/v1/customemoji/metadata", skype.aggregator),
+            &[("Authorization", &bearer), ("X-Skypetoken", &skype.token), ("Accept", "application/json")],
+            Body::None,
+        )?;
+        Ok(parse::custom_emoji(&answer, &skype.ams))
     }
 
     fn report_activity(&self, active: bool) -> Result<()> {
