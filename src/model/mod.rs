@@ -197,7 +197,7 @@ impl Reaction {
             "rofl" => "🤣".into(),
             "thinking" => "🤔".into(),
             "nod" | "ok" => "👌".into(),
-            name => code_points(name).unwrap_or_else(|| name.to_string()),
+            name => code_points(name).or_else(|| emoji::char_of(name).map(str::to_string)).unwrap_or_else(|| name.to_string()),
         };
         // Skin tones: U+1F3FB (light) to U+1F3FF (dark).
         match tone.and_then(|t| char::from_u32(0x1F3FA + t)) {

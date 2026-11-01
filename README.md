@@ -34,7 +34,8 @@ a fraction of the memory the official app keeps busy doing nothing.
   opens beside the channel for reading and replying
 - **Right-click a message** to react, reply with a quote, reply in its thread, copy
   it or open its link; your own also to edit or delete; click a reaction to add
-  yours (or take it back). Reactions and emoji are Teams' own, in colour
+  yours (or take it back), or react with any emoji (☺ in the bar over a message).
+  Reactions and emoji are Teams' own, in colour
 - **Write like in Teams:** Markdown (`**bold**`, `*italic*`, `~~strike~~`, `` `code` ``,
   code blocks, lists, `>` quotes, links), `@` to mention a colleague, ↑ in an empty box
   to edit your last message, Esc to cancel a quote or an edit
@@ -44,7 +45,7 @@ a fraction of the memory the official app keeps busy doing nothing.
 - **In a conversation:** find in its messages (⌘F): every match marked, the list of
   them beside the conversation, ↑ ↓ (or Enter, Shift+Enter) to go from one to the
   next; see who's in it (or who wrote in a channel) and open your chat with them; pick
-  an emoji from Teams' own set; attach pictures (or drop them on the window)
+  an emoji from Teams' whole set, by category or searched by name; attach pictures (or drop them on the window)
 - **Pictures** in messages, and a tenant's own emoji in reactions
 - **Activity:** who mentioned you or replied, what they wrote and where; a click
   opens that very message, marked (in its thread if it's a reply)

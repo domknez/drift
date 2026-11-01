@@ -2,6 +2,7 @@
 //! thread beside it, and the sign-in page. Panels float on the canvas.
 
 pub mod conversation;
+pub mod emoji_picker;
 pub mod list;
 pub mod sign_in;
 mod splash;

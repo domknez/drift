@@ -6,6 +6,7 @@ use crate::model::{Directory, Kind, Message, Picture, text, time};
 use crate::ui::pictures::Pictures;
 use crate::ui::style::icons::{self, Icon};
 use crate::ui::style::{colors, metrics, typography as ty};
+use crate::ui::views::emoji_picker;
 use crate::ui::widgets;
 use crate::ui::workspace::{Side, Workspace};
 use eframe::egui::{self, Align, CornerRadius, Frame, Layout, Margin, Rect, RichText, Sense, Stroke, Ui, pos2, vec2};
@@ -499,8 +500,9 @@ fn hover_bar(
     const CELL: f32 = 32.0;
     let p = colors();
     let more_id = egui::Id::unique(("message-more", conversation, &m.id));
-    let menu_open = egui::Popup::is_id_open(ui.ctx(), more_id);
-    let cells = QUICK_REACTIONS.len() + 2;
+    let emoji_id = egui::Id::unique(("message-emoji", conversation, &m.id));
+    let menu_open = egui::Popup::is_id_open(ui.ctx(), more_id) || egui::Popup::is_id_open(ui.ctx(), emoji_id);
+    let cells = QUICK_REACTIONS.len() + 3;
     let size = vec2(CELL * cells as f32 + 8.0, CELL + 6.0);
     let x = if mine { bubble.left() + 8.0 } else { (bubble.right() - size.x - 8.0).max(bubble.left() + 8.0) };
     // Inside the list, whatever the bubble's width (a short one of the user's sits at
@@ -552,8 +554,26 @@ fn hover_bar(
             action = Some(Action::React { message: m.id.clone(), key: key.to_string() });
         }
     }
-    // Quote: reply with this message quoted.
+    // Any other emoji, from the whole set.
     let rect = cell(QUICK_REACTIONS.len());
+    let others = ui.interact(rect, ui.scope_id().with(("emoji", &m.id)), Sense::click()).on_hover_text("More reactions");
+    if others.hovered() || egui::Popup::is_id_open(ui.ctx(), emoji_id) {
+        ui.painter().rect_filled(rect.shrink(1.0), CornerRadius::same(8), p.hover);
+    }
+    icons::paint(ui.painter(), Rect::from_center_size(rect.center(), vec2(18.0, 18.0)), Icon::Smile, p.dim);
+    egui::Popup::menu(&others).id(emoji_id).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
+        let state = egui::Id::unique(("message-emoji-query", &m.id));
+        let mut picker = ui.ctx().data_mut(|d| d.get_temp::<emoji_picker::Picker>(state)).unwrap_or_default();
+        let picked = emoji_picker::show(ui, pictures, &mut picker, &m.id);
+        ui.ctx().data_mut(|d| d.insert_temp(state, picker));
+        if let Some(e) = picked {
+            action = Some(Action::React { message: m.id.clone(), key: e.key.to_string() });
+            ui.ctx().data_mut(|d| d.remove::<emoji_picker::Picker>(state));
+            ui.close();
+        }
+    });
+    // Quote: reply with this message quoted.
+    let rect = cell(QUICK_REACTIONS.len() + 1);
     let quote = ui.interact(rect, ui.scope_id().with(("quote", &m.id)), Sense::click()).on_hover_text("Reply with quote");
     if quote.hovered() {
         ui.painter().rect_filled(rect.shrink(1.0), CornerRadius::same(8), p.hover);
@@ -563,7 +583,7 @@ fn hover_bar(
         action = Some(Action::Quote(m.clone()));
     }
     // More: the rest of the message's menu.
-    let rect = cell(QUICK_REACTIONS.len() + 1);
+    let rect = cell(QUICK_REACTIONS.len() + 2);
     let more = ui.interact(rect, ui.scope_id().with(("more", &m.id)), Sense::click()).on_hover_text("More actions");
     if more.hovered() || menu_open {
         ui.painter().rect_filled(rect.shrink(1.0), CornerRadius::same(8), p.hover);
@@ -1127,21 +1147,11 @@ pub fn composer(ui: &mut Ui, ws: &mut Workspace, rect: Rect, hint: &str, reply: 
         picker = picker.open_memory(egui::SetOpenCommand::Bool(true));
     }
     picker.show(|ui| {
-        ui.spacing_mut().item_spacing = vec2(2.0, 2.0);
-        egui::Grid::new("emoji-picker").spacing(vec2(2.0, 2.0)).show(ui, |ui| {
-            for (i, (key, ch)) in crate::model::emoji::PICKER.iter().enumerate() {
-                let button = match ws.pictures.get(&Picture::Emoji(key.to_string())) {
-                    Some(texture) => egui::Button::image(egui::Image::new((texture, vec2(26.0, 26.0)))),
-                    None => egui::Button::new(RichText::new(*ch).size(20.0)),
-                };
-                if ui.add(button.frame(false).min_size(vec2(36.0, 36.0))).on_hover_text(*key).clicked() {
-                    emoji = Some(*ch);
-                }
-                if i % 8 == 7 {
-                    ui.end_row();
-                }
-            }
-        });
+        if let Some(e) = emoji_picker::show(ui, &mut ws.pictures, &mut ws.emoji_picker, if reply { "reply" } else { "composer" }) {
+            emoji = Some(e.ch);
+            ws.emoji_picker.query.clear();
+            ui.close();
+        }
     });
     if let Some(ch) = emoji {
         ws.draft_mut(reply).push_str(ch);

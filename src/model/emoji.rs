@@ -46,9 +46,122 @@ pub const PICKER: [(&str, &str); 40] = [
     ("bug", "🐛"),
 ];
 
-/// The key of an emoji character (a trailing variation selector is ignored).
+/// The key of an emoji character (a trailing variation selector is ignored): the
+/// picker's own first, then Teams' catalog (emoji proper, not the letter-like
+/// symbols it also has, such as © or ™).
 pub fn key_of(ch: char) -> Option<&'static str> {
-    PICKER.iter().find(|(_, c)| c.starts_with(ch) && c.chars().count() == 1).map(|(k, _)| *k)
+    if let Some((key, _)) = PICKER.iter().find(|(_, c)| c.starts_with(ch) && c.chars().count() == 1) {
+        return Some(key);
+    }
+    if (ch as u32) < 0x2600 {
+        return None;
+    }
+    catalog().by_char.get(&ch).map(|&i| catalog().emoji[i].key)
+}
+
+/// The character of an emoji by its key, from Teams' catalog.
+pub fn char_of(key: &str) -> Option<&'static str> {
+    catalog().by_key.get(key).map(|&i| catalog().emoji[i].ch)
+}
+
+/// An emoji of Teams' catalog.
+#[derive(Debug)]
+pub struct Emoji {
+    pub key: &'static str,
+    /// The character(s).
+    pub ch: &'static str,
+    pub name: &'static str,
+    /// Words it's found by, lowercase, space-separated.
+    pub keywords: &'static str,
+    /// Its category, an index into [`Catalog::categories`].
+    pub category: usize,
+    /// How often it's used, 1 the most.
+    pub rank: u32,
+}
+
+/// Teams' emoji, by category, as `scripts/emoji-catalog.py` writes them.
+pub struct Catalog {
+    pub categories: Vec<&'static str>,
+    /// In the catalog's order (by category); one per character.
+    pub emoji: Vec<Emoji>,
+    by_char: std::collections::HashMap<char, usize>,
+    /// Every key the catalog has (characters listed twice, too).
+    by_key: std::collections::HashMap<&'static str, usize>,
+}
+
+pub fn catalog() -> &'static Catalog {
+    static CATALOG: std::sync::OnceLock<Catalog> = std::sync::OnceLock::new();
+    CATALOG.get_or_init(|| parse_catalog(include_str!("../../assets/emoji/catalog.tsv")))
+}
+
+fn parse_catalog(text: &'static str) -> Catalog {
+    let mut catalog = Catalog {
+        categories: Vec::new(),
+        emoji: Vec::new(),
+        by_char: std::collections::HashMap::new(),
+        by_key: std::collections::HashMap::new(),
+    };
+    let mut seen: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for line in text.lines() {
+        if let Some(category) = line.strip_prefix('#') {
+            catalog.categories.push(category.split_once('\t').map_or("", |(_, title)| title));
+            continue;
+        }
+        let mut fields = line.split('\t');
+        let (Some(category), Some(key), Some(ch), Some(name), Some(keywords), Some(rank)) =
+            (fields.next(), fields.next(), fields.next(), fields.next(), fields.next(), fields.next())
+        else {
+            continue;
+        };
+        // The catalog has some characters more than once (an animation of its own,
+        // an old name): the plain emoji is the one keyed by its code point.
+        let plain = ch.chars().next().is_some_and(|c| key.starts_with(&format!("{:x}_", c as u32)));
+        catalog.by_key.insert(key, seen.get(ch).copied().unwrap_or(catalog.emoji.len()));
+        if let Some(&at) = seen.get(ch) {
+            if plain && !catalog.emoji[at].key.starts_with(&format!("{:x}_", ch.chars().next().map_or(0, |c| c as u32))) {
+                catalog.emoji[at].key = key;
+                catalog.emoji[at].name = name;
+            }
+            continue;
+        }
+        seen.insert(ch, catalog.emoji.len());
+        let mut chars = ch.chars().filter(|c| *c != '\u{fe0f}');
+        if let (Some(single), None) = (chars.next(), chars.next()) {
+            catalog.by_char.insert(single, catalog.emoji.len());
+        }
+        catalog.emoji.push(Emoji { key, ch, name, keywords, category: category.parse().unwrap_or(0), rank: rank.parse().unwrap_or(9999) });
+    }
+    catalog
+}
+
+/// The emoji whose name or keywords match `query`, the best first: a name starting
+/// with it, then a word of the name or a keyword starting with it, then anywhere;
+/// the more used first within each.
+pub fn search(query: &str) -> Vec<&'static Emoji> {
+    let query = query.trim().to_lowercase();
+    if query.is_empty() {
+        return Vec::new();
+    }
+    let mut found: Vec<(u8, u32, &'static Emoji)> = catalog()
+        .emoji
+        .iter()
+        .filter_map(|e| {
+            let name = e.name.to_lowercase();
+            let starts_word = |text: &str| text.split(|c: char| !c.is_alphanumeric()).any(|w| w.starts_with(&query));
+            let score = if name.starts_with(&query) {
+                0
+            } else if starts_word(&name) || starts_word(e.keywords) {
+                1
+            } else if name.contains(&query) || e.keywords.contains(&query) {
+                2
+            } else {
+                return None;
+            };
+            Some((score, e.rank, e))
+        })
+        .collect();
+    found.sort_by_key(|(score, rank, _)| (*score, *rank));
+    found.into_iter().map(|(_, _, e)| e).collect()
 }
 
 /// The Teams markup of an emoji, as its composer sends it.
@@ -70,5 +183,26 @@ mod tests {
         assert_eq!(key_of('❤'), Some("heart"));
         assert_eq!(key_of('a'), None);
         assert!(html("smile", "🙂").contains("itemid=\"smile\""));
+        // From the catalog, not the picker.
+        assert_eq!(key_of('🍕'), Some("pizzaslice"));
+        assert_eq!(key_of('😃'), Some("1f603_grinningfacewithbigeyes"));
+        assert_eq!(key_of('©'), None);
+    }
+
+    #[test]
+    fn reads_the_catalog() {
+        let c = catalog();
+        assert_eq!(c.categories.first().copied(), Some("Smilies"));
+        assert!(c.emoji.len() > 1000);
+        assert!(c.emoji.iter().all(|e| e.category < c.categories.len()));
+    }
+
+    #[test]
+    fn searches_by_name_and_keyword() {
+        assert_eq!(search("fox").first().map(|e| e.ch), Some("🦊"));
+        assert!(search("pizza").iter().any(|e| e.ch == "🍕"));
+        assert!(search("  ").is_empty());
+        assert_eq!(char_of("pizzaslice"), Some("🍕"));
+        assert_eq!(char_of("happyface"), Some("😃"));
     }
 }

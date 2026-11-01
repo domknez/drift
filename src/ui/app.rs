@@ -119,6 +119,10 @@ impl App {
             if std::env::var_os("DRIFT_DEMO_PEOPLE").is_some() {
                 workspace.side = crate::ui::workspace::Side::People;
             }
+            // DRIFT_DEMO_EMOJI=<search>: the picker open, with that searched.
+            if let Ok(query) = std::env::var("DRIFT_DEMO_EMOJI") {
+                workspace.emoji_picker.query = query;
+            }
             if let Ok(filter) = std::env::var("DRIFT_DEMO_FILTER") {
                 workspace.filter = filter;
             }
