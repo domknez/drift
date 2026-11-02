@@ -232,7 +232,11 @@ fn send(socket: &mut Socket, frame: String) -> Result<()> {
 fn register(teams: &Teams, surl: &str, endpoint: &str) -> Result<()> {
     let skype = teams.session().skype()?;
     let bearer = format!("Bearer {}", teams.session().access(SPACES)?);
-    let one = |app: &str, template: &str, path: &str| {
+    // Each kind of service registers under an id of its own: one id again replaces the
+    // registration made with it (the chat service's is the endpoint's).
+    static CALLS_ID: std::sync::OnceLock<(String, String)> = std::sync::OnceLock::new();
+    let (calls_id, spaces_id) = CALLS_ID.get_or_init(|| (uuid(), uuid()));
+    let one = |app: &str, template: &str, path: &str, id: &str| {
         let body = json!({
             "clientDescription": {
                 "appId": app,
@@ -242,7 +246,7 @@ fn register(teams: &Teams, surl: &str, endpoint: &str) -> Result<()> {
                 "templateKey": template,
                 "platformUIVersion": CLIENT_VERSION,
             },
-            "registrationId": endpoint,
+            "registrationId": id,
             "nodeId": "",
             "transports": {"TROUTER": [{"context": "", "path": path, "ttl": REGISTRATION_TTL}]},
         });
@@ -255,14 +259,19 @@ fn register(teams: &Teams, surl: &str, endpoint: &str) -> Result<()> {
         .map(|_| ())
     };
     // Calls are a nicety: without them messages still come.
-    if let Err(e) = one("NextGenCalling", "DesktopNgc_2.3:SkypeNgc", &format!("{surl}{CALLS}")) {
-        log_warn!("trouter: no call notices: {e}");
+    for (app, template, path, id) in
+        [("NextGenCalling", "DesktopNgc_2.3:SkypeNgc", CALLS, calls_id), ("SkypeSpacesWeb", "SkypeSpacesWeb_2.3", SPACES_CALLS, spaces_id)]
+    {
+        if let Err(e) = one(app, template, &format!("{surl}{path}"), id) {
+            log_warn!("trouter: no call notices from {app}: {e}");
+        }
     }
-    one("TeamsCDLWebWorker", "TeamsCDLWebWorker_2.1", surl)
+    one("TeamsCDLWebWorker", "TeamsCDLWebWorker_2.1", surl, endpoint)
 }
 
-/// Where call notices come, after the socket's own address.
+/// Where call notices come, after the socket's own address (two services send them).
 const CALLS: &str = "NGCallManagerWin";
+const SPACES_CALLS: &str = "SkypeSpacesWeb";
 
 /// A call notice: someone calling (event 107) — who, as the call service says it.
 /// Its details come gzipped and in Base64 (`cp`).
@@ -285,7 +294,8 @@ fn call_of(body: &Value) -> Option<Push> {
 
 /// What a forwarded request says changed.
 fn pushes(url: &str, body: &Value) -> Vec<Push> {
-    if url.ends_with(CALLS) {
+    if url.ends_with(CALLS) || url.contains(&format!("/{SPACES_CALLS}")) {
+        log_debug!("trouter: call event {}", body["evt"]);
         return call_of(body).into_iter().collect();
     }
     if !url.ends_with("/messaging") || body["type"] != "EventMessage" {
