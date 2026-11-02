@@ -45,6 +45,8 @@ pub struct Workspace {
     pub chip: Chip,
     /// The calendar from yesterday to two weeks on; None until loaded.
     pub meetings: Option<Vec<Meeting>>,
+    /// Meetings already reminded of (by id).
+    reminded: HashSet<String>,
     meetings_load: Load<Vec<Meeting>, Error>,
     meetings_at: Option<Instant>,
     /// When the workspace opened, and when everything the start-up screen waits for
@@ -249,6 +251,7 @@ impl Workspace {
             section: Section::Chats,
             chip: Chip::All,
             meetings: None,
+            reminded: HashSet::new(),
             meetings_load: Load::Idle,
             meetings_at: None,
             presence: HashMap::new(),
@@ -562,6 +565,48 @@ impl Workspace {
                 let _ = tx.send(id);
                 ctx.request_repaint();
             });
+        }
+    }
+
+    /// A notification a minute before each meeting the user hasn't declined, once;
+    /// clicking it joins (or opens the meeting's chat). One that started a little
+    /// while ago (drift was just opened) is reminded of too.
+    fn remind_meetings(&mut self, ctx: &egui::Context) {
+        const BEFORE: i64 = 60_000;
+        const STILL_AFTER: i64 = 5 * 60_000;
+        let Some(meetings) = &self.meetings else { return };
+        let now = crate::model::time::now_ms();
+        let mut next: Option<i64> = None;
+        for m in meetings.iter().filter(|m| !m.cancelled && m.response != "Decline") {
+            if now < m.start - BEFORE {
+                next = Some(next.map_or(m.start - BEFORE, |n| n.min(m.start - BEFORE)));
+                continue;
+            }
+            if now > m.start + STILL_AFTER || !self.reminded.insert(m.id.clone()) || !self.notifications {
+                continue;
+            }
+            let minutes = (m.start - now) / 60_000;
+            let when = match minutes {
+                1.. => format!("Starts in {minutes} min"),
+                0 if m.start >= now => "Starts in less than a minute".to_string(),
+                _ if now - m.start < 60_000 => "Starting now".to_string(),
+                _ => format!("Started {} min ago", (now - m.start) / 60_000),
+            };
+            let body = if m.join_url.is_some() { format!("{when}. Click to join.") } else { when };
+            let (join, chat, tx, ctx2) = (m.join_url.clone(), m.chat.clone(), self.clicked.0.clone(), ctx.clone());
+            crate::notify::show(&m.subject, Some("Meeting"), &body, move || {
+                match (join, chat) {
+                    (Some(url), _) => ctx2.open_url(egui::OpenUrl::new_tab(url)),
+                    (None, Some(chat)) => {
+                        let _ = tx.send(chat);
+                    }
+                    (None, None) => {}
+                }
+                ctx2.request_repaint();
+            });
+        }
+        if let Some(at) = next {
+            ctx.request_repaint_after(Duration::from_millis((at - now).clamp(0, 3_600_000) as u64));
         }
     }
 
@@ -889,6 +934,7 @@ impl Workspace {
                 Err(e) => log_warn!("calendar: {e}"),
             }
         }
+        self.remind_meetings(ctx);
         if let Some(result) = self.activity_load.take() {
             match result {
                 Ok(items) => self.activity = Some(items),
