@@ -1093,7 +1093,9 @@ pub fn composer(ui: &mut Ui, ws: &mut Workspace, rect: Rect, hint: &str, reply: 
     let id = composer_id(reply);
     let focused = ui.memory(|m| m.has_focus(id));
     let people = mention_matches(ws, reply);
+    let emoji_found = emoji_matches(ws, reply);
     let mut pick = None;
+    let mut pick_emoji = None;
     if focused {
         let empty = ws.draft(reply).trim().is_empty();
         if empty
@@ -1112,6 +1114,13 @@ pub fn composer(ui: &mut Ui, ws: &mut Workspace, rect: Rect, hint: &str, reply: 
             })
         {
             pick = Some(first.clone());
+        }
+        if let Some(first) = emoji_found.as_ref().and_then(|e| e.first())
+            && ui.input_mut(|i| {
+                i.consume_key(egui::Modifiers::NONE, egui::Key::Tab) || i.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
+            })
+        {
+            pick_emoji = Some(first.clone());
         }
     }
 
@@ -1180,6 +1189,7 @@ pub fn composer(ui: &mut Ui, ws: &mut Workspace, rect: Rect, hint: &str, reply: 
                     .inner_margin(Margin::same(6))
                     .show(ui, |ui| {
                         ui.set_width(popup.width() - 12.0);
+                        ui.spacing_mut().item_spacing.y = 0.0;
                         for (i, person) in people.iter().enumerate() {
                             let (r, click) = ui.allocate_exact_size(vec2(ui.available_width(), row_h), Sense::click());
                             if i == 0 || click.hovered() {
@@ -1200,7 +1210,65 @@ pub fn composer(ui: &mut Ui, ws: &mut Workspace, rect: Rect, hint: &str, reply: 
                     });
             });
     }
-    let picked = pick.is_some();
+    // Emoji to put in, above the box, while a :name is being typed.
+    if let Some(found) = emoji_found.filter(|e| !e.is_empty())
+        && response.has_focus()
+    {
+        let row_h = 34.0;
+        let h = row_h * found.len() as f32 + 12.0;
+        let popup = Rect::from_min_size(pos2(inner.left(), inner.top() - h - 6.0), vec2(280.0, h));
+        egui::Area::new(egui::Id::unique(if reply { "emoji-reply" } else { "emoji" }))
+            .order(egui::Order::Foreground)
+            .fixed_pos(popup.min)
+            .show(ui.ctx(), |ui| {
+                Frame::new()
+                    .fill(p.panel)
+                    .stroke(Stroke::new(1.0, p.line))
+                    .corner_radius(CornerRadius::same(12))
+                    .inner_margin(Margin::same(6))
+                    .show(ui, |ui| {
+                        ui.set_width(popup.width() - 12.0);
+                        ui.spacing_mut().item_spacing.y = 0.0;
+                        for (i, e) in found.iter().enumerate() {
+                            let (r, click) = ui.allocate_exact_size(vec2(ui.available_width(), row_h), Sense::click());
+                            if i == 0 || click.hovered() {
+                                ui.painter().rect_filled(r, CornerRadius::same(8), p.hover);
+                            }
+                            let face = Rect::from_center_size(pos2(r.left() + 20.0, r.center().y), vec2(22.0, 22.0));
+                            match ws.pictures.get(&Picture::Emoji(e.key.clone())) {
+                                Some(texture) => egui::Image::new((texture, face.size())).paint_at(ui, face),
+                                None => {
+                                    let shown = e.ch.unwrap_or("·");
+                                    ui.painter().text(
+                                        face.center(),
+                                        egui::Align2::CENTER_CENTER,
+                                        shown,
+                                        egui::FontId::proportional(18.0),
+                                        p.text,
+                                    );
+                                }
+                            }
+                            let name = egui::pos2(face.right() + 10.0, r.center().y);
+                            ui.painter().text(name, egui::Align2::LEFT_CENTER, &e.label, ty::small_strong(), p.text);
+                            if click.clicked() {
+                                pick_emoji = Some(e.clone());
+                            }
+                        }
+                    });
+            });
+    }
+    let picked = pick.is_some() || pick_emoji.is_some();
+    if let Some(e) = pick_emoji {
+        ws.used_emoji(&e.key);
+        let draft = ws.draft_mut(reply);
+        if let Some(at) = draft.rfind(':') {
+            draft.truncate(at);
+        }
+        draft.push_str(&e.text);
+        draft.push(' ');
+        set_cursor_to_end(ui, id, ws.draft(reply));
+        response.request_focus();
+    }
     if let Some(person) = pick {
         insert_mention(ws.draft_mut(reply), &person.name);
         set_cursor_to_end(ui, id, ws.draft(reply));
@@ -1302,6 +1370,47 @@ fn mention_matches(ws: &Workspace, reply: bool) -> Option<Vec<crate::model::mark
         .take(6)
         .collect();
     Some(people)
+}
+
+/// An emoji offered while `:name` is typed: its key, the text it puts in (the
+/// character, or `:name:` of the organisation's own), and how it's listed.
+#[derive(Clone)]
+struct Suggestion {
+    key: String,
+    text: String,
+    label: String,
+    ch: Option<&'static str>,
+}
+
+/// Emoji for the `:word` at the end of the draft (two letters at least, after a
+/// space or at the start, so times like 10:30 aren't taken for one).
+fn emoji_matches(ws: &Workspace, reply: bool) -> Option<Vec<Suggestion>> {
+    let draft = ws.draft(reply);
+    let at = draft.rfind(':')?;
+    if draft[..at].chars().last().is_some_and(|c| !c.is_whitespace()) {
+        return None;
+    }
+    let typed = &draft[at + 1..];
+    let length = typed.chars().count();
+    if !(2..=30).contains(&length) || !typed.chars().all(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '+')) {
+        return None;
+    }
+    let typed = typed.to_lowercase();
+    // The organisation's first: they're what can't be typed any other way.
+    let mut found: Vec<Suggestion> = ws
+        .custom_emoji
+        .iter()
+        .filter(|e| e.name.to_lowercase().contains(&typed) || e.keywords.iter().any(|k| k.starts_with(&typed)))
+        .map(|e| Suggestion { key: e.key.clone(), text: format!(":{}:", e.name), label: format!(":{}:", e.name), ch: None })
+        .collect();
+    found.extend(crate::model::emoji::search(&typed).into_iter().map(|e| Suggestion {
+        key: e.key.to_string(),
+        text: e.ch.to_string(),
+        label: e.name.to_string(),
+        ch: Some(e.ch),
+    }));
+    found.truncate(6);
+    Some(found)
 }
 
 /// Swap the `@word` at the end of the draft for `@Full Name `.
