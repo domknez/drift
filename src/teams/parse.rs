@@ -150,7 +150,10 @@ fn preview(m: &Value) -> Option<Preview> {
     let html = str_of(m, &["messagetype", "messageType"]).is_some_and(|t| t.starts_with("RichText"));
     let body = if html { text::from_html(content) } else { text::plain(content) };
     let author = str_of(m, &["imdisplayname", "imDisplayName"]).unwrap_or("").to_string();
-    Some(Preview { author, text: text::flatten(&body), at })
+    // `from` is a link ending in the author's id.
+    let from = str_of(m, &["from"]).unwrap_or("");
+    let author_id = from.rsplit('/').next().unwrap_or(from).to_string();
+    Some(Preview { author, author_id, text: text::flatten(&body), at })
 }
 
 /// A message list from the chat service, oldest first. Control messages, call and

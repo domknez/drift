@@ -85,6 +85,8 @@ impl Picture {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Preview {
     pub author: String,
+    /// Who wrote it, by id (empty if the service didn't say).
+    pub author_id: String,
     pub text: String,
     /// Unix milliseconds.
     pub at: i64,

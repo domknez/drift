@@ -630,7 +630,7 @@ pub fn lead(ui: &mut Ui, ws: &mut Workspace, c: &Conversation, rect: Rect, behin
 fn preview(ws: &Workspace, c: &Conversation) -> String {
     let Some(last) = &c.last else { return String::new() };
     let first = last.author.split_whitespace().next().unwrap_or("");
-    if last.author == ws.me {
+    if (!last.author_id.is_empty() && last.author_id == ws.me_id) || (last.author_id.is_empty() && last.author == ws.me) {
         format!("You: {}", last.text)
     } else if last.author.is_empty() || (c.kind == Kind::Chat && last.author == c.title) {
         last.text.clone()

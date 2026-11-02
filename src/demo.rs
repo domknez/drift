@@ -45,7 +45,12 @@ fn chat(id: &str, kind: Kind, title: &str, last: (&str, &str, i64), unread: bool
         id: id.into(),
         kind,
         title: title.into(),
-        last: Some(Preview { author: last.0.into(), text: last.1.into(), at: last.2 }),
+        last: Some(Preview {
+            author: last.0.into(),
+            author_id: if last.0 == "You" { ME.into() } else { String::new() },
+            text: last.1.into(),
+            at: last.2,
+        }),
         unread,
         read_up_to: None,
         pinned: false,
@@ -68,7 +73,7 @@ fn channel_preview(id: &str) -> Preview {
         "19:side@thread.tacv2" => ("Priya Nair", "Build 0.4 is up for testing", today(11, 0) - 30 * 86_400_000),
         _ => ("Lea Novak", "Welcome to Halcyon!", today(11, 0) - 20 * 86_400_000),
     };
-    Preview { author: author.into(), text: text.into(), at }
+    Preview { author: author.into(), author_id: String::new(), text: text.into(), at }
 }
 
 fn channel(id: &str, name: &str, general: bool, unread: bool, pinned: bool) -> Channel {

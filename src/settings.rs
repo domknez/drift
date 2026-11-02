@@ -41,8 +41,12 @@ fn write_drafts(path: &Path, drafts: &std::collections::HashMap<String, String>)
             _ => Ok(()),
         }
     } else {
+        // Written aside and renamed over: a crash mid-write leaves the old file whole.
         let dir = path.parent().unwrap_or(Path::new("."));
-        std::fs::create_dir_all(dir).and_then(|()| std::fs::write(path, serde_json::to_vec(drafts).unwrap_or_default()))
+        let aside = path.with_extension("json.new");
+        std::fs::create_dir_all(dir)
+            .and_then(|()| std::fs::write(&aside, serde_json::to_vec(drafts).unwrap_or_default()))
+            .and_then(|()| std::fs::rename(&aside, path))
     };
     if let Err(e) = result {
         log_warn!("could not save drafts to {}: {e}", path.display());

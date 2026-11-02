@@ -6,7 +6,7 @@ use super::pictures::Pictures;
 use crate::backend::{Backend, Error, Push};
 use crate::model::markdown::{self, Mention};
 use crate::model::{
-    Availability, Conversation, ConversationId, Directory, Kind, Meeting, Message, Picture, Presence, SearchHit, Status, text,
+    Availability, Conversation, ConversationId, Directory, Kind, Meeting, Message, Picture, Presence, Preview, SearchHit, Status, text,
 };
 use eframe::egui;
 use std::collections::{HashMap, HashSet};
@@ -632,6 +632,16 @@ impl Workspace {
         self.chores.push((Chore::React, Load::start(ctx, move || backend.react(&open, &message, &key, add).map(|()| true))));
     }
 
+    /// Whether the user wrote a conversation's newest message (by id when the service
+    /// says who, else by name); unknown authors count as the user's (no notification).
+    fn is_mine(&self, last: &Preview) -> bool {
+        if !last.author_id.is_empty() && !self.me_id.is_empty() {
+            last.author_id == self.me_id
+        } else {
+            last.author.is_empty() || last.author == self.me
+        }
+    }
+
     /// Notifications for messages newer than the last ones seen: in chats and meeting
     /// chats (not the user's own, not muted ones, not the one on screen while drift is
     /// in front), in channels followed in drift every post, and in other channels only
@@ -647,8 +657,8 @@ impl Workspace {
             let fresh = self.seen_once && newer && !c.muted && !on_screen;
             let followed = c.kind == Kind::Channel && self.is_following(&c.id);
             match c.kind {
-                Kind::Chat | Kind::Meeting if fresh && last.author != self.me && !last.author.is_empty() => new.push(c),
-                Kind::Channel if followed && fresh && last.author != self.me && !last.author.is_empty() => new.push(c),
+                Kind::Chat | Kind::Meeting if fresh && !self.is_mine(last) => new.push(c),
+                Kind::Channel if followed && fresh && !self.is_mine(last) => new.push(c),
                 Kind::Feed if fresh && self.notifications => {
                     let (tx, id, ctx) = (self.clicked.0.clone(), c.id.clone(), ctx.clone());
                     let body: String = last.text.chars().take(160).collect();
@@ -725,17 +735,16 @@ impl Workspace {
     /// clicking it joins (or opens the meeting's chat). One that started a little
     /// while ago (drift was just opened) is reminded of too.
     fn remind_meetings(&mut self, ctx: &egui::Context) {
-        const BEFORE: i64 = 60_000;
-        const STILL_AFTER: i64 = 5 * 60_000;
         let Some(meetings) = &self.meetings else { return };
         let now = crate::model::time::now_ms();
-        let mut next: Option<i64> = None;
-        for m in meetings.iter().filter(|m| !m.cancelled && m.response != "Decline") {
-            if now < m.start - BEFORE {
-                next = Some(next.map_or(m.start - BEFORE, |n| n.min(m.start - BEFORE)));
-                continue;
-            }
-            if now > m.start + STILL_AFTER || !self.reminded.insert(m.id.clone()) || !self.notifications {
+        let (due, next) = reminders(meetings, now, &self.reminded);
+        let due: Vec<Meeting> = due.into_iter().cloned().collect();
+        if let Some(at) = next {
+            ctx.request_repaint_after(Duration::from_millis((at - now).clamp(0, 3_600_000) as u64));
+        }
+        for m in due {
+            self.reminded.insert(reminder_key(&m));
+            if !self.notifications {
                 continue;
             }
             let minutes = (m.start - now) / 60_000;
@@ -757,9 +766,6 @@ impl Workspace {
                 }
                 ctx2.request_repaint();
             });
-        }
-        if let Some(at) = next {
-            ctx.request_repaint_after(Duration::from_millis((at - now).clamp(0, 3_600_000) as u64));
         }
     }
 
@@ -1441,6 +1447,31 @@ fn person(c: &Conversation) -> Option<&str> {
     }
 }
 
+/// How long before a meeting it's reminded of, and how long after its start still.
+const REMIND_BEFORE: i64 = 60_000;
+const REMIND_AFTER: i64 = 5 * 60_000;
+
+/// A meeting as reminded of: by id and start, so a meeting moved is reminded of again.
+fn reminder_key(m: &Meeting) -> String {
+    format!("{}@{}", m.id, m.start)
+}
+
+/// The meetings to remind of now (not cancelled, not declined, not yet reminded),
+/// and when the next one is due.
+fn reminders<'a>(meetings: &'a [Meeting], now: i64, reminded: &HashSet<String>) -> (Vec<&'a Meeting>, Option<i64>) {
+    let mut due = Vec::new();
+    let mut next: Option<i64> = None;
+    for m in meetings.iter().filter(|m| !m.cancelled && m.response != "Decline") {
+        let from = m.start - REMIND_BEFORE;
+        if now < from {
+            next = Some(next.map_or(from, |n| n.min(from)));
+        } else if now <= m.start + REMIND_AFTER && !reminded.contains(&reminder_key(m)) {
+            due.push(m);
+        }
+    }
+    (due, next)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1496,6 +1527,39 @@ mod tests {
         ws.undo_delete();
         assert_eq!(ws.messages.iter().flatten().map(|m| m.id.clone()).collect::<Vec<_>>(), before);
         assert!(ws.pending_delete.is_none());
+    }
+
+    #[test]
+    fn meetings_are_reminded_of_once_a_minute_before() {
+        let meeting = |id: &str, start: i64| Meeting {
+            id: id.into(),
+            subject: "Stand-up".into(),
+            start,
+            end: start + 900_000,
+            organizer: String::new(),
+            location: String::new(),
+            join_url: None,
+            chat: None,
+            cancelled: false,
+            response: "Accept".into(),
+        };
+        let start = 10_000_000;
+        let none = HashSet::new();
+        let ids = |(due, _): (Vec<&Meeting>, Option<i64>)| due.iter().map(|m| m.id.clone()).collect::<Vec<_>>();
+        let m = [meeting("a", start)];
+        assert!(ids(reminders(&m, start - 61_000, &none)).is_empty());
+        assert_eq!(reminders(&m, start - 61_000, &none).1, Some(start - 60_000));
+        assert_eq!(ids(reminders(&m, start - 59_000, &none)), ["a"]);
+        assert_eq!(ids(reminders(&m, start + 299_000, &none)), ["a"]);
+        assert!(ids(reminders(&m, start + 301_000, &none)).is_empty());
+        let once = HashSet::from([reminder_key(&m[0])]);
+        assert!(ids(reminders(&m, start - 30_000, &once)).is_empty());
+        // Moved: reminded again.
+        let moved = [meeting("a", start + 3_600_000)];
+        assert_eq!(ids(reminders(&moved, start + 3_600_000 - 30_000, &once)), ["a"]);
+        let declined = [Meeting { response: "Decline".into(), ..meeting("b", start) }];
+        let cancelled = [Meeting { cancelled: true, ..meeting("c", start) }];
+        assert!(ids(reminders(&declined, start, &none)).is_empty() && ids(reminders(&cancelled, start, &none)).is_empty());
     }
 
     #[test]
