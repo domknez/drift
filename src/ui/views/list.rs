@@ -719,6 +719,17 @@ pub fn conversation_menu(ui: &mut Ui, ws: &mut Workspace, c: &Conversation) {
         ws.set_muted(&c.id, !c.muted);
         ui.close();
     }
+    if c.kind == Kind::Channel {
+        let following = ws.is_following(&c.id);
+        if ui
+            .button(if following { "Stop notifying about every post" } else { "Notify about every post" })
+            .on_hover_text("A notification for each new post and reply in this channel")
+            .clicked()
+        {
+            ws.set_following(&c.id, !following);
+            ui.close();
+        }
+    }
     if ui.button(if c.pinned { "Unpin" } else { "Pin to the top" }).clicked() {
         ws.set_pinned(ui.ctx(), &c.id, !c.pinned);
         ui.close();

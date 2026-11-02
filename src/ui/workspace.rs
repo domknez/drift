@@ -158,6 +158,8 @@ pub struct Workspace {
     pub hidden: Option<HashMap<String, i64>>,
     /// Conversations muted in drift (None until the saved ones are in).
     pub muted_here: Option<HashSet<String>>,
+    /// Channels followed in drift: every new post notifies (None until the saved ones are in).
+    pub following: Option<HashSet<String>>,
     /// Emoji picked lately (keys, the latest first; None until the saved ones are in).
     pub recent_emoji: Option<Vec<String>>,
     /// The height of the text in the composer and in the thread's (as last drawn).
@@ -303,6 +305,7 @@ impl Workspace {
             switcher: None,
             recent: Vec::new(),
             muted_here: None,
+            following: None,
             hidden: None,
             composer_text: [20.0; 2],
             viewing: None,
@@ -482,8 +485,8 @@ impl Workspace {
 
     /// Notifications for messages newer than the last ones seen: in chats and meeting
     /// chats (not the user's own, not muted ones, not the one on screen while drift is
-    /// in front), and in channels only what Activity shows (mentions, replies). The
-    /// first list only sets what's been seen.
+    /// in front), in channels followed in drift every post, and in other channels only
+    /// what Activity shows (mentions, replies). The first list only sets what's been seen.
     fn notify_new(&mut self, ctx: &egui::Context, directory: &Directory) {
         let focused = ctx.input(|i| i.viewport().focused.unwrap_or(true));
         let mut new: Vec<&Conversation> = Vec::new();
@@ -493,8 +496,10 @@ impl Workspace {
             let newer = before.is_none_or(|at| last.at > at);
             let on_screen = focused && self.open.as_deref() == Some(c.id.as_str());
             let fresh = self.seen_once && newer && !c.muted && !on_screen;
+            let followed = c.kind == Kind::Channel && self.is_following(&c.id);
             match c.kind {
                 Kind::Chat | Kind::Meeting if fresh && last.author != self.me && !last.author.is_empty() => new.push(c),
+                Kind::Channel if followed && fresh && last.author != self.me && !last.author.is_empty() => new.push(c),
                 Kind::Feed if fresh && self.notifications => {
                     let (tx, id, ctx) = (self.clicked.0.clone(), c.id.clone(), ctx.clone());
                     let body: String = last.text.chars().take(160).collect();
@@ -715,6 +720,20 @@ impl Workspace {
         if let Some(c) = self.directory.as_mut().and_then(|d| d.conversations.iter_mut().find(|c| c.id == id)) {
             c.muted = muted;
         }
+    }
+
+    /// Follow a channel in drift (a notification for every new post), or stop.
+    pub fn set_following(&mut self, id: &str, on: bool) {
+        let set = self.following.get_or_insert_default();
+        if on {
+            set.insert(id.to_string());
+        } else {
+            set.remove(id);
+        }
+    }
+
+    pub fn is_following(&self, id: &str) -> bool {
+        self.following.as_ref().is_some_and(|f| f.contains(id))
     }
 
     /// Mark the open conversation read up to its newest message, once per message.

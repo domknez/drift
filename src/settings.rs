@@ -51,6 +51,8 @@ pub struct Prefs {
     pub notifications: bool,
     /// Conversations muted in drift (their ids): no notifications, not counted unread.
     pub muted: Vec<String>,
+    /// Channels followed in drift (their ids): a notification for every new post.
+    pub following: Vec<String>,
     /// The sidebar sections folded away, by key; None for drift's defaults.
     pub folded: Option<Vec<String>>,
     /// Conversations hidden in drift, each with when (Unix ms): they're listed again
@@ -94,6 +96,7 @@ impl Prefs {
             // "-" for none folded (an empty value reads as not set).
             folded: saved.get("folded").map(|v| v.split(',').filter(|s| !s.is_empty() && *s != "-").map(str::to_string).collect()),
             muted: get("muted").map(|v| v.split(',').filter(|s| !s.is_empty()).map(str::to_string).collect()).unwrap_or_default(),
+            following: get("following").map(|v| v.split(',').filter(|s| !s.is_empty()).map(str::to_string).collect()).unwrap_or_default(),
             file: None,
         }
     }
@@ -116,7 +119,7 @@ impl Prefs {
         }
     }
 
-    fn values(&self) -> [(&'static str, String); 8] {
+    fn values(&self) -> [(&'static str, String); 9] {
         [
             ("auto_update", if self.auto_update { "true" } else { "false" }.into()),
             ("conversation", self.conversation.clone().unwrap_or_default()),
@@ -128,6 +131,7 @@ impl Prefs {
                     None => String::new(),
                 },
             ),
+            ("following", self.following.join(",")),
             ("hidden", self.hidden.iter().map(|(id, at)| format!("{id}|{at}")).collect::<Vec<_>>().join(",")),
             ("muted", self.muted.join(",")),
             ("notifications", if self.notifications { "true" } else { "false" }.into()),
@@ -157,7 +161,7 @@ fn merge(text: &str, changes: &[(&str, String)]) -> String {
 mod tests {
     use super::*;
 
-    const SAVED: &str = "auto_update=false\nconversation=19:abc@thread.v2\nfolded=meetings,team:19:t@thread.tacv2\nhidden=19:old@thread.v2|1793000000000\nmuted=19:x@thread.v2,19:y\nnotifications=false\nrecent_emoji=yes,wave;0-weu-d1-abc\ntheme=light\n";
+    const SAVED: &str = "auto_update=false\nconversation=19:abc@thread.v2\nfolded=meetings,team:19:t@thread.tacv2\nfollowing=19:prs@thread.tacv2\nhidden=19:old@thread.v2|1793000000000\nmuted=19:x@thread.v2,19:y\nnotifications=false\nrecent_emoji=yes,wave;0-weu-d1-abc\ntheme=light\n";
 
     #[test]
     fn reads_a_saved_file() {
@@ -165,6 +169,7 @@ mod tests {
         assert_eq!(p.theme, Appearance::Light);
         assert_eq!(p.conversation.as_deref(), Some("19:abc@thread.v2"));
         assert!(!p.auto_update);
+        assert_eq!(p.following, ["19:prs@thread.tacv2"]);
     }
 
     #[test]
