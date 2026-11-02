@@ -29,7 +29,7 @@ impl fmt::Display for Error {
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// A change the service pushes as it happens.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Push {
     /// Something new or changed in a conversation.
     Conversation(ConversationId),
@@ -37,6 +37,8 @@ pub enum Push {
     Everything,
     /// Whether pushes are coming (the socket is up).
     Live(bool),
+    /// A new or changed message, as pushed (shown before the conversation is fetched again).
+    Message { conversation: ConversationId, message: Box<crate::model::Message> },
     /// Someone started (or stopped) typing in a conversation: who (id, name).
     Typing { conversation: ConversationId, id: String, name: String, typing: bool },
 }

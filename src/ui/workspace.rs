@@ -1062,6 +1062,7 @@ impl Workspace {
         while let Ok(push) = self.pushes.try_recv() {
             match push {
                 Push::Live(live) => self.live = live,
+                Push::Message { conversation, message } => self.pushed(&conversation, *message),
                 Push::Typing { conversation, id, name, typing } => {
                     let who = self.typing.entry(conversation).or_default();
                     who.retain(|(i, ..)| *i != id);
@@ -1382,6 +1383,37 @@ impl Workspace {
         match e {
             Error::Network(_) => self.offline = true,
             e => self.error = Some(e.to_string()),
+        }
+    }
+
+    /// A message Teams pushed: into the open conversation (and the kept ones) right
+    /// away, new or in place of the one it changes. The fetch that follows confirms it.
+    fn pushed(&mut self, conversation: &str, message: Message) {
+        let place = |messages: &mut Vec<Message>| {
+            // Those shown as on their way are put back after (see `with_sent_here`).
+            messages.retain(|m| !m.sending);
+            match messages.iter_mut().find(|m| m.id == message.id) {
+                Some(old) => {
+                    // Reactions aren't in a push the same way; keep what's known.
+                    let reactions = std::mem::take(&mut old.reactions);
+                    *old = Message { reactions, ..message.clone() };
+                }
+                None => {
+                    let key = |m: &Message| (m.at, m.id.parse::<i64>().unwrap_or(0));
+                    let at = messages.partition_point(|m| key(m) <= key(&message));
+                    messages.insert(at, message.clone());
+                }
+            }
+        };
+        if let Some(kept) = self.cache.get_mut(conversation) {
+            place(kept);
+        }
+        if self.open.as_deref() == Some(conversation)
+            && let Some(mut messages) = self.messages.take()
+        {
+            place(&mut messages);
+            self.with_sent_here(conversation, &mut messages);
+            self.messages = Some(messages);
         }
     }
 
@@ -1823,6 +1855,27 @@ mod tests {
         ws.with_sent_here("19:maya", &mut after);
         assert!(!after.iter().any(|m| m.sending));
         assert!(ws.sent_here.is_empty());
+    }
+
+    #[test]
+    fn pushed_messages_show_without_a_fetch() {
+        let mut ws = workspace("19:maya");
+        ws.me_id = crate::demo::ME.into();
+        let count = ws.messages.as_ref().unwrap().len();
+        let mut m = ws.messages.as_ref().unwrap()[0].clone();
+        (m.id, m.at, m.author.id) = ("9001".into(), crate::model::time::now_ms(), "8:orgid:maya".into());
+        ws.pushed("19:maya", m.clone());
+        assert_eq!(ws.messages.as_ref().unwrap().len(), count + 1);
+        assert_eq!(ws.messages.as_ref().unwrap().last().unwrap().id, "9001");
+        // The same message changed (an edit): in place.
+        m.edited = true;
+        ws.pushed("19:maya", m);
+        assert_eq!(ws.messages.as_ref().unwrap().len(), count + 1);
+        assert!(ws.messages.as_ref().unwrap().last().unwrap().edited);
+        // Another conversation's: not here.
+        let other = ws.messages.as_ref().unwrap()[1].clone();
+        ws.pushed("19:tomas", Message { id: "9002".into(), ..other });
+        assert_eq!(ws.messages.as_ref().unwrap().len(), count + 1);
     }
 
     #[test]

@@ -277,7 +277,14 @@ fn pushes(url: &str, body: &Value) -> Vec<Push> {
                     .into_iter()
                     .collect();
             }
-            resource["conversationLink"].as_str().and_then(conversation_of)
+            // The push carries the message itself: it shows without waiting for a fetch.
+            let conversation = resource["conversationLink"].as_str().and_then(conversation_of);
+            if let Some(c) = &conversation
+                && let Some(message) = super::parse::message(resource, "")
+            {
+                return vec![Push::Message { conversation: c.clone(), message: Box::new(message) }, Push::Conversation(c.clone())];
+            }
+            conversation
         }
         "ConversationUpdate" | "ThreadUpdate" => resource["id"].as_str().map(str::to_string),
         _ => None,
@@ -394,6 +401,13 @@ mod tests {
             "conversationLink": "x/conversations/19:a", "from": "https://x/v1/users/ME/contacts/8:orgid:maya", "imdisplayname": "Maya"}});
         assert!(matches!(&pushes("/messaging", &typing)[..],
             [Push::Typing { conversation, id, name, typing: true }] if conversation == "19:a" && id == "8:orgid:maya" && name == "Maya"));
+        let full = json!({"type": "EventMessage", "resourceType": "NewMessage", "resource": {
+            "id": "1793304000123", "messagetype": "RichText/Html", "content": "<p>hi</p>", "imdisplayname": "Maya",
+            "from": "https://x/v1/users/ME/contacts/8:orgid:maya", "originalarrivaltime": "2026-11-02T10:00:00.000Z",
+            "conversationLink": "https://x/v1/users/ME/conversations/19:abc@thread.v2"}});
+        assert!(matches!(&pushes("/messaging", &full)[..],
+            [Push::Message { conversation, message }, Push::Conversation(c)]
+                if conversation == "19:abc@thread.v2" && c == conversation && message.author.id == "8:orgid:maya" && message.id == "1793304000123"));
         let other = json!({"type": "EventMessage", "resourceType": "NewMessage", "resource": {"messagetype": "Control/LiveState", "conversationLink": "x/conversations/19:a"}});
         assert!(pushes("/messaging", &other).is_empty());
         assert!(pushes("/unifiedPresenceService", &new).is_empty());

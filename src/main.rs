@@ -80,6 +80,7 @@ fn listen() {
         Push::Live(live) => println!("{}", if live { "live" } else { "down" }),
         Push::Everything => println!("fetch everything"),
         Push::Conversation(id) => println!("change in a conversation ({})", id.split(':').next().unwrap_or("?")),
+        Push::Message { .. } => println!("a message"),
         Push::Typing { typing, .. } => println!("{}", if typing { "someone is typing" } else { "someone stopped typing" }),
     }));
     loop {

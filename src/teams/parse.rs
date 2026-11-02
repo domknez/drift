@@ -164,7 +164,7 @@ pub fn messages(v: &Value, me: &str) -> Vec<Message> {
     out
 }
 
-fn message(m: &Value, me: &str) -> Option<Message> {
+pub fn message(m: &Value, me: &str) -> Option<Message> {
     let kind = str_of(m, &["messagetype"])?;
     if !matches!(kind, "Text" | "RichText" | "RichText/Html" | "RichText/Media_Card") || m["properties"]["deletetime"].is_string() {
         return None;
