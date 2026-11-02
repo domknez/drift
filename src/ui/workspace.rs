@@ -129,6 +129,9 @@ pub struct Workspace {
     pub folded_loaded: bool,
     /// The message being typed in the open conversation.
     pub draft: String,
+    /// Messages left half-written in other conversations, by conversation: back in
+    /// the composer when the conversation is opened again.
+    pub drafts: HashMap<String, String>,
     sending: Load<(), Error>,
     /// Writes in the background (reactions, read marks); true asks to fetch the
     /// messages again after.
@@ -298,6 +301,7 @@ impl Workspace {
             folded: HashSet::from(["meetings".to_string(), "hidden".to_string()]),
             folded_loaded: false,
             draft: String::new(),
+            drafts: HashMap::new(),
             sending: Load::Idle,
             chores: Vec::new(),
             marked: None,
@@ -710,6 +714,7 @@ impl Workspace {
         if hidden {
             set.insert(id.to_string(), crate::model::time::now_ms());
             if self.open.as_deref() == Some(id) {
+                self.keep_draft();
                 self.open = None;
                 self.messages = None;
             }
@@ -1045,11 +1050,24 @@ impl Workspace {
         self.error = Some(e.to_string());
     }
 
+    /// Keep what's half-written in the open conversation for when it's opened again
+    /// (not an edit of a message: that's dropped).
+    fn keep_draft(&mut self) {
+        let Some(open) = self.open.clone() else { return };
+        let draft = std::mem::take(&mut self.draft);
+        if draft.trim().is_empty() || self.editing.as_ref().is_some_and(|(reply, _)| !reply) {
+            self.drafts.remove(&open);
+        } else {
+            self.drafts.insert(open, draft);
+        }
+    }
+
     /// Open a conversation; its messages load right away.
     pub fn open(&mut self, id: &str) {
         if self.open.as_deref() == Some(id) {
             return;
         }
+        self.keep_draft();
         self.open = Some(id.to_string());
         self.recent.retain(|r| r != id);
         self.recent.insert(0, id.to_string());
@@ -1064,7 +1082,7 @@ impl Workspace {
         self.focus = None;
         self.find = None;
         self.side = Side::List;
-        self.draft.clear();
+        self.draft = self.drafts.remove(id).unwrap_or_default();
         self.reply_draft.clear();
         self.quoting = None;
         self.editing = None;

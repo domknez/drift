@@ -697,7 +697,18 @@ fn row(ui: &mut Ui, ws: &mut Workspace, d: &Directory, c: &Conversation) {
     let bottom = Rect::from_min_max(pos2(text_left, rect.top() + 28.0), pos2(rect.right() - 26.0, rect.bottom() - 6.0));
     let mut b = ui.new_child(egui::UiBuilder::new().max_rect(bottom).layout(Layout::left_to_right(Align::Center)));
     let preview_color = if c.unread && !c.muted { p.dim } else { p.faint };
-    b.add(egui::Label::new(RichText::new(preview(ws, c)).font(ty::small()).color(preview_color)).truncate().selectable(false));
+    match ws.drafts.get(&c.id).filter(|_| !selected) {
+        // Something half-written there, as Teams shows it.
+        Some(draft) => {
+            let mut job = egui::text::LayoutJob::default();
+            job.append("Draft: ", 0.0, egui::TextFormat::simple(ty::small_strong(), p.danger));
+            job.append(&draft.split_whitespace().collect::<Vec<_>>().join(" "), 0.0, egui::TextFormat::simple(ty::small(), p.faint));
+            b.add(egui::Label::new(job).truncate().selectable(false));
+        }
+        None => {
+            b.add(egui::Label::new(RichText::new(preview(ws, c)).font(ty::small()).color(preview_color)).truncate().selectable(false));
+        }
+    }
 
     if response.clicked() {
         ws.open(&c.id);
