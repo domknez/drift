@@ -173,6 +173,9 @@ pub struct Workspace {
     /// The message list's scroll position last frame, and when the user last scrolled
     /// it away from the newest (the day of what's on top shows meanwhile).
     pub scrolled_at: (f32, Option<std::time::Instant>),
+    /// The newest message seen at the bottom of the open conversation (with its id),
+    /// to count what came in below while scrolled up.
+    pub seen_down_to: Option<(String, String)>,
     /// The composer's emoji picker (its search).
     pub emoji_picker: crate::ui::views::emoji_picker::Picker,
     /// While Activity is shown: up to which item it had been read when it was opened
@@ -376,6 +379,7 @@ impl Workspace {
             clicked: std::sync::mpsc::channel(),
             newest: NEWEST,
             earlier_from: None,
+            seen_down_to: None,
             scrolled_at: (0.0, None),
             emoji_picker: Default::default(),
             scroll_to: None,

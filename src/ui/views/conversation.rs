@@ -199,6 +199,19 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace) {
             if let (Some(at), Some(since)) = (view.top_at, ws.scrolled_at.1) {
                 floating_day(ui, scrolled.inner_rect, at, since.elapsed().as_secs_f32());
             }
+            // At the bottom, everything's seen; scrolled up, a button back down (with
+            // how many came in meanwhile).
+            let newest = messages.last().map(|m| m.id.clone());
+            if from_bottom <= 40.0 || ws.seen_down_to.as_ref().is_none_or(|(c, _)| *c != id) {
+                ws.seen_down_to = newest.map(|m| (id.clone(), m));
+            } else if from_bottom > 300.0 || newest.as_ref() != ws.seen_down_to.as_ref().map(|(_, m)| m) {
+                let seen = ws.seen_down_to.as_ref().map(|(_, m)| m.clone()).unwrap_or_default();
+                let after = messages.iter().position(|m| m.id == seen).map_or(0, |at| at + 1);
+                let new = messages[after..].iter().filter(|m| m.author.id != me && m.root.is_none()).count();
+                if jump_down(ui, scrolled.inner_rect, new) {
+                    ws.scroll_to = Some(height);
+                }
+            }
             // The focused message is in the main list unless it's a reply (then the thread scrolls).
             if ws.thread.is_none() || !is_channel {
                 ws.focus_scrolled |= view.scrolled;
@@ -457,6 +470,27 @@ pub fn day_pill(ui: &mut Ui, at: i64) {
     ui.painter().rect_filled(pill, CornerRadius::same(12), p.surface);
     ui.painter().galley(pill.center() - galley.size() / 2.0, galley, p.faint);
     ui.add_space(4.0);
+}
+
+/// A round button at the bottom of the list, back to the newest message; with
+/// how many new ones are below, when there are. True when clicked.
+fn jump_down(ui: &mut Ui, list: Rect, new: usize) -> bool {
+    let p = colors();
+    let label = match new {
+        0 => "↓".to_string(),
+        1 => "↓  1 new message".to_string(),
+        n => format!("↓  {n} new messages"),
+    };
+    let galley = ui.painter().layout_no_wrap(label, ty::small_strong(), if new > 0 { p.on_accent } else { p.text });
+    let size = vec2((galley.size().x + 28.0).max(36.0), 34.0);
+    let rect = Rect::from_center_size(pos2(list.center().x, list.bottom() - 30.0), size);
+    let response = ui.interact(rect, ui.scope_id().with("jump-down"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
+    widgets::control(ui, &response, egui::Role::Button, "Go to the newest message");
+    let (fill, stroke) = if new > 0 { (p.accent_fill, Stroke::NONE) } else { (p.panel, Stroke::new(1.0, p.border)) };
+    let painter = ui.painter().with_clip_rect(list);
+    painter.rect(rect, CornerRadius::same(17), fill, stroke, egui::StrokeKind::Inside);
+    painter.galley(rect.center() - galley.size() / 2.0, galley, p.text);
+    response.clicked()
 }
 
 /// How long the floating day stays after scrolling stops, and its fade.
