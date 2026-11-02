@@ -89,9 +89,7 @@ impl Teams {
     /// A file from AMS (an image in a message, a tenant's emoji), with the skype
     /// token where AMS takes it.
     fn ams_get(&self, url: &str) -> Result<Vec<u8>> {
-        let host = url.split('/').nth(2).unwrap_or("");
-        let ams = host.ends_with(".asyncgw.teams.microsoft.com") || host.ends_with(".asm.skype.com") || url.contains("/api/amsMTProd");
-        if !ams {
+        if !is_ams(url) {
             return http::fetch(url, &[]);
         }
         let token = format!("skype_token {}", self.session().skype()?.token);
@@ -819,9 +817,47 @@ fn chat_title(members: &[String], me: &str, names: &HashMap<String, String>, cha
     }
 }
 
+/// Whether `url` is AMS, where pictures in messages are kept and which takes the
+/// skype token: HTTPS to one of its hosts, judged by the parsed host (a link in a
+/// message is anyone's, and the token must go nowhere else).
+fn is_ams(url: &str) -> bool {
+    let Ok(url) = url::Url::parse(url) else { return false };
+    let host = url.host_str().unwrap_or("");
+    url.scheme() == "https"
+        && url.username().is_empty()
+        && url.password().is_none()
+        && url.port().is_none()
+        && (host.ends_with(".asyncgw.teams.microsoft.com")
+            || host.ends_with(".asm.skype.com")
+            || (host == "teams.microsoft.com" && url.path().starts_with("/api/amsMTProd/")))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_token_goes_only_to_ams() {
+        for ok in [
+            "https://us-api.asm.skype.com/v1/objects/0-wus-d1-abc/views/imgo",
+            "https://us-prod.asyncgw.teams.microsoft.com/v1/objects/0-weu-d1-abc/views/imgt1_anim",
+            "https://teams.microsoft.com/api/amsMTProd/v1/objects/x/views/imgo",
+        ] {
+            assert!(is_ams(ok), "{ok}");
+        }
+        for bad in [
+            "https://evil.example/api/amsMTProd/x",
+            "https://evil.example?.asyncgw.teams.microsoft.com/",
+            "https://evil.example#.asm.skype.com/",
+            "https://x.asm.skype.com@evil.example/",
+            "http://us-api.asm.skype.com/v1/objects/x",
+            "https://us-api.asm.skype.com.evil.example/x",
+            "https://us-api.asm.skype.com:8443/x",
+            "https://teams.microsoft.com.evil.example/api/amsMTProd/x",
+        ] {
+            assert!(!is_ams(bad), "{bad}");
+        }
+    }
     use crate::model::Preview;
 
     #[test]

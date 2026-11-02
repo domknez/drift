@@ -1110,6 +1110,7 @@ dependencies = [
  "tar",
  "tungstenite",
  "ureq",
+ "url",
  "windows-native-keyring-store",
  "wry",
  "zune-jpeg",
