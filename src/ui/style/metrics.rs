@@ -4,7 +4,7 @@ pub const WINDOW_SIZE: [f32; 2] = [1360.0, 820.0];
 pub const MIN_WINDOW_SIZE: [f32; 2] = [860.0, 520.0];
 pub const TOP_BAR: f32 = 56.0;
 /// Room for the macOS traffic lights at the left of the top bar.
-pub const LIGHTS: f32 = if cfg!(target_os = "macos") { 78.0 } else { 14.0 };
+pub const LIGHTS: f32 = if cfg!(target_os = "macos") { 92.0 } else { 14.0 };
 /// Space between the panels and around them.
 pub const GAP: f32 = 10.0;
 pub const PANEL_RADIUS: u8 = 16;

@@ -263,8 +263,11 @@ impl eframe::App for App {
         self.updates.apply_on_exit();
     }
 
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        // The traffic lights level with the top bar's middle (the size changes it).
+        let zoom = f64::from(ctx.zoom_factor());
+        super::lights::place(frame, f64::from(super::metrics::TOP_BAR / 2.0) * zoom, 20.0);
         self.apply_theme(&ctx);
         self.updates.poll(&ctx);
         let mut request = None;

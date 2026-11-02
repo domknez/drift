@@ -11,6 +11,7 @@
 //! - [`updates`]: new versions, downloaded in the background
 
 mod app;
+mod lights;
 mod load;
 mod pictures;
 mod style;
