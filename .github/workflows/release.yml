@@ -1,7 +1,7 @@
 # Build drift for macOS, Linux and Windows and publish them as a GitHub release.
 #
 # Runs for a version tag pushed by hand (v1.2.0), and from tag.yml for the tag it
-# makes after each commit to main.
+# makes when it is run by hand.
 name: Release
 
 on:

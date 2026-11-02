@@ -1,16 +1,14 @@
-# After each commit to main passes CI: tag it with the next patch version (v1.2.3
-# after v1.2.2) and release it.
+# Run by hand (Actions → Tag → Run workflow) when a release is agreed on: tags the
+# newest commit on main with the next patch version (v1.2.3 after v1.2.2) and
+# releases it. Nothing is tagged on its own.
 #
-# A version tag set by hand (v1.3.0) starts its own release (release.yml) and is
-# where the next patch versions count from. A commit that already has a version tag,
-# or whose message says [skip release], isn't tagged again.
+# A version tag pushed by hand (v1.3.0) starts its own release (release.yml) and is
+# where the next patch versions count from. A commit that already has a version tag
+# isn't tagged again.
 name: Tag
 
 on:
-  workflow_run:
-    workflows: [CI]
-    types: [completed]
-    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -21,17 +19,15 @@ concurrency:
 
 jobs:
   tag:
-    if: >-
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'push' &&
-      !contains(github.event.workflow_run.head_commit.message, '[skip release]')
+    # main only, never another branch.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.next.outputs.tag }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: main
           fetch-depth: 0
       - id: next
         name: Next version
