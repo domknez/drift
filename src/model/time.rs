@@ -83,7 +83,29 @@ pub fn local_offset(t: i64) -> i64 {
             tm.tm_gmtoff as i64
         }
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::Foundation::{FILETIME, SYSTEMTIME};
+        use windows_sys::Win32::System::Time::{FileTimeToSystemTime, SystemTimeToFileTime, SystemTimeToTzSpecificLocalTime};
+        // FILETIME counts 100 ns from 1601; the zone's rules for that date (summer time too).
+        let Ok(ticks) = u64::try_from(t + 11_644_473_600).map(|s| s * 10_000_000) else { return 0 };
+        let utc_file = FILETIME { dwLowDateTime: ticks as u32, dwHighDateTime: (ticks >> 32) as u32 };
+        // SAFETY: the calls only write into the structs passed; a null zone means the computer's.
+        unsafe {
+            let mut utc: SYSTEMTIME = std::mem::zeroed();
+            let mut local: SYSTEMTIME = std::mem::zeroed();
+            let mut local_file: FILETIME = std::mem::zeroed();
+            if FileTimeToSystemTime(&utc_file, &mut utc) == 0
+                || SystemTimeToTzSpecificLocalTime(std::ptr::null(), &utc, &mut local) == 0
+                || SystemTimeToFileTime(&local, &mut local_file) == 0
+            {
+                return 0;
+            }
+            let local_ticks = (u64::from(local_file.dwHighDateTime) << 32) | u64::from(local_file.dwLowDateTime);
+            (local_ticks as i64 - ticks as i64) / 10_000_000
+        }
+    }
+    #[cfg(not(any(unix, windows)))]
     {
         let _ = t;
         0

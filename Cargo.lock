@@ -1112,6 +1112,7 @@ dependencies = [
  "ureq",
  "url",
  "windows-native-keyring-store",
+ "windows-sys 0.61.2",
  "wry",
  "zune-jpeg",
 ]
