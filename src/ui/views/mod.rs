@@ -54,6 +54,30 @@ pub fn workspace(ui: &mut egui::Ui, ws: &mut Workspace, look: Look, updates: &Up
     if let Some(to) = resize.filter(|to| *to != look) {
         request = Some(Request::Look(to));
     }
+    // ⌥↑ and ⌥↓: the conversation above or below, newest first; with ⇧, the
+    // nearest one with something unread. ⌘⇧U: the open one back to unread.
+    let alt = |shift: bool, key| {
+        let modifiers = if shift { egui::Modifiers::ALT | egui::Modifiers::SHIFT } else { egui::Modifiers::ALT };
+        egui::KeyboardShortcut::new(modifiers, key)
+    };
+    let step = ui.input_mut(|i| {
+        [(false, egui::Key::ArrowUp, -1), (false, egui::Key::ArrowDown, 1), (true, egui::Key::ArrowUp, -1), (true, egui::Key::ArrowDown, 1)]
+            .into_iter()
+            .find(|(shift, key, _)| i.consume_shortcut(&alt(*shift, *key)))
+            .map(|(shift, _, by)| (by, shift))
+    });
+    if let Some((by, unread)) = step
+        && let Some(id) = ws.neighbour(by, unread)
+    {
+        ws.section = super::workspace::Section::Chats;
+        ws.open(&id);
+    }
+    let unread = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, egui::Key::U);
+    if ui.input_mut(|i| i.consume_shortcut(&unread))
+        && let Some(id) = ws.open.clone()
+    {
+        ws.set_read(ui.ctx(), &id, false);
+    }
     // ⌘T: the quick switcher, to jump to a conversation or a place.
     if ui.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::T))) {
         ws.switcher = if ws.switcher.is_some() { None } else { Some(switcher::Switcher::default()) };

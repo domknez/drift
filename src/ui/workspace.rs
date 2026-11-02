@@ -568,6 +568,26 @@ impl Workspace {
         }
     }
 
+    /// The conversation `by` places from the open one among chats, meeting chats and
+    /// channels, newest first (with `unread`, only those with something unread);
+    /// the first one when none is open.
+    pub fn neighbour(&self, by: i32, unread: bool) -> Option<String> {
+        let d = self.directory.as_ref()?;
+        let mut all: Vec<&Conversation> = d
+            .conversations
+            .iter()
+            .filter(|c| c.kind != Kind::Feed && c.last.is_some() && !self.is_hidden(c))
+            .filter(|c| !unread || (c.unread && !c.muted) || self.open.as_deref() == Some(c.id.as_str()))
+            .collect();
+        all.sort_by_key(|c| std::cmp::Reverse(c.last.as_ref().map_or(0, |l| l.at)));
+        let at = self.open.as_deref().and_then(|open| all.iter().position(|c| c.id == open));
+        let to = match at {
+            Some(at) => usize::try_from(at as i32 + by).ok()?,
+            None => 0,
+        };
+        all.get(to).filter(|c| Some(c.id.as_str()) != self.open.as_deref()).map(|c| c.id.clone())
+    }
+
     /// A notification a minute before each meeting the user hasn't declined, once;
     /// clicking it joins (or opens the meeting's chat). One that started a little
     /// while ago (drift was just opened) is reminded of too.

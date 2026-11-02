@@ -541,6 +541,24 @@ fn user_menu(ui: &mut Ui, ws: &mut Workspace, rect: Rect, look: Look, updates: &
         ui.add_space(4.0);
         divider(ui);
 
+        // The keyboard shortcuts, on hover.
+        let (row, response) = ui.allocate_exact_size(vec2(ui.available_width(), 32.0), Sense::hover());
+        let response = response.on_hover_ui(|ui| {
+            ui.set_min_width(260.0);
+            egui::Grid::new("shortcuts").num_columns(2).spacing(vec2(16.0, 4.0)).show(ui, |ui| {
+                for (keys, what) in SHORTCUTS {
+                    ui.label(RichText::new(*keys).font(ty::small_strong()).color(p.text));
+                    ui.label(RichText::new(*what).font(ty::small()).color(p.dim));
+                    ui.end_row();
+                }
+            });
+        });
+        if response.hovered() {
+            ui.painter().rect_filled(row.shrink2(vec2(2.0, 2.0)), CornerRadius::same(8), p.hover);
+        }
+        ui.painter().text(pos2(row.left() + 10.0, row.center().y), egui::Align2::LEFT_CENTER, "Keyboard shortcuts", ty::small(), p.dim);
+        divider(ui);
+
         // Signing out.
         let (row, response) = ui.allocate_exact_size(vec2(ui.available_width(), 36.0), Sense::click());
         let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
@@ -608,3 +626,16 @@ fn theme_swatch(ui: &mut Ui, theme: Theme, picked: bool, in_use: bool) -> egui::
     painter.rect_stroke(rect, CornerRadius::same(8), ring, egui::StrokeKind::Outside);
     response
 }
+
+/// What the keyboard does, for the menu.
+const SHORTCUTS: &[(&str, &str)] = &[
+    ("⌘K", "Search"),
+    ("⌘T", "Go to a conversation"),
+    ("⌘1 – ⌘4", "Activity, Chats, Teams, Calendar"),
+    ("⌥↑  ⌥↓", "Previous or next conversation"),
+    ("⌥⇧↑  ⌥⇧↓", "Previous or next unread"),
+    ("⌘⇧U", "Mark as unread"),
+    ("↑", "Edit your last message"),
+    ("⌘+  ⌘−  ⌘0", "Bigger, smaller, usual size"),
+    ("⌘R", "Refresh"),
+];
