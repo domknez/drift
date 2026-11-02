@@ -1566,6 +1566,33 @@ mod tests {
     }
 
     #[test]
+    fn new_messages_notify_only_when_they_should() {
+        let mut ws = workspace("19:maya");
+        ws.notifications = true;
+        ws.me = "Alex Morgan".into();
+        ws.me_id = crate::demo::ME.into();
+        let ctx = egui::Context::default();
+        let mut directory = crate::demo::Demo.directory().unwrap();
+        // The first list only says what's been seen.
+        ws.notify_new(&ctx, &directory);
+        assert!(ws.toasts.conversations().is_empty());
+        let newer = |d: &mut Directory, id: &str, author: &str, author_id: &str| {
+            let c = d.conversations.iter_mut().find(|c| c.id == id).unwrap();
+            let last = c.last.as_mut().unwrap();
+            (last.at, last.author, last.author_id) = (last.at + 60_000, author.into(), author_id.into());
+        };
+        newer(&mut directory, "19:release", "Priya Nair", "8:orgid:priya"); // someone else: yes
+        newer(&mut directory, "19:tomas", "Alex Morgan", crate::demo::ME); // the user's own: no
+        newer(&mut directory, "19:maya", "Maya Lindqvist", "8:orgid:maya"); // on screen, in front: no
+        let muted = directory.conversations.iter().find(|c| c.muted).map(|c| c.id.clone()).unwrap();
+        newer(&mut directory, &muted, "Jonas Weber", "8:orgid:jonas"); // muted: no
+        // A namesake of the user is someone else.
+        newer(&mut directory, "19:priya", "Alex Morgan", "8:orgid:other-alex");
+        ws.notify_new(&ctx, &directory);
+        assert_eq!(ws.toasts.conversations(), ["19:release", "19:priya"]);
+    }
+
+    #[test]
     fn moving_between_conversations() {
         let mut ws = workspace("19:maya");
         ws.directory = Some(crate::demo::Demo.directory().unwrap());

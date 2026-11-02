@@ -58,6 +58,12 @@ impl Toasts {
         }
     }
 
+    /// The conversations of the toasts up, oldest first.
+    #[cfg(test)]
+    pub fn conversations(&self) -> Vec<&str> {
+        self.up.iter().map(|t| t.conversation.as_str()).collect()
+    }
+
     /// Draw the toasts in the bottom right of `area`; the conversation of one clicked.
     pub fn show(&mut self, ctx: &egui::Context, area: Rect) -> Option<ConversationId> {
         self.up.retain(|t| t.since.elapsed() < STAYS + FADE);

@@ -289,7 +289,8 @@ fn request_body(request: &Value) -> Value {
     }
     let mut text = String::new();
     super::auth::base64url(body)
-        .and_then(|bytes| flate2::read::GzDecoder::new(bytes.as_slice()).read_to_string(&mut text).ok())
+        // Bounded: a body unpacks to a few kilobytes, not to whatever it claims.
+        .and_then(|bytes| flate2::read::GzDecoder::new(bytes.as_slice()).take(8 << 20).read_to_string(&mut text).ok())
         .and_then(|_| serde_json::from_str(&text).ok())
         .unwrap_or_default()
 }
@@ -344,6 +345,21 @@ fn correlation_vector() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn survives_broken_frames() {
+        for frame in ["", "5", "5:", "5::", "3:::", "5:abc+::{}", "5:+::{}", "3:::{not json", "1::", ":::"] {
+            let _ = payload(frame);
+            let _ = ack_id(frame);
+        }
+        assert_eq!(ack_id("5:+::{}"), None);
+        let gz = |body: &str| json!({"body": body, "headers": {"X-Microsoft-Skype-Content-Encoding": "gzip"}});
+        for body in ["", "!!!", "H4sI", "aGVsbG8="] {
+            assert_eq!(request_body(&gz(body)), Value::Null);
+        }
+        assert_eq!(request_body(&json!({"body": "{broken"})), Value::Null);
+        assert!(pushes("/v4/f/x/messaging", &Value::Null).is_empty());
+    }
 
     #[test]
     fn reads_frames() {

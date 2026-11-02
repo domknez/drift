@@ -364,6 +364,12 @@ mod tests {
         assert_eq!(read_drafts(&path), drafts);
         write_drafts(&path, &Default::default());
         assert!(!path.exists());
+        // A broken file reads as no drafts, and is replaced whole by the next save.
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(&path, b"{\"19:a@thread.v2\": \"cut of").unwrap();
+        assert!(read_drafts(&path).is_empty());
+        write_drafts(&path, &drafts);
+        assert_eq!(read_drafts(&path), drafts);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
