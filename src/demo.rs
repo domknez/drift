@@ -128,7 +128,15 @@ impl Backend for Demo {
                 false,
                 person_picture("tomas"),
             ),
-            chat("19:release", Kind::Chat, "Release crew", ("Priya", "cut is at 15:00 today", today(9, 40)), true, false, None),
+            Conversation {
+                members: ["priya", "lea", "tomas"]
+                    .map(|id| {
+                        let (id, name) = person(id);
+                        crate::model::Mention { id: id.into(), name: name.into() }
+                    })
+                    .to_vec(),
+                ..chat("19:release", Kind::Chat, "Release crew", ("Priya", "cut is at 15:00 today", today(9, 40)), true, false, None)
+            },
             chat(
                 "19:priya",
                 Kind::Chat,
@@ -288,7 +296,11 @@ impl Backend for Demo {
                 ),
                 _ => ("priya", "cut is at 15:00 today"),
             };
-            return Ok(vec![message("2001", None, who, today(10, 0), &format!("<p>{line}</p>"), None, vec![])]);
+            let mut messages = vec![message("2001", None, who, today(10, 0), &format!("<p>{line}</p>"), None, vec![])];
+            if conversation == "19:release" {
+                messages.push(message("2002", None, ME, today(10, 4), "<p>Release notes are ready for review.</p>", None, vec![]));
+            }
+            return Ok(messages);
         }
         let yesterday = today(17, 34) - 86_400_000;
         Ok(vec![
@@ -398,6 +410,13 @@ impl Backend for Demo {
         // Maya has read everything the user sent her.
         Ok(match conversation {
             "19:maya" => vec![(ME.to_string(), i64::MAX), ("8:orgid:maya".to_string(), 3007)],
+            // Two of three have read the user's last message.
+            "19:release" => vec![
+                (ME.to_string(), i64::MAX),
+                ("8:orgid:priya".to_string(), 2002),
+                ("8:orgid:lea".to_string(), 2001),
+                ("8:orgid:tomas".to_string(), 2002),
+            ],
             _ => Vec::new(),
         })
     }

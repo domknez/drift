@@ -141,6 +141,7 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace) {
             let open_thread = ws.thread.clone();
             let focus = ws.focus.clone();
             let read_by = ws.read_by.clone();
+            let members = conversation.as_ref().map(|c| c.members.clone()).unwrap_or_default();
             let custom_emoji = ws.custom_emoji.clone();
             let recent_emoji = ws.recent_emoji.clone().unwrap_or_default();
             let mut view = View {
@@ -157,6 +158,7 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace) {
                 recent_emoji: &recent_emoji,
                 new_after: ws.new_after,
                 new_scrolled: ws.new_scrolled || ws.focus.is_some(),
+                members: &members,
             };
             let mut area = egui::ScrollArea::vertical().id_salt(("messages", &id)).stick_to_bottom(true).auto_shrink([false, false]);
             if let Some(y) = ws.scroll_to.take() {
@@ -438,6 +440,37 @@ pub struct View<'a> {
     pub new_after: Option<i64>,
     /// Set once the list has been scrolled to that line (or there's none to scroll to).
     pub new_scrolled: bool,
+    /// Who's in the chat, for the names of those who've read a message.
+    pub members: &'a [crate::model::Mention],
+}
+
+/// Who has read a message of the user's (by name) and who hasn't yet, in a chat
+/// where the service says how far each member has read.
+fn readers(m: &Message, view: &View) -> Option<(Vec<String>, Vec<String>)> {
+    let id = m.id.parse::<i64>().ok()?;
+    if view.read_by.is_empty() || view.me.is_empty() || m.author.id != view.me {
+        return None;
+    }
+    let name = |who: &str| view.members.iter().find(|p| p.id == who).map_or_else(|| "Someone".to_string(), |p| p.name.clone());
+    let (read, unread): (Vec<_>, Vec<_>) = view.read_by.iter().partition(|(_, up_to)| *up_to >= id);
+    let names = |list: Vec<&(String, i64)>| {
+        let mut n: Vec<String> = list.into_iter().map(|(who, _)| name(who)).collect();
+        n.sort();
+        n
+    };
+    Some((names(read), names(unread)))
+}
+
+/// The names of who has read a message, and who hasn't, as lines for a tooltip.
+fn readers_text(read: &[String], unread: &[String]) -> String {
+    let mut lines = Vec::new();
+    if !read.is_empty() {
+        lines.push(format!("Seen by {}", read.join(", ")));
+    }
+    if !unread.is_empty() {
+        lines.push(format!("Not yet {}", unread.join(", ")));
+    }
+    lines.join("\n")
 }
 
 /// Whether `focus` is one of the replies to `m`.
@@ -507,7 +540,7 @@ pub fn list(ui: &mut Ui, pictures: &mut Pictures, messages: &[Message], view: &m
             action = Some(a);
         }
         if newest_mine.as_deref() == Some(m.id.as_str()) && !view.read_by.is_empty() {
-            seen(ui, m, view.read_by);
+            seen(ui, m, view);
         }
     }
     action
@@ -633,15 +666,16 @@ fn hover_bar(ui: &mut Ui, pictures: &mut Pictures, m: &Message, mine: bool, thre
     }
     egui::Popup::menu(&more).id(more_id).show(|ui| {
         ui.set_min_width(200.0);
-        message_menu(ui, m, mine, thread, conversation, &mut action);
+        message_menu(ui, m, mine, thread, view, &mut action);
     });
     action
 }
 
 /// A message's menu, after its quick reactions: replying, copying, reading, and for
 /// the user's own, editing and deleting.
-fn message_menu(ui: &mut Ui, m: &Message, mine: bool, thread: bool, conversation: &str, action: &mut Option<Action>) {
+fn message_menu(ui: &mut Ui, m: &Message, mine: bool, thread: bool, view: &View, action: &mut Option<Action>) {
     let p = colors();
+    let conversation = view.conversation;
     if ui.button("Reply with quote").clicked() {
         *action = Some(Action::Quote(m.clone()));
         ui.close();
@@ -669,6 +703,25 @@ fn message_menu(ui: &mut Ui, m: &Message, mine: bool, thread: bool, conversation
     if !mine && ui.button("Mark as unread from here").clicked() {
         *action = Some(Action::UnreadFrom(m.id.clone()));
         ui.close();
+    }
+    // Who has read it (the user's own, in a chat).
+    if let Some((read, unread)) = readers(m, view) {
+        ui.separator();
+        let title = format!("READ BY {} OF {}", read.len(), read.len() + unread.len());
+        ui.add_space(4.0);
+        ui.label(RichText::new(title).font(ty::section()).color(p.faint));
+        ui.add_space(2.0);
+        for (names, seen) in [(&read, true), (&unread, false)] {
+            for name in names {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 8.0;
+                    let (icon, color) = if seen { (Icon::Seen, p.accent) } else { (Icon::Check, p.faint) };
+                    widgets::icon(ui, icon, 14.0, color);
+                    ui.label(RichText::new(name).font(ty::small()).color(if seen { p.text } else { p.faint }));
+                });
+            }
+        }
+        ui.add_space(2.0);
     }
     if mine {
         ui.separator();
@@ -812,7 +865,7 @@ pub fn bubble(
             }
         });
         ui.separator();
-        message_menu(ui, m, mine, thread.is_some(), view.conversation, &mut action);
+        message_menu(ui, m, mine, thread.is_some(), view, &mut action);
     });
     // Over a message: a bar on its top edge with quick reactions, quote and more.
     if let Some(a) = hover_bar(ui, pictures, m, mine, thread.is_some(), view, frame.rect) {
@@ -854,11 +907,10 @@ pub fn bubble(
 }
 
 /// Under the user's newest message in a chat: Sent, or Seen (by how many, in a group).
-fn seen(ui: &mut Ui, m: &Message, read_by: &[(String, i64)]) {
+fn seen(ui: &mut Ui, m: &Message, view: &View) {
     let p = colors();
-    let Ok(id) = m.id.parse::<i64>() else { return };
-    let readers = read_by.iter().filter(|(_, up_to)| *up_to >= id).count();
-    let total = read_by.len();
+    let Some((read, unread)) = readers(m, view) else { return };
+    let (readers, total) = (read.len(), read.len() + unread.len());
     let (icon, label, color) = match (readers, total) {
         (0, _) => (Icon::Check, "Sent".to_string(), p.faint),
         (_, 1) => (Icon::Seen, "Seen".to_string(), p.accent),
@@ -866,12 +918,17 @@ fn seen(ui: &mut Ui, m: &Message, read_by: &[(String, i64)]) {
         (r, t) => (Icon::Seen, format!("Seen by {r} of {t}"), p.accent),
     };
     ui.add_space(-2.0);
-    ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+    let row = ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
         ui.add_space(4.0);
         ui.spacing_mut().item_spacing.x = 4.0;
-        ui.label(RichText::new(label).font(ty::meta()).color(color));
-        widgets::icon(ui, icon, 14.0, color);
+        let label = ui.label(RichText::new(label).font(ty::meta()).color(color));
+        let icon = widgets::icon(ui, icon, 14.0, color);
+        label.rect.union(icon.rect)
     });
+    // Who, on hover.
+    if total > 1 {
+        ui.interact(row.inner, ui.scope_id().with(("seen", &m.id)), Sense::hover()).on_hover_text(readers_text(&read, &unread));
+    }
 }
 
 /// "3 replies · Last reply 12 min ago" with the repliers' pictures; true when clicked.
