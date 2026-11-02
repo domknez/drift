@@ -163,11 +163,32 @@ fn token_request(form: &[(&str, &str)]) -> Result<Value> {
     let mut form = form.to_vec();
     form.push(("client_id", CLIENT_ID));
     let url = format!("{AUTHORITY}/token");
-    // An expired or revoked refresh token answers 400 invalid_grant: sign in again.
-    http::request(Method::Post, &url, &[("Origin", "https://teams.microsoft.com")], Body::Form(&form)).map_err(|e| match e {
-        Error::Service(_) => Error::SignedOut,
+    // A busy or throttling sign-in service is asked again, a little later.
+    let mut answer = Err(Error::Network(String::new()));
+    for pause in [0, 1, 3] {
+        std::thread::sleep(std::time::Duration::from_secs(pause));
+        answer = http::request(Method::Post, &url, &[("Origin", "https://teams.microsoft.com")], Body::Form(&form));
+        match &answer {
+            Err(Error::Service(e)) if passing(e) => continue,
+            Err(Error::Network(_)) => continue,
+            _ => break,
+        }
+    }
+    answer.map_err(token_error)
+}
+
+/// A status the sign-in service may answer differently soon (throttled, down).
+fn passing(error: &str) -> bool {
+    ["HTTP 429", "HTTP 500", "HTTP 502", "HTTP 503", "HTTP 504"].iter().any(|s| error.starts_with(s))
+}
+
+/// Only an expired or revoked refresh token (400 invalid_grant) means signing in
+/// again; anything else (an outage, a scope the tenant refuses) keeps the sign-in.
+fn token_error(e: Error) -> Error {
+    match e {
+        Error::Service(s) if s.ends_with(" invalid_grant") => Error::SignedOut,
         e => e,
-    })
+    }
 }
 
 /// The user's id and name from an id token (a JWT: its claims are the middle part).
@@ -227,6 +248,16 @@ fn parse_authz(v: &Value) -> Option<Skype> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_revoked_sign_in_signs_out() {
+        assert!(matches!(token_error(Error::Service("HTTP 400 invalid_grant".into())), Error::SignedOut));
+        for kept in ["HTTP 503", "HTTP 429", "HTTP 400 invalid_scope", "HTTP 400 interaction_required", "HTTP 500 server_error"] {
+            assert!(matches!(token_error(Error::Service(kept.into())), Error::Service(_)), "{kept}");
+        }
+        assert!(matches!(token_error(Error::Network("down".into())), Error::Network(_)));
+        assert!(passing("HTTP 503") && passing("HTTP 429 throttled") && !passing("HTTP 400 invalid_grant"));
+    }
 
     #[test]
     fn finds_the_code_in_the_redirect() {

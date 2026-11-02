@@ -100,7 +100,8 @@ pub struct Workspace {
     pub pictures: Pictures,
     /// What the sidebar lists; None until the first load.
     pub directory: Option<Directory>,
-    directory_load: Load<Directory, Error>,
+    /// The list, with the user's name and id (read off the UI thread: they wait on the sign-in).
+    directory_load: Load<(Directory, String, String), Error>,
     directory_at: Option<Instant>,
     pub open: Option<ConversationId>,
     /// The open conversation's messages, oldest first; None while they load.
@@ -903,14 +904,13 @@ impl Workspace {
         }
         if let Some(result) = self.directory_load.take() {
             match result {
-                Ok(mut directory) => {
+                Ok((mut directory, me, me_id)) => {
                     // Muted in drift counts as muted.
                     for c in &mut directory.conversations {
                         c.muted |= self.muted_here.as_ref().is_some_and(|m| m.contains(&c.id));
                     }
                     if self.me.is_empty() {
-                        self.me = self.backend.me();
-                        self.me_id = self.backend.me_id();
+                        (self.me, self.me_id) = (me, me_id);
                     }
                     self.notify_new(ctx, &directory);
                     // Something newer in the open conversation than what's on screen: fetch it now.
@@ -929,10 +929,12 @@ impl Workspace {
                 Err(e) => self.failed(e),
             }
         }
+        // Search and the calendar have tokens of their own, which a tenant may refuse:
+        // that's not the sign-in failing (the chat service would say so).
         if let Some(result) = self.hits_load.take() {
             match result {
                 Ok(hits) => self.hits = Some(hits),
-                Err(Error::SignedOut) => return Some(Outcome::SignedOut),
+                Err(Error::SignedOut) => self.error = Some("Search isn't available for this account".into()),
                 Err(e) => self.failed(e),
             }
         }
@@ -953,7 +955,6 @@ impl Workspace {
         if let Some(result) = self.meetings_load.take() {
             match result {
                 Ok(meetings) => self.meetings = Some(meetings),
-                Err(Error::SignedOut) => return Some(Outcome::SignedOut),
                 Err(e) => log_warn!("calendar: {e}"),
             }
         }
@@ -1047,7 +1048,7 @@ impl Workspace {
         if !self.directory_load.is_running() && due(self.directory_at, directory_every) {
             self.directory_at = Some(Instant::now());
             let backend = self.backend.clone();
-            self.directory_load = Load::start(ctx, move || backend.directory());
+            self.directory_load = Load::start(ctx, move || backend.directory().map(|d| (d, backend.me(), backend.me_id())));
         }
         if let Some(id) = self.open.clone()
             && !self.messages_load.is_running()

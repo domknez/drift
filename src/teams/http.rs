@@ -80,7 +80,11 @@ pub fn request(method: Method, url: &str, headers: &[(&str, &str)], body: Body) 
         }
         _ => {
             log_warn!("{path}: HTTP {status}: {}", error_text(&json, &text));
-            Err(Error::Service(format!("HTTP {status}")))
+            // The sign-in service's own code (`invalid_grant`, …) goes along.
+            Err(Error::Service(match json["error"].as_str() {
+                Some(code) => format!("HTTP {status} {code}"),
+                None => format!("HTTP {status}"),
+            }))
         }
     }
 }
