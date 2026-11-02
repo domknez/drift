@@ -122,6 +122,8 @@ pub struct Message {
     pub body: Vec<Block>,
     /// A card a bot or connector posted (a pull request, an alert, …).
     pub card: Option<Card>,
+    /// Files shared with it (kept in SharePoint or OneDrive).
+    pub files: Vec<File>,
     pub edited: bool,
     pub reactions: Vec<Reaction>,
     /// For items of the activity feed: where the mention or reply happened.
@@ -155,6 +157,21 @@ pub struct Card {
     pub link: Option<String>,
     /// Labelled values ("Target branch" → "develop"), as the card lists them.
     pub facts: Vec<(String, String)>,
+}
+
+/// A file shared in a message: its name, and its page in SharePoint or OneDrive
+/// (opened in the browser, which signs in and offers the download).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct File {
+    pub name: String,
+    pub url: String,
+}
+
+impl File {
+    /// What kind of file it is, from its name (`PDF`, `DOCX`, …).
+    pub fn kind(&self) -> String {
+        self.name.rsplit_once('.').map(|(_, ext)| ext.to_uppercase()).filter(|e| e.len() <= 5).unwrap_or_else(|| "FILE".into())
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

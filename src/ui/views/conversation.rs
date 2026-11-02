@@ -698,6 +698,9 @@ pub fn bubble(
         if let Some(card) = &m.card {
             widgets::card(ui, card);
         }
+        for file in &m.files {
+            widgets::file(ui, file);
+        }
     };
     // Measure it first (an invisible pass), so the bubble is as wide as its text.
     const PAD_X: f32 = 14.0;

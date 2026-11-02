@@ -2,7 +2,7 @@
 //! API isn't documented, and what's missing gets a default rather than an error.
 
 use crate::model::{
-    Author, Availability, Card, Channel, Conversation, CustomEmoji, Kind, Meeting, Message, Picture, Presence, Preview, Reaction,
+    Author, Availability, Card, Channel, Conversation, CustomEmoji, File, Kind, Meeting, Message, Picture, Presence, Preview, Reaction,
     SearchHit, Source, Status, Team, text, time,
 };
 use serde_json::Value;
@@ -185,7 +185,8 @@ fn message(m: &Value, me: &str) -> Option<Message> {
         .and_then(|s| card(&s["attachments"]))
         .or_else(|| card(&m["properties"]["cards"]))
         .or_else(|| card(&m["properties"]["attachments"]));
-    if body.is_empty() && card.is_none() {
+    let files = files(&m["properties"]["files"]);
+    if body.is_empty() && card.is_none() && files.is_empty() {
         return None;
     }
     let at = str_of(m, &["originalarrivaltime", "composetime"]).and_then(time::parse_iso).unwrap_or(0);
@@ -221,6 +222,7 @@ fn message(m: &Value, me: &str) -> Option<Message> {
         at,
         body,
         card,
+        files,
         edited: !m["properties"]["edittime"].is_null() || m["skypeeditedid"].is_string(),
         reactions: reactions(&m["properties"]["emotions"], me),
         source,
@@ -243,6 +245,21 @@ fn embedded(v: &Value) -> Value {
         Value::String(s) => serde_json::from_str(s).unwrap_or(Value::Null),
         v => v.clone(),
     }
+}
+
+/// Files shared in a message (`properties.files`): each one's name and its page.
+fn files(v: &Value) -> Vec<File> {
+    embedded(v)
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|f| {
+            let name = str_of(f, &["fileName", "title"])?.to_string();
+            let info = &f["fileInfo"];
+            let url = str_of(info, &["shareUrl", "fileUrl"]).or_else(|| str_of(f, &["objectUrl"]))?.to_string();
+            Some(File { name, url })
+        })
+        .collect()
 }
 
 fn reactions(v: &Value, me: &str) -> Vec<Reaction> {
@@ -570,6 +587,24 @@ mod tests {
             m.source,
             Some(Source { conversation: "19:x".into(), message: None, root: None, title: "[DEV] General".into(), what: "mention".into() })
         );
+    }
+
+    #[test]
+    fn reads_shared_files() {
+        let files = json!([{"itemid": "a1", "fileName": "Q3 report.pdf", "objectUrl": "https://org.sharepoint.com/sites/x/Q3%20report.pdf",
+            "fileInfo": {"shareUrl": "https://org.sharepoint.com/:b:/s/x/abc", "fileUrl": "https://org.sharepoint.com/sites/x/Q3%20report.pdf"}},
+            {"fileName": "notes.txt", "objectUrl": "https://org-my.sharepoint.com/notes.txt"}]);
+        let v = json!({"messages": [{"id": "1", "messagetype": "RichText/Html", "content": "", "originalarrivaltime": "2026-10-30T10:42:00Z",
+            "imdisplayname": "Lea", "properties": {"files": files.to_string()}}]});
+        let m = messages(&v, ME).remove(0);
+        assert_eq!(
+            m.files,
+            [
+                File { name: "Q3 report.pdf".into(), url: "https://org.sharepoint.com/:b:/s/x/abc".into() },
+                File { name: "notes.txt".into(), url: "https://org-my.sharepoint.com/notes.txt".into() },
+            ]
+        );
+        assert_eq!(m.files[0].kind(), "PDF");
     }
 
     #[test]

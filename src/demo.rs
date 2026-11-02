@@ -238,6 +238,13 @@ impl Backend for Demo {
                     None,
                     vec![],
                 ),
+                Message {
+                    files: vec![crate::model::File {
+                        name: "Release notes 0.4.docx".into(),
+                        url: "https://example.sharepoint.com/release-notes".into(),
+                    }],
+                    ..message("3009", None, ME, today(10, 26), "<p>Notes for the cut:</p>", None, vec![])
+                },
                 message(
                     "3008",
                     None,
@@ -508,7 +515,18 @@ fn pr(n: u32, title: &str, from: &str, to: &str) -> Card {
 
 fn message(id: &str, root: Option<&str>, who: &str, at: i64, html: &str, card: Option<Card>, reactions: Vec<Reaction>) -> Message {
     let body: Vec<Block> = text::from_html(html);
-    Message { id: id.into(), root: root.map(str::to_string), author: author(who), at, body, card, edited: false, reactions, source: None }
+    Message {
+        id: id.into(),
+        root: root.map(str::to_string),
+        author: author(who),
+        at,
+        body,
+        card,
+        files: Vec::new(),
+        edited: false,
+        reactions,
+        source: None,
+    }
 }
 
 /// A soft violet-to-teal picture, made up for the demo's image message.
