@@ -108,6 +108,13 @@ fn next_link(s: &str) -> Option<(usize, usize, &str, &str)> {
     }
 }
 
+/// Whether a message is nothing but a few emoji (shown big, without a bubble).
+pub fn only_emoji(body: &[Block]) -> bool {
+    let [Block::Text(runs)] = body else { return false };
+    let emoji = runs.iter().filter(|r| r.span.emoji.is_some()).count();
+    (1..=5).contains(&emoji) && runs.iter().all(|r| r.span.emoji.is_some() || r.text.trim().is_empty())
+}
+
 /// The text alone, on one line (for previews and notifications).
 pub fn flatten(body: &[Block]) -> String {
     flatten_with(body, |r| r.text.clone())
@@ -733,6 +740,16 @@ mod tests {
             ]
         );
         assert_eq!(runs(&plain("PR [#7](https://x.io/7)"))[1].span.link.as_deref(), Some("https://x.io/7"));
+    }
+
+    #[test]
+    fn knows_emoji_only_messages() {
+        assert!(only_emoji(&from_html(
+            r#"<p><img alt="wave" itemid="wave;0-weu-d1-abc" itemtype="http://schema.skype.com/CustomEmoji" src="x"></p>"#
+        )));
+        assert!(only_emoji(&from_html("<p>👍 🙂</p>")));
+        assert!(!only_emoji(&from_html("<p>ok 👍</p>")));
+        assert!(!only_emoji(&from_html("<p>no emoji</p>")));
     }
 
     #[test]

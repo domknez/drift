@@ -113,6 +113,13 @@ const MARK_TEXT: Color32 = Color32::from_rgb(0x1d, 0x1b, 0x19);
 thread_local! {
     /// What's being found in the open conversation: marked wherever it shows.
     static HIGHLIGHT: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+    /// Emoji are drawn bigger still: the message is nothing but emoji.
+    static JUMBO: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Draw emoji in message text from now on at their biggest (a message of only emoji), or not.
+pub fn set_jumbo(on: bool) {
+    JUMBO.with(|j| j.set(on));
 }
 
 /// Mark `query` in message text drawn from now on (None: mark nothing).
@@ -176,7 +183,13 @@ pub fn rich_text(ui: &mut Ui, pictures: &mut Pictures, body: &[Inline], color: C
                     // where there's no picture. Either way they take the same square, so the
                     // text doesn't move when a picture comes (or turns out not to).
                     if let Some(emoji) = s.emoji.as_ref().map(|key| Picture::Emoji(key.clone())) {
-                        let side = if line_is_emoji_only { 30.0 } else { 19.0 };
+                        let side = if JUMBO.with(std::cell::Cell::get) {
+                            44.0
+                        } else if line_is_emoji_only {
+                            30.0
+                        } else {
+                            19.0
+                        };
                         let (rect, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
                         if let Some(texture) = pictures.get(&emoji) {
                             egui::Image::new((texture, rect.size())).paint_at(ui, rect);

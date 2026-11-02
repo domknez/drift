@@ -267,6 +267,15 @@ impl Backend for Demo {
                     None,
                     like(true),
                 ),
+                message(
+                    "3010",
+                    None,
+                    ME,
+                    today(10, 33),
+                    "<p><img itemtype=\"http://schema.skype.com/Emoji\" itemid=\"yes\" alt=\"👍\"></p>",
+                    None,
+                    vec![],
+                ),
             ]);
         }
         if conversation != OPEN {

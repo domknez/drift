@@ -708,6 +708,9 @@ pub fn bubble(
     } else {
         (if open { p.selected } else { p.surface }, CornerRadius { nw: 16, ne: 16, sw: if last { 4 } else { 16 }, se: 16 })
     };
+    // Only a few emoji: big, without the bubble, as Teams shows them.
+    let jumbo = m.card.is_none() && m.files.is_empty() && text::only_emoji(&m.body);
+    let fill = if jumbo { egui::Color32::TRANSPARENT } else { fill };
     let mut action = None;
     ui.add_space(if first { 8.0 } else { 3.0 });
     let mut clicked = None;
@@ -727,11 +730,13 @@ pub fn bubble(
                 ui.label(RichText::new(stamp).font(ty::meta()).color(p.faint));
             });
         }
+        widgets::set_jumbo(jumbo);
         if !m.body.is_empty()
             && let Some(click) = widgets::blocks(ui, pictures, &m.body)
         {
             clicked = Some(click);
         }
+        widgets::set_jumbo(false);
         if let Some(card) = &m.card {
             widgets::card(ui, card);
         }
