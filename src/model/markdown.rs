@@ -255,7 +255,12 @@ fn pair(s: &str, marker: &str, tag: &str) -> String {
                 while let Some(at) = rest[from..].find(marker).map(|a| a + from) {
                     let last = rest[..at].chars().last();
                     let after = rest[at + marker.len()..].chars().next();
-                    if at > inner_start && last.is_some_and(|c| !c.is_whitespace()) && !(marker == "_" && word(after)) {
+                    // Not across a pair an earlier marker made (`**a *b** c*`): the tags would cross.
+                    if at > inner_start
+                        && last.is_some_and(|c| !c.is_whitespace())
+                        && !(marker == "_" && word(after))
+                        && balanced(&rest[inner_start..at])
+                    {
                         return Some(at);
                     }
                     from = at + marker.len();
@@ -277,6 +282,12 @@ fn pair(s: &str, marker: &str, tag: &str) -> String {
     }
     out.push_str(rest);
     out
+}
+
+/// Whether every tag an earlier pass made in `s` is closed in it too (the text
+/// itself is escaped, so any `<b>` is one of them).
+fn balanced(s: &str) -> bool {
+    ["b", "s", "i"].iter().all(|t| s.matches(&format!("<{t}>")).count() == s.matches(&format!("</{t}>")).count())
 }
 
 /// How a piece of typed text looks while it's typed: its Markdown shown as it will be
@@ -428,6 +439,27 @@ mod tests {
         assert_eq!(html("**bold** and *it* and ~~gone~~"), "<p><b>bold</b> and <i>it</i> and <s>gone</s></p>");
         assert_eq!(html("keep snake_case_names and 2 * 3 * 4"), "<p>keep snake_case_names and 2 * 3 * 4</p>");
         assert_eq!(html("_soft_ and `**not bold**`"), "<p><i>soft</i> and <code>**not bold**</code></p>");
+    }
+
+    #[test]
+    fn any_text_survives() {
+        // Markdown's own characters, HTML's, and a few wide ones, in random order.
+        let alphabet: Vec<char> = "*_~`[]()>#-.:@!<&\"' \nab1é😀".chars().collect();
+        let mut rng = fastrand::Rng::with_seed(7);
+        for _ in 0..3000 {
+            let text: String = (0..rng.usize(0..40)).map(|_| alphabet[rng.usize(..alphabet.len())]).collect();
+            let out = html(&text);
+            assert_eq!(looks(&text).len(), text.len(), "{text:?}");
+            assert!(balanced(&out), "{text:?} → {out}");
+            let _ = crate::model::text::from_html(&out);
+            let _ = crate::model::text::from_html(&text);
+        }
+    }
+
+    #[test]
+    fn emphasis_never_crosses() {
+        assert_eq!(html("**a *b** c*"), "<p><b>a *b</b> c*</p>");
+        assert_eq!(html("*a **b** c*"), "<p><i>a <b>b</b> c</i></p>");
     }
 
     #[test]
