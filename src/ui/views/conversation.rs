@@ -1326,19 +1326,29 @@ pub fn composer(ui: &mut Ui, ws: &mut Workspace, rect: Rect, hint: &str, reply: 
             ws.cancel_compose(reply);
         }
         paste(ui, ws, reply);
-        if let Some(first) = people.as_ref().and_then(|p| p.first())
-            && ui.input_mut(|i| {
-                i.consume_key(egui::Modifiers::NONE, egui::Key::Tab) || i.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
-            })
-        {
-            pick = Some(first.clone());
-        }
-        if let Some(first) = emoji_found.as_ref().and_then(|e| e.first())
-            && ui.input_mut(|i| {
-                i.consume_key(egui::Modifiers::NONE, egui::Key::Tab) || i.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
-            })
-        {
-            pick_emoji = Some(first.clone());
+        // A list of people or emoji is up: ↑ ↓ go through it, Tab or Enter picks.
+        let shown = people.as_ref().map_or(0, Vec::len).max(emoji_found.as_ref().map_or(0, Vec::len));
+        if shown > 0 {
+            let (up, down, take) = ui.input_mut(|i| {
+                (
+                    i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp),
+                    i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown),
+                    i.consume_key(egui::Modifiers::NONE, egui::Key::Tab) || i.consume_key(egui::Modifiers::NONE, egui::Key::Enter),
+                )
+            });
+            if down {
+                ws.suggestion = (ws.suggestion + 1) % shown;
+            }
+            if up {
+                ws.suggestion = (ws.suggestion + shown - 1) % shown;
+            }
+            ws.suggestion = ws.suggestion.min(shown - 1);
+            if take {
+                pick = people.as_ref().and_then(|p| p.get(ws.suggestion)).cloned();
+                pick_emoji = emoji_found.as_ref().and_then(|e| e.get(ws.suggestion)).cloned();
+            }
+        } else {
+            ws.suggestion = 0;
         }
     }
 
@@ -1377,8 +1387,12 @@ pub fn composer(ui: &mut Ui, ws: &mut Workspace, rect: Rect, hint: &str, reply: 
         .stick_to_bottom(true)
         .show(&mut t, |ui| ui.add(edit))
         .inner;
-    if response.changed() && !reply {
-        ws.typed();
+    if response.changed() {
+        // What's typed changed: the suggestions start over at the first.
+        ws.suggestion = 0;
+        if !reply {
+            ws.typed();
+        }
     }
     let text_height = response.rect.height().round();
     if text_height != ws.composer_text[usize::from(reply)] {
@@ -1413,7 +1427,7 @@ pub fn composer(ui: &mut Ui, ws: &mut Workspace, rect: Rect, hint: &str, reply: 
                         ui.spacing_mut().item_spacing.y = 0.0;
                         for (i, person) in people.iter().enumerate() {
                             let (r, click) = ui.allocate_exact_size(vec2(ui.available_width(), row_h), Sense::click());
-                            if i == 0 || click.hovered() {
+                            if i == ws.suggestion || click.hovered() {
                                 ui.painter().rect_filled(r, CornerRadius::same(8), p.hover);
                             }
                             let picture =
@@ -1452,7 +1466,7 @@ pub fn composer(ui: &mut Ui, ws: &mut Workspace, rect: Rect, hint: &str, reply: 
                         ui.spacing_mut().item_spacing.y = 0.0;
                         for (i, e) in found.iter().enumerate() {
                             let (r, click) = ui.allocate_exact_size(vec2(ui.available_width(), row_h), Sense::click());
-                            if i == 0 || click.hovered() {
+                            if i == ws.suggestion || click.hovered() {
                                 ui.painter().rect_filled(r, CornerRadius::same(8), p.hover);
                             }
                             let face = Rect::from_center_size(pos2(r.left() + 20.0, r.center().y), vec2(22.0, 22.0));

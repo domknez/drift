@@ -156,6 +156,8 @@ pub struct Workspace {
     pub pending_delete: Option<PendingDelete>,
     /// Teams couldn't be reached the last time it was asked.
     pub offline: bool,
+    /// The person or emoji picked with the arrows in the composer's suggestions.
+    pub suggestion: usize,
     /// The keyboard shortcuts' sheet is open.
     pub shortcuts: bool,
     /// When the others were last told the user is typing (and where).
@@ -382,6 +384,7 @@ impl Workspace {
             pending_delete: None,
             offline: false,
             shortcuts: false,
+            suggestion: 0,
             typing: HashMap::new(),
             typing_sent: None,
             marked: None,

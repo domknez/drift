@@ -258,11 +258,12 @@ pub fn rich_text(ui: &mut Ui, pictures: &mut Pictures, body: &[Inline], color: C
                                 if hit {
                                     piece = piece.background_color(MARK);
                                 }
-                                ui.label(piece);
+                                ui.add(egui::Label::new(piece).selectable(true));
                             }
                         }
+                        // Message text can be selected and copied (across runs and lines too).
                         (None, _) => {
-                            ui.label(rich);
+                            ui.add(egui::Label::new(rich).selectable(true));
                         }
                     }
                 }
