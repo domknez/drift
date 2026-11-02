@@ -53,6 +53,8 @@ objc2-user-notifications = { version = "0.3", default-features = false, features
 [target.'cfg(unix)'.dependencies]
 # The local time zone for message times.
 libc = "0.2"
+# Unpacking an update's .tar.gz (Linux) without the system's tar, which may not be GNU's.
+tar = { version = "0.4", default-features = false }
 
 [target.'cfg(windows)'.dependencies]
 notify-rust = "4"

@@ -263,12 +263,18 @@ fn unpack_bundle(zip: &Path, dest: &Path, work: &Path) -> Result<(), String> {
 }
 
 /// Linux and Windows: the archive's executable (in its one folder,
-/// `drift-<v>-<platform>/`), to `dest` next to the running one. `tar` reads both the
-/// `.tar.gz` and, on Windows (10 and later), the `.zip`.
+/// `drift-<v>-<platform>/`), to `dest` next to the running one. The `.tar.gz` is
+/// unpacked here; Windows' own `tar` (10 and later) reads the `.zip`.
 fn unpack_binary(archive: &Path, dest: &Path, work: &Path) -> Result<(), String> {
     let unpacked = work.join("unpacked");
     std::fs::create_dir_all(&unpacked).map_err(|e| e.to_string())?;
+    #[cfg(windows)]
     run("tar", &["-xf", path_str(archive)?, "-C", path_str(&unpacked)?])?;
+    #[cfg(not(windows))]
+    {
+        let file = std::fs::File::open(archive).map_err(|e| e.to_string())?;
+        tar::Archive::new(flate2::read::GzDecoder::new(file)).unpack(&unpacked).map_err(|e| format!("unpacking: {e}"))?;
+    }
     let exe = if cfg!(windows) { "drift.exe" } else { "drift" };
     let new = std::fs::read_dir(&unpacked)
         .map_err(|e| e.to_string())?
@@ -345,6 +351,33 @@ fn path_str(p: &Path) -> Result<&str, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn unpacks_the_executable_from_a_tar_gz() {
+        let work = std::env::temp_dir().join(format!("drift-unpack-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&work);
+        std::fs::create_dir_all(&work).unwrap();
+        let archive = work.join("drift-9.9.9-linux-x86_64.tar.gz");
+        {
+            let gz = flate2::write::GzEncoder::new(std::fs::File::create(&archive).unwrap(), flate2::Compression::fast());
+            let mut builder = tar::Builder::new(gz);
+            for (name, data) in [("drift", &b"#!new"[..]), ("README.md", &b"read me"[..])] {
+                let mut header = tar::Header::new_gnu();
+                header.set_size(data.len() as u64);
+                header.set_mode(0o644);
+                header.set_cksum();
+                builder.append_data(&mut header, format!("drift-9.9.9-linux-x86_64/{name}"), data).unwrap();
+            }
+            builder.into_inner().unwrap().finish().unwrap();
+        }
+        let dest = work.join("drift.new");
+        unpack_binary(&archive, &dest, &work).unwrap();
+        assert_eq!(std::fs::read(&dest).unwrap(), b"#!new");
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(std::fs::metadata(&dest).unwrap().permissions().mode() & 0o777, 0o755);
+        std::fs::remove_dir_all(&work).unwrap();
+    }
 
     #[test]
     fn compares_versions() {

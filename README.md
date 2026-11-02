@@ -79,7 +79,8 @@ Download drift from the [latest release](https://github.com/domknez/drift/releas
   first time: open it with right-click → Open, or run
   `xattr -dr com.apple.quarantine /Applications/drift.app` once.
 - **Linux** (x86_64): unpack `drift-<version>-linux-x86_64.tar.gz` and run `drift`. It
-  needs GTK 3, WebKitGTK 4.1 and D-Bus.
+  needs glibc 2.35 or newer (Ubuntu 22.04, Debian 12 and later), GTK 3, WebKitGTK 4.1
+  and D-Bus.
 - **Windows** (x86_64): unzip `drift-<version>-windows-x86_64.zip` and run `drift.exe`.
 
 drift keeps itself up to date: it checks for a new release now and then, downloads it
