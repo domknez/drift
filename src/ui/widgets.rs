@@ -42,9 +42,25 @@ pub fn status_dot(painter: &egui::Painter, center: egui::Pos2, radius: f32, stat
         }
     };
     painter.circle_filled(center, radius, fill);
-    if status == Availability::DoNotDisturb {
-        let half = radius * 0.5;
-        painter.line_segment([center - vec2(half, 0.0), center + vec2(half, 0.0)], Stroke::new(radius * 0.4, Color32::WHITE));
+    // A mark in each colour, as Teams has, so it isn't told by colour alone: a tick,
+    // a bar, the hands of a clock (too small to draw on the tiniest dots).
+    let r = radius;
+    let mark = Stroke::new((r * 0.32).max(1.2), Color32::WHITE);
+    match status {
+        Availability::DoNotDisturb => {
+            painter.line_segment([center - vec2(r * 0.5, 0.0), center + vec2(r * 0.5, 0.0)], Stroke::new(r * 0.4, Color32::WHITE));
+        }
+        _ if r < 5.0 => {}
+        Availability::Available => {
+            painter.add(egui::Shape::line(
+                vec![center + vec2(-r * 0.45, 0.0), center + vec2(-r * 0.1, r * 0.35), center + vec2(r * 0.45, -r * 0.35)],
+                mark,
+            ));
+        }
+        Availability::BeRightBack | Availability::Away => {
+            painter.add(egui::Shape::line(vec![center + vec2(0.0, -r * 0.5), center, center + vec2(r * 0.4, r * 0.2)], mark));
+        }
+        _ => {}
     }
 }
 

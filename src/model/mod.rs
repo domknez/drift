@@ -351,6 +351,13 @@ pub struct Presence {
     pub out_of_office: bool,
 }
 
+impl Presence {
+    /// How it reads (on hover, and to screen readers).
+    pub fn label(self) -> &'static str {
+        if self.out_of_office { "Out of office" } else { self.availability.label() }
+    }
+}
+
 /// An emoji of the user's organisation (a tenant's own, added in Teams).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CustomEmoji {

@@ -622,6 +622,7 @@ pub fn lead(ui: &mut Ui, ws: &mut Workspace, c: &Conversation, rect: Rect, behin
             if let Some(presence) = ws.presence_of(c) {
                 let radius = (rect.width() * 0.14).max(4.0);
                 widgets::presence_dot(ui.painter(), rect.right_bottom() - vec2(radius - 1.0, radius - 1.0), radius, presence, behind);
+                ui.interact(rect, ui.scope_id().with(("presence", &c.id)), Sense::hover()).on_hover_text(presence.label());
             }
         }
     }
@@ -647,7 +648,8 @@ fn row(ui: &mut Ui, ws: &mut Workspace, d: &Directory, c: &Conversation) {
     let selected = ws.open.as_deref() == Some(c.id.as_str());
     let (outer, response) = ui.allocate_exact_size(vec2(ui.available_width(), metrics::ROW + 2.0), Sense::click());
     let unread = if c.unread && !c.muted { ", unread" } else { "" };
-    widgets::control(ui, &response, egui::Role::ListItem, &format!("{}{unread}", c.title));
+    let presence = ws.presence_of(c).map_or(String::new(), |p| format!(", {}", p.label()));
+    widgets::control(ui, &response, egui::Role::ListItem, &format!("{}{presence}{unread}", c.title));
     let rect = Rect::from_min_size(outer.min + vec2(8.0, 1.0), vec2(outer.width() - 16.0, metrics::ROW));
     if selected || response.hovered() {
         ui.painter().rect_filled(rect, CornerRadius::same(12), if selected { p.selected } else { p.hover });

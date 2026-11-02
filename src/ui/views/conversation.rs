@@ -233,6 +233,7 @@ fn head(ui: &mut Ui, ws: &mut Workspace, rect: Rect, directory: &Directory, id: 
             widgets::avatar(&mut child, &c.id, &c.title, 36.0, picture);
             if let Some(presence) = ws.presence_of(c) {
                 widgets::presence_dot(ui.painter(), pic.right_bottom() - vec2(4.0, 4.0), 5.0, presence, p.panel);
+                ui.interact(pic, ui.scope_id().with("head-presence"), Sense::hover()).on_hover_text(presence.label());
             }
         }
         kind => {
