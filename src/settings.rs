@@ -17,6 +17,38 @@ pub fn dir() -> Option<PathBuf> {
     Some(base.join("drift"))
 }
 
+/// Messages left half-written, by conversation, kept in `drafts.json` next to the
+/// settings so they're back after a restart.
+pub fn load_drafts() -> std::collections::HashMap<String, String> {
+    dir().map(|d| read_drafts(&d.join("drafts.json"))).unwrap_or_default()
+}
+
+pub fn save_drafts(drafts: &std::collections::HashMap<String, String>) {
+    if let Some(dir) = dir() {
+        write_drafts(&dir.join("drafts.json"), drafts);
+    }
+}
+
+fn read_drafts(path: &Path) -> std::collections::HashMap<String, String> {
+    std::fs::read(path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+}
+
+/// Write `drafts` to `path`, or remove the file when there are none.
+fn write_drafts(path: &Path, drafts: &std::collections::HashMap<String, String>) {
+    let result = if drafts.is_empty() {
+        match std::fs::remove_file(path) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+            _ => Ok(()),
+        }
+    } else {
+        let dir = path.parent().unwrap_or(Path::new("."));
+        std::fs::create_dir_all(dir).and_then(|()| std::fs::write(path, serde_json::to_vec(drafts).unwrap_or_default()))
+    };
+    if let Err(e) = result {
+        log_warn!("could not save drafts to {}: {e}", path.display());
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Appearance {
     System,
@@ -317,6 +349,18 @@ mod tests {
     #[test]
     fn round_trips_through_the_file() {
         assert_eq!(merge("", &Prefs::parse(SAVED).values()), SAVED);
+    }
+
+    #[test]
+    fn drafts_survive_a_restart() {
+        let dir = std::env::temp_dir().join(format!("drift-drafts-test-{}", std::process::id()));
+        let path = dir.join("drafts.json");
+        let drafts = std::collections::HashMap::from([("19:a@thread.v2".to_string(), "half\nwritten, with \"quotes\"".to_string())]);
+        write_drafts(&path, &drafts);
+        assert_eq!(read_drafts(&path), drafts);
+        write_drafts(&path, &Default::default());
+        assert!(!path.exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

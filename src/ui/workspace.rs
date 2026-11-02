@@ -134,6 +134,8 @@ pub struct Workspace {
     /// Messages left half-written in other conversations, by conversation: back in
     /// the composer when the conversation is opened again.
     pub drafts: HashMap<String, String>,
+    /// The saved drafts have been put in (once, at start).
+    pub drafts_loaded: bool,
     sending: Load<(), Error>,
     /// Writes in the background (reactions, read marks); true asks to fetch the
     /// messages again after.
@@ -305,6 +307,7 @@ impl Workspace {
             folded_loaded: false,
             draft: String::new(),
             drafts: HashMap::new(),
+            drafts_loaded: false,
             sending: Load::Idle,
             chores: Vec::new(),
             marked: None,
@@ -1117,6 +1120,18 @@ impl Workspace {
     fn failed(&mut self, e: Error) {
         log_warn!("{e}");
         self.error = Some(e.to_string());
+    }
+
+    /// Every half-written message, the open conversation's included (not an edit).
+    pub fn all_drafts(&self) -> HashMap<String, String> {
+        let mut all = self.drafts.clone();
+        if let Some(open) = &self.open
+            && !self.draft.trim().is_empty()
+            && !self.editing.as_ref().is_some_and(|(reply, _)| !reply)
+        {
+            all.insert(open.clone(), self.draft.clone());
+        }
+        all
     }
 
     /// Keep what's half-written in the open conversation for when it's opened again

@@ -21,6 +21,10 @@ pub struct App {
     updates: Updates,
     /// `DRIFT_SCREENSHOT=<file.png>`: save the window once it has loaded, then quit.
     capture: Option<Capture>,
+    /// Drafts are kept across restarts (not in the demo): as last saved, and when.
+    keep_drafts: bool,
+    saved_drafts: Option<std::collections::HashMap<String, String>>,
+    drafts_at: Option<std::time::Instant>,
 }
 
 struct Capture {
@@ -145,7 +149,16 @@ impl App {
                 Ok("meetings") => Section::Meetings,
                 _ => Section::Chats,
             };
-            return App { prefs, applied: None, screen: Screen::Signed(Box::new(workspace)), updates: Updates::demo(), capture };
+            return App {
+                prefs,
+                applied: None,
+                screen: Screen::Signed(Box::new(workspace)),
+                updates: Updates::demo(),
+                capture,
+                keep_drafts: false,
+                saved_drafts: None,
+                drafts_at: None,
+            };
         }
         let prefs = Prefs::load();
         let screen = match Session::stored() {
@@ -155,7 +168,7 @@ impl App {
             None => Screen::SignIn(SignIn::new(None)),
         };
         let updates = Updates::new(prefs.auto_update);
-        App { prefs, applied: None, screen, updates, capture }
+        App { prefs, applied: None, screen, updates, capture, keep_drafts: true, saved_drafts: None, drafts_at: None }
     }
 
     /// Take the screenshot once the workspace has loaded, save it and quit.
@@ -230,6 +243,11 @@ impl App {
             }
             Request::SignOut => {
                 Session::sign_out();
+                // What was being written is the account's: it goes with it.
+                if self.keep_drafts {
+                    crate::settings::save_drafts(&Default::default());
+                }
+                self.saved_drafts = None;
                 self.prefs.update(|p| p.conversation = None);
                 self.screen = Screen::SignIn(SignIn::new(None));
             }
@@ -239,6 +257,9 @@ impl App {
 
 impl eframe::App for App {
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        if let (true, Screen::Signed(workspace)) = (self.keep_drafts, &self.screen) {
+            crate::settings::save_drafts(&workspace.all_drafts());
+        }
         self.updates.apply_on_exit();
     }
 
@@ -275,6 +296,19 @@ impl eframe::App for App {
                 if workspace.following.is_none() {
                     workspace.following = Some(self.prefs.following.iter().cloned().collect());
                 }
+                if !workspace.drafts_loaded {
+                    workspace.drafts_loaded = true;
+                    if self.keep_drafts {
+                        let mut saved = crate::settings::load_drafts();
+                        if let Some(open) = &workspace.open
+                            && workspace.draft.is_empty()
+                        {
+                            workspace.draft = saved.remove(open).unwrap_or_default();
+                        }
+                        workspace.drafts.extend(saved);
+                        self.saved_drafts = Some(workspace.all_drafts());
+                    }
+                }
                 if workspace.recent_emoji.is_none() {
                     workspace.recent_emoji = Some(self.prefs.recent_emoji.clone());
                 }
@@ -310,6 +344,19 @@ impl eframe::App for App {
                 if workspace.recent_emoji != recent_before {
                     let recent = workspace.recent_emoji.clone().unwrap_or_default();
                     self.prefs.update(|p| p.recent_emoji = recent);
+                }
+                // Drafts saved a second after they change at most, and at quitting.
+                if self.keep_drafts {
+                    let drafts = workspace.all_drafts();
+                    if self.saved_drafts.as_ref() != Some(&drafts) {
+                        if self.drafts_at.is_none_or(|at| at.elapsed() >= std::time::Duration::from_secs(1)) {
+                            crate::settings::save_drafts(&drafts);
+                            self.saved_drafts = Some(drafts);
+                            self.drafts_at = Some(std::time::Instant::now());
+                        } else {
+                            ctx.request_repaint_after(std::time::Duration::from_secs(1));
+                        }
+                    }
                 }
                 if workspace.muted_here != muted_before {
                     let mut muted: Vec<String> = workspace.muted_here.iter().flatten().cloned().collect();
