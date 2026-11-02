@@ -160,6 +160,10 @@ pub struct Workspace {
     pub suggestion: usize,
     /// How wide the list is (dragged by the user, kept in the settings).
     pub list_width: f32,
+    /// Someone calling: the call's id, who, and when it began ringing (answered in Teams).
+    pub ringing: Option<(String, String, Instant)>,
+    /// When the ring last sounded.
+    rang_at: Option<Instant>,
     /// The keyboard shortcuts' sheet is open.
     pub shortcuts: bool,
     /// When the others were last told the user is typing (and where).
@@ -390,6 +394,8 @@ impl Workspace {
             pending_delete: None,
             offline: false,
             shortcuts: false,
+            ringing: None,
+            rang_at: None,
             list_width: crate::ui::style::metrics::LIST_WIDTH,
             suggestion: 0,
             typing: HashMap::new(),
@@ -1091,6 +1097,7 @@ impl Workspace {
             match push {
                 Push::Live(live) => self.live = live,
                 Push::Message { conversation, message } => self.pushed(&conversation, *message),
+                Push::Call { id, from, name, group } => self.called(ctx, id, &from, name, group),
                 Push::Typing { conversation, id, name, typing } => {
                     let who = self.typing.entry(conversation).or_default();
                     who.retain(|(i, ..)| *i != id);
@@ -1225,6 +1232,7 @@ impl Workspace {
             }
         }
         self.remind_meetings(ctx);
+        self.ring(ctx);
         if let Some(result) = self.activity_load.take() {
             match result {
                 Ok(items) => self.activity = Some(items),
@@ -1412,6 +1420,41 @@ impl Workspace {
             Error::Network(_) => self.offline = true,
             e => self.error = Some(e.to_string()),
         }
+    }
+
+    /// Someone's calling: a notification (a click opens Teams, where it's answered),
+    /// and in the window a notice that rings until it's answered there, dismissed,
+    /// or it would have stopped ringing.
+    fn called(&mut self, ctx: &egui::Context, id: String, from: &str, name: String, group: bool) {
+        if from == self.me_id || self.ringing.as_ref().is_some_and(|(call, ..)| *call == id) {
+            return;
+        }
+        let title = if group { format!("{name} is calling (group call)") } else { format!("{name} is calling") };
+        let ctx2 = ctx.clone();
+        crate::notify::show(&title, Some("Call"), "Click to answer in Teams", move || {
+            ctx2.open_url(egui::OpenUrl::new_tab(TEAMS_WEB));
+            ctx2.request_repaint();
+        });
+        self.ringing = Some((id, title, Instant::now()));
+        self.rang_at = None;
+    }
+
+    /// While a call rings: the sound every few seconds (the notice shows it), until
+    /// it's been ringing as long as Teams rings.
+    fn ring(&mut self, ctx: &egui::Context) {
+        const RINGS_FOR: Duration = Duration::from_secs(45);
+        const EVERY: Duration = Duration::from_secs(4);
+        if self.ringing.as_ref().is_some_and(|(.., at)| at.elapsed() >= RINGS_FOR) {
+            self.ringing = None;
+        }
+        if self.ringing.is_none() {
+            return;
+        }
+        if self.rang_at.is_none_or(|at| at.elapsed() >= EVERY) {
+            self.rang_at = Some(Instant::now());
+            crate::notify::chime();
+        }
+        ctx.request_repaint_after(Duration::from_millis(500));
     }
 
     /// A message Teams pushed: into the open conversation (and the kept ones) right
@@ -1712,6 +1755,9 @@ fn person(c: &Conversation) -> Option<&str> {
         _ => None,
     }
 }
+
+/// Teams on the web, where a call is answered (drift doesn't take calls itself).
+pub const TEAMS_WEB: &str = "https://teams.microsoft.com/";
 
 /// How long before a meeting it's reminded of, and how long after its start still.
 const REMIND_BEFORE: i64 = 60_000;

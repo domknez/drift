@@ -48,6 +48,8 @@ pub enum Push {
     Live(bool),
     /// A new or changed message, as pushed (shown before the conversation is fetched again).
     Message { conversation: ConversationId, message: Box<crate::model::Message> },
+    /// Someone is calling the user: the call's id, who (id, name), and whether it's a group call.
+    Call { id: String, from: String, name: String, group: bool },
     /// Someone started (or stopped) typing in a conversation: who (id, name).
     Typing { conversation: ConversationId, id: String, name: String, typing: bool },
 }

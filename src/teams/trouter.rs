@@ -227,33 +227,67 @@ fn send(socket: &mut Socket, frame: String) -> Result<()> {
 }
 
 /// Tell the registrar to send the chat service's events to this socket.
+/// Have the services send here: calls (to `…/NGCallManagerWin`), then the chat
+/// service's events (which has to come last, as the web client does it).
 fn register(teams: &Teams, surl: &str, endpoint: &str) -> Result<()> {
     let skype = teams.session().skype()?;
     let bearer = format!("Bearer {}", teams.session().access(SPACES)?);
-    let body = json!({
-        "clientDescription": {
-            "appId": "TeamsCDLWebWorker",
-            "aesKey": "",
-            "languageId": "en-US",
-            "platform": "edge",
-            "templateKey": "TeamsCDLWebWorker_2.1",
-            "platformUIVersion": CLIENT_VERSION,
-        },
-        "registrationId": endpoint,
-        "nodeId": "",
-        "transports": {"TROUTER": [{"context": "", "path": surl, "ttl": REGISTRATION_TTL}]},
-    });
-    http::request(
-        Method::Post,
-        REGISTRAR,
-        &[("X-Skypetoken", &skype.token), ("Authorization", &bearer), ("Content-Type", "application/json")],
-        Body::Json(&body),
-    )
-    .map(|_| ())
+    let one = |app: &str, template: &str, path: &str| {
+        let body = json!({
+            "clientDescription": {
+                "appId": app,
+                "aesKey": "",
+                "languageId": "en-US",
+                "platform": "edge",
+                "templateKey": template,
+                "platformUIVersion": CLIENT_VERSION,
+            },
+            "registrationId": endpoint,
+            "nodeId": "",
+            "transports": {"TROUTER": [{"context": "", "path": path, "ttl": REGISTRATION_TTL}]},
+        });
+        http::request(
+            Method::Post,
+            REGISTRAR,
+            &[("X-Skypetoken", &skype.token), ("Authorization", &bearer), ("Content-Type", "application/json")],
+            Body::Json(&body),
+        )
+        .map(|_| ())
+    };
+    // Calls are a nicety: without them messages still come.
+    if let Err(e) = one("NextGenCalling", "DesktopNgc_2.3:SkypeNgc", &format!("{surl}{CALLS}")) {
+        log_warn!("trouter: no call notices: {e}");
+    }
+    one("TeamsCDLWebWorker", "TeamsCDLWebWorker_2.1", surl)
+}
+
+/// Where call notices come, after the socket's own address.
+const CALLS: &str = "NGCallManagerWin";
+
+/// A call notice: someone calling (event 107) — who, as the call service says it.
+/// Its details come gzipped and in Base64 (`cp`).
+fn call_of(body: &Value) -> Option<Push> {
+    if body["evt"].as_i64() != Some(107) {
+        return None;
+    }
+    let packed = super::auth::base64url(body["cp"].as_str()?)?;
+    let mut text = String::new();
+    flate2::read::GzDecoder::new(packed.as_slice()).take(1 << 20).read_to_string(&mut text).ok()?;
+    let details: Value = serde_json::from_str(&text).ok()?;
+    let from = &details["callNotification"]["from"];
+    Some(Push::Call {
+        id: body["callId"].as_str().unwrap_or("").to_string(),
+        from: from["id"].as_str()?.to_string(),
+        name: from["displayName"].as_str().unwrap_or("Someone").to_string(),
+        group: details["conversationInvitation"]["isMultiParty"].as_bool().unwrap_or(false),
+    })
 }
 
 /// What a forwarded request says changed.
 fn pushes(url: &str, body: &Value) -> Vec<Push> {
+    if url.ends_with(CALLS) {
+        return call_of(body).into_iter().collect();
+    }
     if !url.ends_with("/messaging") || body["type"] != "EventMessage" {
         return Vec::new();
     }
@@ -365,6 +399,31 @@ fn correlation_vector() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hears_calls() {
+        use std::io::Write;
+        let details = json!({"callNotification": {"from": {"id": "8:orgid:maya", "displayName": "Maya Lindqvist"}},
+            "conversationInvitation": {"isMultiParty": false}});
+        let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+        gz.write_all(details.to_string().as_bytes()).unwrap();
+        let packed = gz.finish().unwrap();
+        const B64: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let cp: String = packed
+            .chunks(3)
+            .flat_map(|c| {
+                let n = (u32::from(c[0]) << 16) | (u32::from(*c.get(1).unwrap_or(&0)) << 8) | u32::from(*c.get(2).unwrap_or(&0));
+                let take = c.len() + 1;
+                (0..4).map(move |i| if i < take { B64[(n >> (18 - 6 * i) & 63) as usize] as char } else { '=' })
+            })
+            .collect();
+        let body = json!({"evt": 107, "cp": cp, "callId": "call-1", "callerId": "orgid:maya"});
+        assert!(matches!(&pushes("https://x/NGCallManagerWin", &body)[..],
+            [Push::Call { id, from, name, group: false }] if id == "call-1" && from == "8:orgid:maya" && name == "Maya Lindqvist"));
+        // Other call events, and garbage, are nothing.
+        assert!(pushes("https://x/NGCallManagerWin", &json!({"evt": 108, "cp": cp})).is_empty());
+        assert!(pushes("https://x/NGCallManagerWin", &json!({"evt": 107, "cp": "not base64 gzip"})).is_empty());
+    }
 
     #[test]
     fn survives_broken_frames() {
