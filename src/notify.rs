@@ -35,6 +35,9 @@ pub fn show(title: &str, subtitle: Option<&str>, body: &str, on_click: impl FnOn
         let spawned = std::thread::Builder::new().name("notification".into()).spawn(move || {
             let mut n = notify_rust::Notification::new();
             n.summary(&title).body(&body).appname("drift");
+            // The desktop's own sound for a new message (freedesktop's sound theme).
+            #[cfg(unix)]
+            n.sound_name("message-new-instant");
             match n.show() {
                 #[cfg(unix)]
                 Ok(handle) => handle.wait_for_action(|action| {
@@ -50,6 +53,32 @@ pub fn show(title: &str, subtitle: Option<&str>, body: &str, on_click: impl FnOn
         if let Err(e) = spawned {
             log_warn!("could not show a notification: {e}");
         }
+    }
+}
+
+/// drift's sound for a new message: its own, made by `scripts/chime.py`.
+#[cfg(target_os = "macos")]
+const CHIME: &[u8] = include_bytes!("../assets/sounds/message.wav");
+
+/// Play the sound for a new message, for those shown in the window (system
+/// notifications bring their own). Call from the main thread.
+pub fn chime() {
+    #[cfg(target_os = "macos")]
+    {
+        use objc2::AllocAnyThread;
+        use objc2_app_kit::NSSound;
+        use objc2_foundation::NSData;
+        thread_local! {
+            // Kept while it plays (and for the next time).
+            static SOUND: Option<objc2::rc::Retained<NSSound>> =
+                NSSound::initWithData(NSSound::alloc(), &NSData::with_bytes(CHIME));
+        }
+        SOUND.with(|sound| {
+            if let Some(sound) = sound {
+                sound.stop();
+                sound.play();
+            }
+        });
     }
 }
 
@@ -154,7 +183,8 @@ mod center {
             content.setSubtitle(&NSString::from_str(subtitle));
         }
         content.setBody(&NSString::from_str(body));
-        content.setSound(Some(&UNNotificationSound::defaultSound()));
+        // drift's own sound (in the app bundle), as Teams has its own.
+        content.setSound(Some(&UNNotificationSound::soundNamed(&NSString::from_str("message.wav"))));
         let id = format!("drift-{}", NEXT.fetch_add(1, Ordering::Relaxed));
         if let Ok(mut clicks) = CLICKS.lock() {
             let clicks = clicks.get_or_insert_default();

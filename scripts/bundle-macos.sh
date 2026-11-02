@@ -21,6 +21,8 @@ rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$binary" "$app/Contents/MacOS/drift"
 cp assets/icon/drift.icns "$app/Contents/Resources/drift.icns"
+# The sound of drift's notifications (the notification center finds it by name here).
+cp assets/sounds/message.wav "$app/Contents/Resources/message.wav"
 
 cat > "$app/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

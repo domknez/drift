@@ -544,6 +544,9 @@ impl Workspace {
             );
             return;
         }
+        if focused {
+            crate::notify::chime();
+        }
         for c in new {
             let Some(last) = &c.last else { continue };
             let one_to_one = c.kind == Kind::Chat && c.members.len() <= 1;
