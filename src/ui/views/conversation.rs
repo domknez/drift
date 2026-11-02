@@ -1200,6 +1200,15 @@ fn emoji_over_text(ui: &Ui, pictures: &mut Pictures, output: &egui::text_edit::T
     }
 }
 
+/// A file's size, as people read it.
+fn size_text(bytes: usize) -> String {
+    match bytes {
+        0..1_000 => format!("{bytes} B"),
+        1_000..1_000_000 => format!("{:.0} KB", bytes as f64 / 1e3),
+        _ => format!("{:.1} MB", bytes as f64 / 1e6),
+    }
+}
+
 /// What's pasted into the composer: text keeps the links it had (from the clipboard's
 /// HTML), and a picture (a screenshot, say) is attached.
 fn paste(ui: &mut Ui, ws: &mut Workspace, reply: bool) {
@@ -1296,9 +1305,13 @@ pub fn composer(ui: &mut Ui, ws: &mut Workspace, rect: Rect, hint: &str, reply: 
                 .show(&mut row, |ui| {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 6.0;
-                        widgets::icon(ui, Icon::Image, 15.0, p.accent);
+                        let (icon, about) = match a.picture {
+                            Some((_, (w, h))) => (Icon::Image, format!("{w}×{h}")),
+                            None => (Icon::File, size_text(a.bytes.len())),
+                        };
+                        widgets::icon(ui, icon, 15.0, p.accent);
                         ui.label(RichText::new(&a.name).font(ty::small_strong()).color(p.text));
-                        ui.label(RichText::new(format!("{}×{}", a.size.0, a.size.1)).font(ty::meta()).color(p.faint));
+                        ui.label(RichText::new(about).font(ty::meta()).color(p.faint));
                         if widgets::icon_button(ui, Icon::Close, "Remove").clicked() {
                             remove = Some(i);
                         }
@@ -1539,12 +1552,11 @@ pub fn composer(ui: &mut Ui, ws: &mut Workspace, rect: Rect, hint: &str, reply: 
         Rect::from_min_max(pos2(send_rect.left() - tools_w - 6.0, send_rect.top()), pos2(send_rect.left() - 6.0, send_rect.bottom()));
     let mut row = ui.new_child(egui::UiBuilder::new().max_rect(tools).layout(Layout::left_to_right(Align::Center)));
     row.spacing_mut().item_spacing.x = 2.0;
-    if widgets::icon_button(&mut row, Icon::Clip, "Attach pictures (or drop them on the window)").clicked()
-        && let Some(files) =
-            rfd::FileDialog::new().set_title("Attach pictures").add_filter("Pictures", &["png", "jpg", "jpeg"]).pick_files()
+    if widgets::icon_button(&mut row, Icon::Clip, "Attach files (or drop them on the window)").clicked()
+        && let Some(files) = rfd::FileDialog::new().set_title("Attach files").pick_files()
     {
         for file in files {
-            let name = file.file_name().map_or_else(|| "picture".into(), |n| n.to_string_lossy().into_owned());
+            let name = file.file_name().map_or_else(|| "file".into(), |n| n.to_string_lossy().into_owned());
             match std::fs::read(&file) {
                 Ok(bytes) => ws.attach(reply, &name, bytes),
                 Err(e) => ws.error = Some(format!("{name}: {e}")),

@@ -12,10 +12,12 @@ mod parse;
 pub mod shape;
 mod trouter;
 
-use crate::backend::{Backend, Error, Push, Result};
+use crate::backend::{Backend, Error, FilePlace, Push, Result};
 use crate::model::markdown::Outgoing;
-use crate::model::{Availability, Conversation, CustomEmoji, Directory, Kind, Meeting, Message, Picture, Presence, SearchHit, Status};
-use auth::{CHAT_AGGREGATOR, PRESENCE, SEARCH, SPACES, Session};
+use crate::model::{
+    Availability, Conversation, CustomEmoji, Directory, Kind, Meeting, Message, Picture, Presence, SearchHit, Status, Upload,
+};
+use auth::{CHAT_AGGREGATOR, GRAPH, PRESENCE, SEARCH, SPACES, Session};
 use http::{Body, Method};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -34,11 +36,13 @@ pub struct Teams {
     session: Mutex<Session>,
     /// Display names by id, filled as people are looked up.
     names: Mutex<HashMap<String, String>>,
+    /// The user's OneDrive (its site), once looked up.
+    my_site: Mutex<Option<String>>,
 }
 
 impl Teams {
     pub fn new(session: Session) -> Teams {
-        Teams { session: Mutex::new(session), names: Mutex::new(HashMap::new()) }
+        Teams { session: Mutex::new(session), names: Mutex::new(HashMap::new()), my_site: Mutex::new(None) }
     }
 
     fn session(&self) -> std::sync::MutexGuard<'_, Session> {
@@ -141,6 +145,9 @@ impl Teams {
             "contenttype": "text",
             "imdisplayname": Backend::me(self),
         });
+        if !message.files.is_empty() {
+            body["properties"]["files"] = Value::String(file_cards(&message.files).to_string());
+        }
         if !message.mentions.is_empty() {
             let mentions: Vec<Value> = message
                 .mentions
@@ -150,9 +157,82 @@ impl Teams {
                     serde_json::json!({"@type": "http://schema.skype.com/Mention", "itemid": i, "mri": m.id, "mentionType": "person", "displayName": m.name})
                 })
                 .collect();
-            body["properties"] = serde_json::json!({"mentions": Value::Array(mentions).to_string()});
+            body["properties"]["mentions"] = Value::String(Value::Array(mentions).to_string());
         }
         body
+    }
+
+    /// A Microsoft Graph request (`path` after `/v1.0`).
+    fn graph(&self, method: Method, path: &str, body: Body) -> Result<Value> {
+        let bearer = format!("Bearer {}", self.session().access(GRAPH)?);
+        http::upload(
+            method,
+            &format!("https://graph.microsoft.com/v1.0{path}"),
+            &[("Authorization", &bearer), ("Accept", "application/json")],
+            body,
+        )
+    }
+
+    /// The user's OneDrive site (`https://<tenant>-my.sharepoint.com/personal/<user>`).
+    fn my_site(&self) -> Result<String> {
+        if let Some(site) = self.my_site.lock().unwrap_or_else(|e| e.into_inner()).clone() {
+            return Ok(site);
+        }
+        let me = self.graph(Method::Get, "/me?$select=mySite", Body::None)?;
+        let site = me["mySite"].as_str().filter(|s| !s.is_empty()).ok_or_else(|| Error::Service("this account has no OneDrive".into()))?;
+        let site = site.trim_end_matches('/').to_string();
+        *self.my_site.lock().unwrap_or_else(|e| e.into_inner()) = Some(site.clone());
+        Ok(site)
+    }
+
+    /// A chat's file: into the user's OneDrive (where Teams keeps them, "Microsoft
+    /// Teams Chat Files"), then shared with the chat's other members to read.
+    fn upload_to_onedrive(&self, members: &[String], name: &str, bytes: &[u8]) -> Result<Upload> {
+        let site = self.my_site()?;
+        let host = url::Url::parse(&site)
+            .ok()
+            .and_then(|u| u.host_str().map(str::to_string))
+            .ok_or_else(|| Error::Service("no OneDrive address".into()))?;
+        let bearer = format!("Bearer {}", self.session().access(&format!("https://{host}"))?);
+        let headers = [("Authorization", bearer.as_str()), ("Accept", "application/json")];
+        let path = format!("{}/{}", http::encode(CHAT_FILES), http::encode(&onedrive_name(name)));
+        let put = format!("{site}/_api/v2.0/drive/root:/{path}:/content?@name.conflictBehavior=rename&$select=*,sharepointIds");
+        let item = http::upload(Method::Put, &put, &headers, Body::Bytes(bytes, "application/octet-stream"))?;
+        let mut upload = uploaded(&item, &site)?;
+        let others: Vec<Value> = members
+            .iter()
+            .filter_map(|m| m.strip_prefix("8:orgid:"))
+            .filter(|oid| format!("8:orgid:{oid}") != self.my_id())
+            .map(|oid| serde_json::json!({"objectId": oid}))
+            .collect();
+        if !others.is_empty() {
+            // Shared quietly (no e-mail), as Teams does: the message is the notice.
+            let invite = serde_json::json!({"recipients": others, "roles": ["read"], "requireSignIn": true, "sendInvitation": false});
+            let url = format!("{site}/_api/v2.0/sites/root/items/{}/driveItem/invite", upload.item_id);
+            let granted = http::request(Method::Post, &url, &headers, Body::Json(&invite))?;
+            let first = &granted["value"][0];
+            upload.share_id = first["id"].as_str().unwrap_or("").to_string();
+            upload.share_url = first["link"]["webUrl"].as_str().unwrap_or("").to_string();
+        }
+        Ok(upload)
+    }
+
+    /// A channel's file: into the channel's folder in the team's SharePoint, which the
+    /// team can read already.
+    fn upload_to_channel(&self, group: &str, channel: &str, name: &str, bytes: &[u8]) -> Result<Upload> {
+        let folder =
+            self.graph(Method::Get, &format!("/teams/{}/channels/{}/filesFolder", http::encode(group), http::encode(channel)), Body::None)?;
+        let (drive, id) = (folder["parentReference"]["driveId"].as_str().unwrap_or(""), folder["id"].as_str().unwrap_or(""));
+        if drive.is_empty() || id.is_empty() {
+            return Err(Error::Service("the channel has no files folder".into()));
+        }
+        let put =
+            format!("/drives/{drive}/items/{id}:/{}:/content?@microsoft.graph.conflictBehavior=rename", http::encode(&onedrive_name(name)));
+        let item = self.graph(Method::Put, &put, Body::Bytes(bytes, "application/octet-stream"))?;
+        let item_id = item["id"].as_str().unwrap_or("");
+        let item = self.graph(Method::Get, &format!("/drives/{drive}/items/{item_id}?$select=id,name,webUrl,sharepointIds"), Body::None)?;
+        let site = item["sharepointIds"]["siteUrl"].as_str().unwrap_or("").trim_end_matches('/').to_string();
+        uploaded(&item, &site)
     }
 
     /// The calendar between two times (Unix ms), as the middle tier gives it.
@@ -566,7 +646,7 @@ impl Backend for Teams {
         Ok(Directory { teams, conversations })
     }
     fn send(&self, conversation: &str, message: &Outgoing) -> Result<()> {
-        if message.html.trim().is_empty() {
+        if message.html.trim().is_empty() && message.files.is_empty() {
             return Err(Error::Service("empty message".into()));
         }
         let path = format!("/v1/users/ME/conversations/{}/messages", http::encode(conversation));
@@ -582,6 +662,13 @@ impl Backend for Teams {
             "imdisplayname": Backend::me(self),
         });
         self.chat_write(Method::Post, &path, &body)
+    }
+
+    fn upload_file(&self, place: &FilePlace, name: &str, bytes: &[u8]) -> Result<Upload> {
+        match place {
+            FilePlace::Chat { members } => self.upload_to_onedrive(members, name, bytes),
+            FilePlace::Channel { group, channel } => self.upload_to_channel(group, channel, name, bytes),
+        }
     }
 
     fn upload_image(&self, conversation: &str, name: &str, bytes: &[u8], mime: &str) -> Result<String> {
@@ -828,6 +915,63 @@ fn chat_title(members: &[String], me: &str, names: &HashMap<String, String>, cha
     }
 }
 
+/// Where Teams keeps a chat's files in the sender's OneDrive.
+const CHAT_FILES: &str = "Microsoft Teams Chat Files";
+
+/// A file name OneDrive takes (it refuses some characters).
+fn onedrive_name(name: &str) -> String {
+    let clean: String = name.chars().map(|c| if "\"*:<>?/\\|".contains(c) || c.is_control() { '_' } else { c }).collect();
+    let clean = clean.trim().trim_end_matches('.').to_string();
+    if clean.is_empty() { "file".into() } else { clean }
+}
+
+/// An uploaded file as OneDrive or SharePoint answers it.
+fn uploaded(item: &Value, site: &str) -> Result<Upload> {
+    let ids = &item["sharepointIds"];
+    let item_id = ids["listItemUniqueId"].as_str().ok_or_else(|| Error::Service("the upload has no id".into()))?;
+    Ok(Upload {
+        name: item["name"].as_str().unwrap_or("").to_string(),
+        url: item["webUrl"].as_str().unwrap_or("").to_string(),
+        site: format!("{}/", site.trim_end_matches('/')),
+        site_id: ids["siteId"].as_str().unwrap_or("").to_string(),
+        item_id: item_id.to_string(),
+        share_url: String::new(),
+        share_id: String::new(),
+    })
+}
+
+/// `properties.files` of a message with files, as the Teams web client sends it.
+fn file_cards(files: &[Upload]) -> Value {
+    Value::Array(
+        files
+            .iter()
+            .map(|f| {
+                let kind = f.name.rsplit_once('.').map(|(_, e)| e.to_lowercase()).unwrap_or_default();
+                serde_json::json!({
+                    "@type": "http://schema.skype.com/File",
+                    "version": 2,
+                    "id": f.item_id,
+                    "itemid": f.item_id,
+                    "fileName": f.name,
+                    "title": f.name,
+                    "fileType": kind,
+                    "type": kind,
+                    "state": "active",
+                    "baseUrl": f.site,
+                    "objectUrl": f.url,
+                    "providerData": "",
+                    "botFileProperties": {},
+                    "permissionScope": if f.share_id.is_empty() { Value::Null } else { Value::from("SpecificPeople") },
+                    "fileInfo": {"fileUrl": f.url, "siteUrl": f.site, "serverRelativeUrl": "", "shareUrl": f.share_url, "shareId": f.share_id},
+                    "fileChicletState": {"serviceName": "p2p", "state": "active"},
+                    "filePreview": {"previewUrl": "", "previewHeight": 0, "previewWidth": 0},
+                    "sharepointIds": {"listItemUniqueId": f.item_id, "siteId": f.site_id},
+                })
+            })
+            .collect(),
+    )
+}
+
 /// Whether `url` is AMS, where pictures in messages are kept and which takes the
 /// skype token: HTTPS to one of its hosts, judged by the parsed host (a link in a
 /// message is anyone's, and the token must go nowhere else).
@@ -846,6 +990,30 @@ fn is_ams(url: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn files_go_as_teams_sends_them() {
+        assert_eq!(onedrive_name("re: plan? <v2>.pdf"), "re_ plan_ _v2_.pdf");
+        assert_eq!(onedrive_name(" .. "), "file");
+        let item = json!({"name": "plan.pdf", "webUrl": "https://org-my.sharepoint.com/personal/a/Documents/plan.pdf",
+            "sharepointIds": {"listItemUniqueId": "abc", "siteId": "site"}});
+        let mut up = uploaded(&item, "https://org-my.sharepoint.com/personal/a").unwrap();
+        (up.share_id, up.share_url) = ("s1".into(), "https://share".into());
+        let cards = file_cards(&[up]);
+        let card = &cards[0];
+        assert_eq!(
+            (card["fileName"].as_str(), card["fileType"].as_str(), card["itemid"].as_str()),
+            (Some("plan.pdf"), Some("pdf"), Some("abc"))
+        );
+        assert_eq!(card["baseUrl"], "https://org-my.sharepoint.com/personal/a/");
+        assert_eq!(card["fileInfo"]["shareId"], "s1");
+        assert_eq!(card["permissionScope"], "SpecificPeople");
+        // A message with only a file is still sent.
+        let teams_body = json!({"properties": {"files": cards.to_string()}});
+        assert!(teams_body["properties"]["files"].is_string());
+        assert!(uploaded(&json!({"name": "x"}), "s").is_err());
+    }
 
     #[test]
     fn the_token_goes_only_to_ams() {

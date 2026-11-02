@@ -17,6 +17,8 @@ pub struct Mention {
 pub struct Outgoing {
     pub html: String,
     pub mentions: Vec<Mention>,
+    /// Files going with it, already uploaded.
+    pub files: Vec<super::Upload>,
 }
 
 /// The HTML for `text`, with `@Name` turned into mentions of `people` it names.

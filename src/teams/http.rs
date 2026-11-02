@@ -20,6 +20,16 @@ static AGENT: LazyLock<ureq::Agent> = LazyLock::new(|| {
         .into()
 });
 
+/// For uploads: a file of tens of megabytes can take minutes.
+static SLOW_AGENT: LazyLock<ureq::Agent> = LazyLock::new(|| {
+    ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(15 * 60)))
+        .http_status_as_error(false)
+        .user_agent(USER_AGENT)
+        .build()
+        .into()
+});
+
 pub enum Body<'a> {
     None,
     Json(&'a Value),
@@ -38,6 +48,15 @@ pub enum Method {
 
 /// Send a request and read the answer as JSON (`Null` for an empty one).
 pub fn request(method: Method, url: &str, headers: &[(&str, &str)], body: Body) -> Result<Value> {
+    request_with(&AGENT, method, url, headers, body)
+}
+
+/// [`request`] with time for a big body to go up.
+pub fn upload(method: Method, url: &str, headers: &[(&str, &str)], body: Body) -> Result<Value> {
+    request_with(&SLOW_AGENT, method, url, headers, body)
+}
+
+fn request_with(agent: &ureq::Agent, method: Method, url: &str, headers: &[(&str, &str)], body: Body) -> Result<Value> {
     let path = url.split('?').next().unwrap_or(url);
     let verb = match method {
         Method::Get => "GET",
@@ -47,16 +66,16 @@ pub fn request(method: Method, url: &str, headers: &[(&str, &str)], body: Body) 
     };
     log_debug!("{verb} {path}");
     let response = if matches!(method, Method::Get) {
-        let mut req = AGENT.get(url);
+        let mut req = agent.get(url);
         for (k, v) in headers {
             req = req.header(*k, *v);
         }
         req.call()
     } else {
         let mut req = match method {
-            Method::Put => AGENT.put(url),
-            Method::Delete => AGENT.delete(url).force_send_body(),
-            _ => AGENT.post(url),
+            Method::Put => agent.put(url),
+            Method::Delete => agent.delete(url).force_send_body(),
+            _ => agent.post(url),
         };
         for (k, v) in headers {
             req = req.header(*k, *v);

@@ -258,14 +258,18 @@ impl PendingDelete {
 /// How long a deleted message can be brought back.
 const UNDO_FOR: Duration = Duration::from_secs(5);
 
-/// A picture waiting in a composer to go with the next message.
+/// A file waiting in a composer to go with the next message: a picture (shown in
+/// the message) or any other file (shared as a file).
 #[derive(Clone)]
 pub struct Attachment {
     pub name: String,
     pub bytes: Arc<Vec<u8>>,
-    pub mime: &'static str,
-    pub size: (u32, u32),
+    /// A picture's MIME type and size; None for any other file.
+    pub picture: Option<(&'static str, (u32, u32))>,
 }
+
+/// The biggest file sent (Teams' own limit is far above; this keeps it in memory).
+const BIGGEST_FILE: usize = 250 << 20;
 
 /// The tab picked in the top bar: what the list shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -490,11 +494,17 @@ impl Workspace {
             editing: editing.clone(),
         });
         let backend = self.backend.clone();
+        let place = self.file_place(&open);
         self.sending = Load::start(ctx, move || {
-            // Pictures go up first; the message then shows them under its text.
-            for picture in &pictures {
-                let url = backend.upload_image(&to, &picture.name, &picture.bytes, picture.mime)?;
-                let (w, h) = picture.size;
+            // Files go up first; the message then shows pictures under its text and the
+            // other files as files.
+            for file in &pictures {
+                let Some((mime, (w, h))) = file.picture else {
+                    let place = place.as_ref().ok_or_else(|| Error::Service("files can't be sent here".into()))?;
+                    message.files.push(backend.upload_file(place, &file.name, &file.bytes)?);
+                    continue;
+                };
+                let url = backend.upload_image(&to, &file.name, &file.bytes, mime)?;
                 let scale = (300.0 / w.max(1) as f32).min(1.0);
                 message.html.push_str(&format!(
                     "<p><img itemscope=\"\" itemtype=\"http://schema.skype.com/AMSImage\" src=\"{url}\" width=\"{}\" height=\"{}\"></p>",
@@ -510,15 +520,27 @@ impl Workspace {
         });
     }
 
-    /// Add a picture to the composer (the thread's when `reply`); only pictures can go
-    /// for now, so anything else is refused, with the reason.
+    /// Add a file to the composer (the thread's when `reply`): a picture shows in the
+    /// message, anything else goes as a file.
     pub fn attach(&mut self, reply: bool, name: &str, bytes: Vec<u8>) {
-        match super::pictures::image_info(&bytes) {
-            Some((w, h, mime)) => {
-                self.attachments.push((reply, Attachment { name: name.to_string(), bytes: Arc::new(bytes), mime, size: (w, h) }))
-            }
-            None => self.error = Some(format!("{name}: only pictures (PNG or JPEG) can be sent for now")),
+        if bytes.len() > BIGGEST_FILE {
+            self.error = Some(format!("{name} is too big to send from drift (the most is {} MB)", BIGGEST_FILE >> 20));
+            return;
         }
+        let picture = super::pictures::image_info(&bytes).map(|(w, h, mime)| (mime, (w, h)));
+        self.attachments.push((reply, Attachment { name: name.to_string(), bytes: Arc::new(bytes), picture }));
+    }
+
+    /// Where a file sent in `conversation` goes: a channel's folder, or the user's
+    /// OneDrive shared with the chat's members.
+    fn file_place(&self, conversation: &str) -> Option<crate::backend::FilePlace> {
+        let d = self.directory.as_ref()?;
+        if let Some((team, channel)) = d.channel(conversation) {
+            let Some(Picture::Team { group, .. }) = &team.picture else { return None };
+            return Some(crate::backend::FilePlace::Channel { group: group.clone(), channel: channel.id.clone() });
+        }
+        let c = d.conversation(conversation)?;
+        Some(crate::backend::FilePlace::Chat { members: c.members.iter().map(|m| m.id.clone()).collect() })
     }
 
     pub fn draft(&self, reply: bool) -> &String {
@@ -1483,7 +1505,7 @@ impl Workspace {
     pub fn forward(&mut self, ctx: &egui::Context, message: &Message, to: &str) {
         let place =
             self.open.as_deref().and_then(|o| self.directory.as_ref()?.conversation(o)).map_or("a chat".to_string(), |c| c.title.clone());
-        let outgoing = markdown::Outgoing { html: forwarded_html(message, &place), mentions: Vec::new() };
+        let outgoing = markdown::Outgoing { html: forwarded_html(message, &place), ..Default::default() };
         let (backend, to) = (self.backend.clone(), to.to_string());
         self.chores.push((Chore::Forward, Load::start(ctx, move || backend.send(&to, &outgoing).map(|()| false))));
     }

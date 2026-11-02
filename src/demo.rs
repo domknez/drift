@@ -395,6 +395,10 @@ impl Backend for Demo {
         Err(Error::Service("no uploads in the demo".into()))
     }
 
+    fn upload_file(&self, _place: &crate::backend::FilePlace, name: &str, _bytes: &[u8]) -> Result<crate::model::Upload> {
+        Ok(crate::model::Upload { name: name.into(), url: format!("https://example.sharepoint.com/{name}"), ..Default::default() })
+    }
+
     fn edit(&self, _conversation: &str, _message: &str, _with: &Outgoing) -> Result<()> {
         Ok(())
     }

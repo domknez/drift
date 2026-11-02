@@ -87,11 +87,11 @@ pub fn workspace(ui: &mut egui::Ui, ws: &mut Workspace, look: Look, updates: &Up
     if ui.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::T))) {
         ws.switcher = if ws.switcher.is_some() { None } else { Some(switcher::Switcher::default()) };
     }
-    // Pictures dropped on the window go with the next message (in the thread if one is open).
+    // Files dropped on the window go with the next message (in the thread if one is open).
     let dropped = ui.input(|i| i.raw.dropped_files.clone());
     if ws.open.is_some() {
         for file in dropped {
-            let name = file.path().file_name().map_or_else(|| "picture".into(), |n| n.to_string_lossy().into_owned());
+            let name = file.path().file_name().map_or_else(|| "file".into(), |n| n.to_string_lossy().into_owned());
             match file.bytes() {
                 Ok(bytes) => ws.attach(ws.thread.is_some(), &name, bytes),
                 Err(e) => ws.error = Some(format!("{name}: {e}")),

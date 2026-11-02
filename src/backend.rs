@@ -28,6 +28,15 @@ impl fmt::Display for Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
+/// Where a file sent in a conversation goes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FilePlace {
+    /// A chat's: the user's OneDrive, shared with the other members (their ids).
+    Chat { members: Vec<String> },
+    /// A channel's: its folder in the team's SharePoint (the team's group id, the channel's id).
+    Channel { group: String, channel: String },
+}
+
 /// A change the service pushes as it happens.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Push {
@@ -72,6 +81,12 @@ pub trait Backend: Send + Sync {
 
     /// Upload a picture for a message in `conversation`: the address to put in it.
     fn upload_image(&self, conversation: &str, name: &str, bytes: &[u8], mime: &str) -> Result<String>;
+
+    /// Put a file where Teams keeps `place`'s files, for a message there.
+    fn upload_file(&self, place: &FilePlace, name: &str, bytes: &[u8]) -> Result<crate::model::Upload> {
+        let _ = (place, name, bytes);
+        Err(Error::Service("files can't be sent from here".into()))
+    }
 
     /// Replace the text of one of the user's messages.
     fn edit(&self, conversation: &str, message: &str, with: &Outgoing) -> Result<()>;

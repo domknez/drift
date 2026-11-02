@@ -163,6 +163,22 @@ pub struct Card {
     pub facts: Vec<(String, String)>,
 }
 
+/// A file put where Teams keeps a conversation's files (the sender's OneDrive for
+/// a chat, the team's SharePoint for a channel), to go with a message.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Upload {
+    pub name: String,
+    /// The file's page.
+    pub url: String,
+    /// The site it's in (ending in `/`), and SharePoint's ids for it.
+    pub site: String,
+    pub site_id: String,
+    pub item_id: String,
+    /// The chat's members' access to it (none for a channel's, the team has it).
+    pub share_url: String,
+    pub share_id: String,
+}
+
 /// A file shared in a message: its name, and its page in SharePoint or OneDrive
 /// (opened in the browser, which signs in and offers the download).
 #[derive(Clone, Debug, PartialEq, Eq)]

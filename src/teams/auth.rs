@@ -21,6 +21,8 @@ pub const SPACES: &str = "https://api.spaces.skype.com";
 pub const SEARCH: &str = "https://outlook.office.com/search";
 /// The audience of the chat service aggregator (teams, channels, chats).
 pub const CHAT_AGGREGATOR: &str = "https://chatsvcagg.teams.microsoft.com";
+/// Microsoft Graph (the user's OneDrive, channels' files).
+pub const GRAPH: &str = "https://graph.microsoft.com";
 /// The audience of the presence service (status).
 pub const PRESENCE: &str = "https://presence.teams.microsoft.com";
 /// Tokens are renewed when they have less than this left (ms).
