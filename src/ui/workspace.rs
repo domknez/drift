@@ -92,6 +92,8 @@ pub struct Workspace {
     pub quoting: Option<(bool, Message)>,
     /// One of the user's messages being edited (true: in the thread's composer).
     pub editing: Option<(bool, String)>,
+    /// What was in the composer before an edit took it, back when the edit ends.
+    before_edit: Option<(bool, String)>,
     /// Pictures to send with the next message (true: in the thread's composer).
     pub attachments: Vec<(bool, Attachment)>,
     pub me: String,
@@ -326,6 +328,7 @@ impl Workspace {
             reply_draft: String::new(),
             quoting: None,
             editing: None,
+            before_edit: None,
             attachments: Vec::new(),
             directory: None,
             directory_load: Load::Idle,
@@ -413,7 +416,11 @@ impl Workspace {
             message.html = quote_html(quoted) + &message.html;
         }
         let editing = self.editing.take_if(|(r, _)| *r == reply).map(|(_, id)| id);
-        self.draft_mut(reply).clear();
+        if editing.is_some() {
+            self.end_edit(reply);
+        } else {
+            self.draft_mut(reply).clear();
+        }
         // Kept until it's sent: a failure puts it all back.
         self.unsent = None;
         self.outbox = Some(Outbox {
@@ -473,8 +480,18 @@ impl Workspace {
     /// Edit one of the user's messages in the composer (the thread's when `reply`).
     pub fn edit(&mut self, message: &Message, reply: bool) {
         self.quoting = None;
+        // What's being written waits for the edit to end (kept from before the first one).
+        if !self.editing.as_ref().is_some_and(|(r, _)| *r == reply) {
+            self.before_edit = Some((reply, std::mem::take(self.draft_mut(reply))));
+        }
         self.editing = Some((reply, message.id.clone()));
         *self.draft_mut(reply) = text::to_markdown(&message.body);
+    }
+
+    /// The composer gets back what was in it before the edit.
+    fn end_edit(&mut self, reply: bool) {
+        let before = self.before_edit.take_if(|(r, _)| *r == reply).map(|(_, text)| text).unwrap_or_default();
+        *self.draft_mut(reply) = before;
     }
 
     /// ↑ in an empty composer: edit the user's last message there. False if there's none.
@@ -505,14 +522,13 @@ impl Workspace {
     pub fn cancel_compose(&mut self, reply: bool) {
         if self.editing.as_ref().is_some_and(|(r, _)| *r == reply) {
             self.editing = None;
-            self.draft_mut(reply).clear();
+            self.end_edit(reply);
         }
         if self.quoting.as_ref().is_some_and(|(r, _)| *r == reply) {
             self.quoting = None;
         }
     }
 
-    /// Delete one of the user's messages: gone at once, deleted behind.
     /// Delete one of the user's messages: gone from the screen at once, from Teams once
     /// its Undo has run out (a delete still waiting goes right away).
     pub fn delete(&mut self, ctx: &egui::Context, message: &str) {
@@ -555,6 +571,10 @@ impl Workspace {
     fn put_back(&mut self, outbox: Outbox, why: String) {
         let here = self.open.as_deref() == Some(outbox.conversation.as_str());
         let reply = outbox.reply;
+        // An edit that failed takes the composer again; what's there waits as before.
+        if here && outbox.editing.is_some() && self.editing.is_none() {
+            self.before_edit = Some((reply, std::mem::take(self.draft_mut(reply))));
+        }
         if here && self.draft(reply).trim().is_empty() {
             *self.draft_mut(reply) = outbox.text;
             self.attachments.extend(outbox.attachments.into_iter().map(|a| (reply, a)));
@@ -1273,11 +1293,16 @@ impl Workspace {
     /// Every half-written message, the open conversation's included (not an edit).
     pub fn all_drafts(&self) -> HashMap<String, String> {
         let mut all = self.drafts.clone();
+        // While a message is edited, what was being written before it.
+        let draft = match (&self.editing, &self.before_edit) {
+            (Some((false, _)), Some((false, before))) => before,
+            (Some((false, _)), _) => "",
+            _ => &self.draft,
+        };
         if let Some(open) = &self.open
-            && !self.draft.trim().is_empty()
-            && !self.editing.as_ref().is_some_and(|(reply, _)| !reply)
+            && !draft.trim().is_empty()
         {
-            all.insert(open.clone(), self.draft.clone());
+            all.insert(open.clone(), draft.to_string());
         }
         all
     }
@@ -1286,8 +1311,13 @@ impl Workspace {
     /// (not an edit of a message: that's dropped).
     fn keep_draft(&mut self) {
         let Some(open) = self.open.clone() else { return };
+        // An edit is dropped; what was being written before it is kept.
+        if self.editing.as_ref().is_some_and(|(reply, _)| !reply) {
+            self.editing = None;
+            self.end_edit(false);
+        }
         let draft = std::mem::take(&mut self.draft);
-        if draft.trim().is_empty() || self.editing.as_ref().is_some_and(|(reply, _)| !reply) {
+        if draft.trim().is_empty() {
             self.drafts.remove(&open);
         } else {
             self.drafts.insert(open, draft);
@@ -1441,6 +1471,19 @@ mod tests {
         ws.put_back(outbox("19:tomas", "rebased"), "offline".into());
         assert_eq!(ws.draft, "typing here");
         assert_eq!(ws.drafts.get("19:tomas").map(String::as_str), Some("rebased"));
+    }
+
+    #[test]
+    fn editing_a_message_keeps_what_was_being_written() {
+        let mut ws = workspace("19:maya");
+        ws.draft = "half a thought".into();
+        let mine = ws.messages.iter().flatten().find(|m| m.author.id == crate::demo::ME).unwrap().clone();
+        ws.edit(&mine, false);
+        assert_ne!(ws.draft, "half a thought");
+        assert_eq!(ws.all_drafts().get("19:maya").map(String::as_str), Some("half a thought"));
+        ws.cancel_compose(false);
+        assert_eq!(ws.draft, "half a thought");
+        assert!(ws.editing.is_none());
     }
 
     #[test]
