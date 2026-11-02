@@ -8,18 +8,25 @@ use eframe::egui::{self, ColorImage, TextureHandle, TextureId, TextureOptions};
 use std::collections::{HashMap, VecDeque};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Condvar, Mutex};
+use std::time::{Duration, Instant};
 use zune_jpeg::JpegDecoder;
 use zune_jpeg::zune_core::colorspace::ColorSpace;
 use zune_jpeg::zune_core::options::DecoderOptions;
 
 const WORKERS: usize = 3;
+/// The biggest picture decoded, per side and in all: what a message sends is its
+/// own say, and a few bytes can claim a huge one.
+const MAX_SIDE: usize = 8192;
+const MAX_PIXELS: usize = 40_000_000;
+/// Pictures in messages not drawn for this long are let go (fetched again if needed).
+const UNUSED_FOR: Duration = Duration::from_secs(180);
 /// Pending fetches beyond this are dropped (oldest first) and asked for again if needed.
 const MAX_QUEUE: usize = 64;
 
 enum Slot {
     Loading,
     Missing,
-    Ready(TextureHandle),
+    Ready(TextureHandle, Instant),
 }
 
 type Queue = Arc<(Mutex<VecDeque<Picture>>, Condvar)>;
@@ -32,6 +39,7 @@ pub struct Pictures {
     done: Receiver<(String, Option<ColorImage>)>,
     /// For the workers, until they start (with the first picture asked for).
     done_tx: Option<Sender<(String, Option<ColorImage>)>>,
+    swept: Instant,
 }
 
 impl Pictures {
@@ -44,6 +52,7 @@ impl Pictures {
             queue: Arc::new((Mutex::new(VecDeque::new()), Condvar::new())),
             done,
             done_tx: Some(done_tx),
+            swept: Instant::now(),
         }
     }
 
@@ -51,10 +60,17 @@ impl Pictures {
     pub fn begin_frame(&mut self) {
         while let Ok((key, image)) = self.done.try_recv() {
             let slot = match image {
-                Some(image) => Slot::Ready(self.ctx.load_texture(&key, image, TextureOptions::LINEAR)),
+                Some(image) => Slot::Ready(self.ctx.load_texture(&key, image, TextureOptions::LINEAR), Instant::now()),
                 None => Slot::Missing,
             };
             self.slots.insert(key, slot);
+        }
+        // Pictures in messages scrolled past long ago: their memory back. (People's,
+        // teams' and emoji are small and seen all the time.)
+        if self.swept.elapsed() >= Duration::from_secs(30) {
+            self.swept = Instant::now();
+            self.slots
+                .retain(|key, slot| !(key.starts_with("image:") && matches!(slot, Slot::Ready(_, used) if used.elapsed() > UNUSED_FOR)));
         }
     }
 
@@ -62,8 +78,11 @@ impl Pictures {
     /// and it's asked for.
     pub fn get(&mut self, picture: &Picture) -> Option<TextureId> {
         let key = picture.key();
-        match self.slots.get(&key) {
-            Some(Slot::Ready(tex)) => Some(tex.id()),
+        match self.slots.get_mut(&key) {
+            Some(Slot::Ready(tex, used)) => {
+                *used = Instant::now();
+                Some(tex.id())
+            }
             Some(_) => None,
             None => {
                 self.start_workers();
@@ -126,16 +145,22 @@ fn worker(queue: &Queue, tx: &Sender<(String, Option<ColorImage>)>, backend: &dy
 }
 
 /// A picture's width and height, and its MIME type (PNG, GIF or JPEG), if it's one.
+/// Only the header is read (it's called on the UI thread, for attachments).
 pub fn image_info(bytes: &[u8]) -> Option<(u32, u32, &'static str)> {
-    let image = decode(bytes)?;
-    let mime = if bytes.starts_with(b"\x89PNG") {
-        "image/png"
+    let cursor = || std::io::Cursor::new(bytes);
+    let (w, h, mime) = if bytes.starts_with(b"\x89PNG") {
+        let reader = png::Decoder::new(cursor()).read_info().ok()?;
+        (reader.info().width as usize, reader.info().height as usize, "image/png")
     } else if bytes.starts_with(b"GIF8") {
-        "image/gif"
+        let decoder = gif::DecodeOptions::new().read_info(cursor()).ok()?;
+        (usize::from(decoder.width()), usize::from(decoder.height()), "image/gif")
     } else {
-        "image/jpeg"
+        let mut decoder = JpegDecoder::new(cursor());
+        decoder.decode_headers().ok()?;
+        let (w, h) = decoder.dimensions()?;
+        (w, h, "image/jpeg")
     };
-    Some((image.size[0] as u32, image.size[1] as u32, mime))
+    (w > 0 && h > 0 && fits(w, h)).then_some((w as u32, h as u32, mime))
 }
 
 /// JPEG, PNG or GIF, by their signature.
@@ -155,9 +180,15 @@ fn decode_gif(bytes: &[u8]) -> Option<ColorImage> {
     options.set_color_output(gif::ColorOutput::RGBA);
     let mut decoder = options.read_info(std::io::Cursor::new(bytes)).ok()?;
     let (width, height) = (usize::from(decoder.width()), usize::from(decoder.height()));
+    if !fits(width, height) {
+        return None;
+    }
     let frame = decoder.read_next_frame().ok()??;
     let mut canvas = vec![0u8; width * height * 4];
     let (left, top, w) = (usize::from(frame.left), usize::from(frame.top), usize::from(frame.width));
+    if w == 0 {
+        return image_from(&canvas, [width, height]);
+    }
     for (y, row) in frame.buffer.chunks_exact(w * 4).enumerate() {
         let (y, x) = (top + y, left);
         if y >= height || x >= width {
@@ -171,18 +202,26 @@ fn decode_gif(bytes: &[u8]) -> Option<ColorImage> {
 }
 
 fn decode_jpeg(bytes: &[u8]) -> Option<ColorImage> {
-    let options = DecoderOptions::default().jpeg_set_out_colorspace(ColorSpace::RGBA);
+    let options = DecoderOptions::default().jpeg_set_out_colorspace(ColorSpace::RGBA).set_max_width(MAX_SIDE).set_max_height(MAX_SIDE);
     let mut decoder = JpegDecoder::new_with_options(std::io::Cursor::new(bytes), options);
+    decoder.decode_headers().ok()?;
+    let (w, h) = decoder.dimensions()?;
+    if !fits(w, h) {
+        return None;
+    }
     let pixels = decoder.decode().ok()?;
     let info = decoder.info()?;
     image_from(&pixels, [info.width as usize, info.height as usize])
 }
 
 fn decode_png(bytes: &[u8]) -> Option<ColorImage> {
-    let mut decoder = png::Decoder::new(std::io::Cursor::new(bytes));
+    let mut decoder = png::Decoder::new_with_limits(std::io::Cursor::new(bytes), png::Limits { bytes: MAX_PIXELS * 4 });
     // 8-bit samples, palettes expanded.
     decoder.set_transformations(png::Transformations::normalize_to_color8());
     let mut reader = decoder.read_info().ok()?;
+    if !fits(reader.info().width as usize, reader.info().height as usize) {
+        return None;
+    }
     let mut pixels = vec![0; reader.output_buffer_size()?];
     let frame = reader.next_frame(&mut pixels).ok()?;
     pixels.truncate(frame.buffer_size());
@@ -194,6 +233,11 @@ fn decode_png(bytes: &[u8]) -> Option<ColorImage> {
         }
         _ => image_from(&pixels, size),
     }
+}
+
+/// Whether a picture of this size is decoded at all.
+fn fits(width: usize, height: usize) -> bool {
+    width <= MAX_SIDE && height <= MAX_SIDE && width * height <= MAX_PIXELS
 }
 
 /// An image from 1 (grey), 3 (RGB) or 4 (RGBA) bytes per pixel.
@@ -243,5 +287,32 @@ mod tests {
     #[test]
     fn rejects_garbage() {
         assert!(decode(b"not an image").is_none());
+    }
+
+    #[test]
+    fn refuses_pictures_claiming_to_be_huge() {
+        // A GIF whose screen is 65535×65535, with one 1×1 frame: a few dozen bytes.
+        let mut out = Vec::new();
+        {
+            let mut encoder = gif::Encoder::new(&mut out, 65535, 65535, &[255, 0, 0, 0, 255, 0]).unwrap();
+            encoder
+                .write_frame(&gif::Frame { width: 1, height: 1, buffer: std::borrow::Cow::Borrowed(&[0]), ..Default::default() })
+                .unwrap();
+        }
+        assert!(out.len() < 100);
+        assert!(decode(&out).is_none());
+    }
+
+    #[test]
+    fn survives_truncated_pictures() {
+        let mut png = Vec::new();
+        let mut encoder = png::Encoder::new(&mut png, 64, 64);
+        encoder.set_color(png::ColorType::Rgb);
+        encoder.write_header().unwrap().write_image_data(&[7; 64 * 64 * 3]).unwrap();
+        for cut in [8, 30, png.len() / 2, png.len() - 1] {
+            let _ = decode(&png[..cut]);
+        }
+        let _ = decode(b"\xff\xd8\xff\xe0\x00\x10JFIF");
+        let _ = decode(b"GIF89a\x01\x00\x01\x00");
     }
 }
