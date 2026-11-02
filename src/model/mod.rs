@@ -130,6 +130,8 @@ pub struct Message {
     pub reactions: Vec<Reaction>,
     /// For items of the activity feed: where the mention or reply happened.
     pub source: Option<Source>,
+    /// Written here and on its way: shown at once, replaced by what Teams has once it's there.
+    pub sending: bool,
 }
 
 /// Where an activity happened: the conversation, its name, and what it was.

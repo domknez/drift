@@ -563,6 +563,7 @@ fn message(id: &str, root: Option<&str>, who: &str, at: i64, html: &str, card: O
         edited: false,
         reactions,
         source: None,
+        sending: false,
     }
 }
 

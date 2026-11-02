@@ -230,6 +230,7 @@ fn message(m: &Value, me: &str) -> Option<Message> {
         edited: !m["properties"]["edittime"].is_null() || m["skypeeditedid"].is_string(),
         reactions: reactions(&m["properties"]["emotions"], me),
         source,
+        sending: false,
     })
 }
 

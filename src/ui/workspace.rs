@@ -113,6 +113,13 @@ pub struct Workspace {
     read_load: Load<(ConversationId, Vec<(String, i64)>), Error>,
     read_at: Option<Instant>,
     messages_load: Load<(ConversationId, Vec<Message>), Error>,
+    /// Conversations' messages as last fetched, shown at once when one is opened
+    /// (and fetched again behind); the newest few are fetched ahead.
+    cache: HashMap<String, Vec<Message>>,
+    prefetch: Vec<String>,
+    prefetch_load: Load<(ConversationId, Vec<Message>), Error>,
+    /// Messages sent from here, shown until Teams lists them (by conversation).
+    sent_here: Vec<(String, Message)>,
     messages_at: Option<Instant>,
     /// The last failure, shown until the next success.
     pub error: Option<String>,
@@ -349,6 +356,10 @@ impl Workspace {
             read_load: Load::Idle,
             read_at: None,
             messages_load: Load::Idle,
+            cache: HashMap::new(),
+            prefetch: Vec::new(),
+            prefetch_load: Load::Idle,
+            sent_here: Vec::new(),
             messages_at: None,
             error: None,
             find: None,
@@ -434,6 +445,36 @@ impl Workspace {
             self.end_edit(reply);
         } else {
             self.draft_mut(reply).clear();
+        }
+        // Shown at once, as Teams does: a new message at the bottom, an edit in place.
+        let body = text::from_html(&message.html);
+        match &editing {
+            Some(id) => {
+                if let Some(m) = self.messages.iter_mut().flatten().find(|m| m.id == *id) {
+                    m.body = body;
+                    m.edited = true;
+                }
+            }
+            None => {
+                let now = crate::model::time::now_ms();
+                let shown = Message {
+                    id: format!("sending-{now}"),
+                    root: reply.then(|| self.thread.clone()).flatten(),
+                    author: crate::model::Author { id: self.me_id.clone(), name: self.me.clone() },
+                    at: now,
+                    body,
+                    card: None,
+                    files: Vec::new(),
+                    edited: false,
+                    reactions: Vec::new(),
+                    source: None,
+                    sending: true,
+                };
+                if let Some(messages) = self.messages.as_mut() {
+                    messages.push(shown.clone());
+                }
+                self.sent_here.push((open.clone(), shown));
+            }
         }
         // Kept until it's sent: a failure puts it all back.
         self.unsent = None;
@@ -999,6 +1040,13 @@ impl Workspace {
                 Err(e) => {
                     log_warn!("sending: {e}");
                     if let Some(outbox) = outbox {
+                        // The one shown as on its way goes; the text is back in the composer.
+                        if let Some(at) = self.sent_here.iter().rposition(|(c, _)| *c == outbox.conversation) {
+                            let (_, gone) = self.sent_here.remove(at);
+                            if let Some(messages) = self.messages.as_mut() {
+                                messages.retain(|m| m.id != gone.id);
+                            }
+                        }
                         self.put_back(outbox, e.to_string());
                     }
                 }
@@ -1109,6 +1157,7 @@ impl Workspace {
                         self.messages_at = None;
                     }
                     self.directory = Some(directory);
+                    self.queue_prefetch();
                     self.check_new();
                     self.error = None;
                     self.offline = false;
@@ -1217,6 +1266,8 @@ impl Workspace {
                     if let Some(p) = self.pending_delete.as_ref().filter(|p| p.conversation == id) {
                         messages.retain(|m| m.id != p.message.id);
                     }
+                    self.cache_messages(&id, &messages);
+                    self.with_sent_here(&id, &mut messages);
                     self.messages = Some(messages);
                     self.mark_read(ctx);
                     // Finding while the messages came in: show the newest match.
@@ -1224,9 +1275,15 @@ impl Workspace {
                         self.show_found(0);
                     }
                 }
-                Ok(_) => {}
+                Ok((id, messages)) => self.cache_messages(&id, &messages),
                 Err(Error::SignedOut) => return Some(Outcome::SignedOut),
                 Err(e) => self.failed(e),
+            }
+        }
+        if let Some(result) = self.prefetch_load.take() {
+            match result {
+                Ok((id, messages)) => self.cache_messages(&id, &messages),
+                Err(e) => log_debug!("fetching ahead: {e}"),
             }
         }
 
@@ -1249,6 +1306,14 @@ impl Workspace {
             self.messages_at = Some(Instant::now());
             let backend = self.backend.clone();
             self.messages_load = Load::start(ctx, move || backend.messages(&id).map(|m| (id, m)));
+        }
+        // The newest conversations fetched ahead, one at a time, behind everything else.
+        if !self.prefetch_load.is_running()
+            && !self.messages_load.is_running()
+            && let Some(id) = self.prefetch.pop()
+        {
+            let backend = self.backend.clone();
+            self.prefetch_load = Load::start(ctx, move || backend.messages(&id).map(|m| (id, m)));
         }
         if !self.meetings_load.is_running() && due(self.meetings_at, CALENDAR_EVERY) {
             self.meetings_at = Some(Instant::now());
@@ -1318,6 +1383,65 @@ impl Workspace {
             Error::Network(_) => self.offline = true,
             e => self.error = Some(e.to_string()),
         }
+    }
+
+    /// Keep a conversation's messages for opening it again quickly (the most recent
+    /// conversations' only).
+    fn cache_messages(&mut self, id: &str, messages: &[Message]) {
+        const KEPT: usize = 40;
+        self.cache.insert(id.to_string(), messages.to_vec());
+        if self.cache.len() > KEPT {
+            let newest = |m: &Vec<Message>| m.last().map_or(0, |m| m.at);
+            if let Some(oldest) = self
+                .cache
+                .iter()
+                .filter(|(k, _)| Some(k.as_str()) != self.open.as_deref())
+                .min_by_key(|(_, m)| newest(m))
+                .map(|(k, _)| k.clone())
+            {
+                self.cache.remove(&oldest);
+            }
+        }
+    }
+
+    /// Messages sent from here that Teams doesn't list yet stay at the bottom; once
+    /// it does (the same text from the user, since a minute before), they go.
+    fn with_sent_here(&mut self, id: &str, messages: &mut Vec<Message>) {
+        let now = crate::model::time::now_ms();
+        let me = self.me_id.clone();
+        self.sent_here.retain(|(c, shown)| {
+            if c != id {
+                return now - shown.at < 120_000;
+            }
+            let listed = messages
+                .iter()
+                .any(|m| m.author.id == me && m.at >= shown.at - 60_000 && text::flatten(&m.body) == text::flatten(&shown.body));
+            !listed && now - shown.at < 120_000
+        });
+        for (_, shown) in self.sent_here.iter().filter(|(c, _)| c == id) {
+            messages.push(shown.clone());
+        }
+    }
+
+    /// The newest conversations whose messages aren't kept (or are older than their
+    /// newest message): fetched ahead.
+    fn queue_prefetch(&mut self) {
+        const AHEAD: usize = 8;
+        let Some(d) = self.directory.as_ref() else { return };
+        let mut newest: Vec<&Conversation> = d.conversations.iter().filter(|c| c.kind != Kind::Feed && c.last.is_some()).collect();
+        newest.sort_by_key(|c| std::cmp::Reverse(c.last.as_ref().map_or(0, |l| l.at)));
+        let stale = |c: &Conversation| {
+            let last = c.last.as_ref().map_or(0, |l| l.at);
+            self.cache.get(&c.id).is_none_or(|m| m.last().is_none_or(|m| m.at < last))
+        };
+        // Popped from the end: the newest last.
+        self.prefetch = newest
+            .into_iter()
+            .take(AHEAD)
+            .filter(|c| stale(c) && Some(c.id.as_str()) != self.open.as_deref())
+            .map(|c| c.id.clone())
+            .rev()
+            .collect();
     }
 
     /// Forward a message to another conversation (as a quote, saying who wrote it where).
@@ -1412,7 +1536,11 @@ impl Workspace {
         self.recent.insert(0, id.to_string());
         self.recent.truncate(30);
         self.newest = NEWEST;
-        self.messages = None;
+        // What was fetched before shows at once; the fetch that follows brings it up to date.
+        self.messages = self.cache.get(id).cloned().map(|mut m| {
+            self.with_sent_here(id, &mut m);
+            m
+        });
         self.read_by.clear();
         self.read_at = None;
         self.messages_load = Load::Idle;
@@ -1674,6 +1802,38 @@ mod tests {
         let html = forwarded_html(m, "Maya <& co>");
         assert!(html.starts_with("<p><i>Forwarded from Alex Morgan in Maya &lt;&amp; co&gt;</i></p><blockquote>"));
         assert!(html.contains("<b>release cut at 15:00</b>"));
+    }
+
+    #[test]
+    fn a_sent_message_shows_at_once_until_teams_lists_it() {
+        let mut ws = workspace("19:maya");
+        ws.me_id = crate::demo::ME.into();
+        ws.me = "Alex Morgan".into();
+        ws.draft = "on my way".into();
+        ws.send(&egui::Context::default(), false);
+        let last = ws.messages.as_ref().unwrap().last().unwrap().clone();
+        assert!(last.sending && text::flatten(&last.body) == "on my way");
+        // A fetch from before it went: it stays at the bottom.
+        let mut before = crate::demo::Demo.messages("19:maya").unwrap();
+        ws.with_sent_here("19:maya", &mut before);
+        assert!(before.last().unwrap().sending);
+        // Teams lists it: the one shown goes.
+        let mut after = crate::demo::Demo.messages("19:maya").unwrap();
+        after.push(Message { id: "9999".into(), sending: false, at: last.at + 500, ..last.clone() });
+        ws.with_sent_here("19:maya", &mut after);
+        assert!(!after.iter().any(|m| m.sending));
+        assert!(ws.sent_here.is_empty());
+    }
+
+    #[test]
+    fn a_conversation_fetched_before_opens_at_once() {
+        let mut ws = workspace("19:maya");
+        let tomas = crate::demo::Demo.messages("19:tomas").unwrap();
+        ws.cache_messages("19:tomas", &tomas);
+        ws.open("19:tomas");
+        assert_eq!(ws.messages.as_deref(), Some(tomas.as_slice()));
+        ws.open("19:release");
+        assert!(ws.messages.is_none());
     }
 
     #[test]

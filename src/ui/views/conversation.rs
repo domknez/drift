@@ -648,7 +648,9 @@ pub fn list(ui: &mut Ui, pictures: &mut Pictures, messages: &[Message], view: &m
         if let Some(a) = bubble(ui, pictures, m, view, first, last, threaded) {
             action = Some(a);
         }
-        if newest_mine.as_deref() == Some(m.id.as_str()) && !view.read_by.is_empty() {
+        if m.sending {
+            sending(ui);
+        } else if newest_mine.as_deref() == Some(m.id.as_str()) && !view.read_by.is_empty() {
             seen(ui, m, view);
         }
     }
@@ -871,6 +873,11 @@ pub fn bubble(
     thread: Option<&[&Message]>,
 ) -> Option<Action> {
     let me = view.me;
+    // On its way: a little faded until Teams has it (just this one).
+    let opacity = ui.opacity();
+    if m.sending {
+        ui.multiply_opacity(0.6);
+    }
     let open = view.open == Some(m.id.as_str());
     let focused = view.focus == Some(m.id.as_str());
     let p = colors();
@@ -1046,10 +1053,21 @@ pub fn bubble(
     if last {
         ui.add_space(6.0);
     }
+    ui.set_opacity(opacity);
     action
 }
 
 /// Under the user's newest message in a chat: Sent, or Seen (by how many, in a group).
+/// "Sending…" under a message on its way.
+fn sending(ui: &mut Ui) {
+    let p = colors();
+    ui.add_space(-2.0);
+    ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+        ui.add_space(4.0);
+        ui.label(RichText::new("Sending…").font(ty::meta()).color(p.faint));
+    });
+}
+
 fn seen(ui: &mut Ui, m: &Message, view: &View) {
     let p = colors();
     let Some((read, unread)) = readers(m, view) else { return };
