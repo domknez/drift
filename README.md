@@ -26,8 +26,8 @@ a fraction of the memory the official app keeps busy doing nothing.
   *Join* opens the meeting straight in Teams on the web, a click on a meeting opens its
   chat
 - **One list for what's going on:** chats and channels together, newest first, each
-  with its newest message and the time; chips narrow it to unread, channels or
-  people, and the search field to a name
+  with its newest message and the time; chips narrow it to unread chats, people or
+  meetings, and the search field to a name
 - **Chats as bubbles:** others' on the left with their picture, yours on the right;
   runs of messages share one bubble group, with a day pill between days
 - **Channels with threads:** posts as bubbles with a link to their thread, which

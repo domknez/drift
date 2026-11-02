@@ -23,6 +23,13 @@ pub fn show(ui: &mut egui::Ui, sign_in: &mut SignIn) {
             if ui.add_enabled(!waiting, button).clicked() {
                 sign_in.start(ui.ctx());
             }
+            if waiting {
+                ui.add_space(8.0);
+                let cancel = egui::Button::new(RichText::new("Cancel").font(ty::small_strong()).color(p.dim)).frame(false);
+                if ui.add(cancel).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                    crate::login::cancel();
+                }
+            }
             ui.add_space(14.0);
             if let Some(error) = &sign_in.error {
                 ui.label(RichText::new(error).font(ty::small()).color(p.danger));

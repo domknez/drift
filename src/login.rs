@@ -4,22 +4,50 @@
 //! app's memory and gives it its own main thread / event loop, as macOS requires.
 
 use crate::teams::auth;
-use std::process::{Command, Stdio};
+use std::io::Read;
+use std::process::{Child, Command, Stdio};
+use std::sync::Mutex;
 
 pub const ARG: &str = "--login";
 const PREFIX: &str = "code=";
 
-/// Spawn the sign-in window and block until the user signs in or closes it.
+/// The sign-in window while it's open, for [`cancel`].
+static WINDOW: Mutex<Option<Child>> = Mutex::new(None);
+
+/// Spawn the sign-in window and block until the user signs in, closes it, or
+/// [`cancel`] closes it.
 pub fn obtain_code() -> Result<String, String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    let out =
-        Command::new(exe).arg(ARG).stdin(Stdio::null()).stderr(Stdio::inherit()).output().map_err(|e| format!("sign-in window: {e}"))?;
-    String::from_utf8_lossy(&out.stdout)
-        .lines()
+    let mut child = Command::new(exe)
+        .arg(ARG)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .map_err(|e| format!("sign-in window: {e}"))?;
+    let mut stdout = child.stdout.take().ok_or("sign-in window: no output")?;
+    *WINDOW.lock().unwrap_or_else(|e| e.into_inner()) = Some(child);
+    // The code is a line or two; reading ends when the window's process does.
+    let mut out = String::new();
+    let _ = stdout.read_to_string(&mut out);
+    let child = WINDOW.lock().unwrap_or_else(|e| e.into_inner()).take();
+    if let Some(mut child) = child {
+        let _ = child.wait();
+    }
+    out.lines()
         .find_map(|l| l.strip_prefix(PREFIX))
         .map(|code| code.trim().to_string())
         .filter(|code| !code.is_empty())
         .ok_or_else(|| "Sign-in window closed".into())
+}
+
+/// Close the sign-in window, if it's open (the user gave up waiting).
+pub fn cancel() {
+    let child = WINDOW.lock().unwrap_or_else(|e| e.into_inner()).take();
+    if let Some(mut child) = child {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
 }
 
 /// Entry point of the helper process.

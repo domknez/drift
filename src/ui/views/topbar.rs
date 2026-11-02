@@ -565,9 +565,23 @@ fn user_menu(ui: &mut Ui, ws: &mut Workspace, rect: Rect, look: Look, updates: &
         if response.hovered() {
             ui.painter().rect_filled(row.shrink2(vec2(2.0, 2.0)), CornerRadius::same(8), p.hover);
         }
-        ui.painter().text(pos2(row.left() + 10.0, row.center().y), egui::Align2::LEFT_CENTER, "Sign out", ty::small_strong(), p.danger);
+        // A second click within a few seconds signs out (it means signing in again,
+        // with the browser and MFA).
+        let armed_id = egui::Id::unique("sign-out-armed");
+        let now = ui.input(|i| i.time);
+        let armed = ui.data(|d| d.get_temp::<f64>(armed_id)).is_some_and(|at| now - at < 4.0);
+        let label = if armed { "Click again to sign out" } else { "Sign out" };
+        ui.painter().text(pos2(row.left() + 10.0, row.center().y), egui::Align2::LEFT_CENTER, label, ty::small_strong(), p.danger);
+        if armed {
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(500));
+        }
         if response.clicked() {
-            request = Some(Request::SignOut);
+            if armed {
+                ui.data_mut(|d| d.remove::<f64>(armed_id));
+                request = Some(Request::SignOut);
+            } else {
+                ui.data_mut(|d| d.insert_temp(armed_id, now));
+            }
         }
         ui.add_space(2.0);
     });

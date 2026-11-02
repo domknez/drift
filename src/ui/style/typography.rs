@@ -48,6 +48,11 @@ pub fn item() -> FontId {
     FontId::new(13.5, semibold())
 }
 
+/// Names in the list with something unread, as Teams marks them.
+pub fn item_unread() -> FontId {
+    FontId::new(13.5, extrabold())
+}
+
 /// Teams above their channels in the list.
 pub fn team() -> FontId {
     FontId::new(13.0, bold())
@@ -55,7 +60,7 @@ pub fn team() -> FontId {
 
 /// Section labels ("PINNED", "RECENT").
 pub fn section() -> FontId {
-    FontId::new(11.0, bold())
+    FontId::new(11.5, bold())
 }
 
 /// Message text.
@@ -93,7 +98,7 @@ pub fn pill() -> FontId {
 
 /// Counts on badges.
 pub fn badge() -> FontId {
-    FontId::new(10.5, bold())
+    FontId::new(11.5, bold())
 }
 
 pub fn code() -> FontId {
