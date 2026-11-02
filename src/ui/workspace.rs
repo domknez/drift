@@ -160,8 +160,8 @@ pub struct Workspace {
     pub suggestion: usize,
     /// How wide the list is (dragged by the user, kept in the settings).
     pub list_width: f32,
-    /// Someone calling: the call's id, who, and when it began ringing (answered in Teams).
-    pub ringing: Option<(String, String, Instant)>,
+    /// Someone calling (answered in Teams on the web).
+    pub ringing: Option<Ringing>,
     /// When the ring last sounded.
     rang_at: Option<Instant>,
     /// The keyboard shortcuts' sheet is open.
@@ -259,6 +259,17 @@ impl PendingDelete {
     pub fn is_in(&self, conversation: &str) -> bool {
         self.conversation == conversation
     }
+}
+
+/// A call ringing: its id, who's calling (id, name), whether it's a group call, and
+/// since when.
+#[derive(Clone)]
+pub struct Ringing {
+    pub id: String,
+    pub from: String,
+    pub name: String,
+    pub group: bool,
+    pub since: Instant,
 }
 
 /// How long a deleted message can be brought back.
@@ -1422,21 +1433,34 @@ impl Workspace {
         }
     }
 
-    /// Someone's calling: a notification (a click opens Teams, where it's answered),
-    /// and in the window a notice that rings until it's answered there, dismissed,
-    /// or it would have stopped ringing.
+    /// Someone's calling: a notification (a click answers in Teams on the web), and in
+    /// the window a bar with Accept and Decline that rings until one is clicked or
+    /// it would have stopped ringing.
     fn called(&mut self, ctx: &egui::Context, id: String, from: &str, name: String, group: bool) {
-        if from == self.me_id || self.ringing.as_ref().is_some_and(|(call, ..)| *call == id) {
+        if from == self.me_id || self.ringing.as_ref().is_some_and(|r| r.id == id) {
             return;
         }
         let title = if group { format!("{name} is calling (group call)") } else { format!("{name} is calling") };
         let ctx2 = ctx.clone();
-        crate::notify::show(&title, Some("Call"), "Click to answer in Teams", move || {
+        crate::notify::show(&title, Some("Call"), "Click to answer in Teams on the web", move || {
             ctx2.open_url(egui::OpenUrl::new_tab(TEAMS_WEB));
             ctx2.request_repaint();
         });
-        self.ringing = Some((id, title, Instant::now()));
+        self.ringing = Some(Ringing { id, from: from.to_string(), name, group, since: Instant::now() });
         self.rang_at = None;
+    }
+
+    /// Answer the ringing call: Teams on the web opens, where it's taken.
+    pub fn accept_call(&mut self, ctx: &egui::Context) {
+        if self.ringing.take().is_some() {
+            ctx.open_url(egui::OpenUrl::new_tab(TEAMS_WEB));
+        }
+    }
+
+    /// Stop the ringing here (the call still rings on the user's other devices: Teams
+    /// takes a decline only from a client that has joined the call).
+    pub fn decline_call(&mut self) {
+        self.ringing = None;
     }
 
     /// While a call rings: the sound every few seconds (the notice shows it), until
@@ -1444,7 +1468,7 @@ impl Workspace {
     fn ring(&mut self, ctx: &egui::Context) {
         const RINGS_FOR: Duration = Duration::from_secs(45);
         const EVERY: Duration = Duration::from_secs(4);
-        if self.ringing.as_ref().is_some_and(|(.., at)| at.elapsed() >= RINGS_FOR) {
+        if self.ringing.as_ref().is_some_and(|r| r.since.elapsed() >= RINGS_FOR) {
             self.ringing = None;
         }
         if self.ringing.is_none() {

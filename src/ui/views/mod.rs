@@ -1,6 +1,7 @@
 //! One file per part of the window: the top bar, the list, the conversation, the
 //! thread beside it, and the sign-in page. Panels float on the canvas.
 
+mod call;
 pub mod conversation;
 pub mod emoji_picker;
 pub mod list;
@@ -146,6 +147,7 @@ pub fn workspace(ui: &mut egui::Ui, ws: &mut Workspace, look: Look, updates: &Up
     });
     switcher::show(ui.ctx(), ws);
     shortcuts::show(ui.ctx(), &mut ws.shortcuts);
+    call::show(ui.ctx(), ws);
     start_up(ui.ctx(), ws);
     if let Some(url) = ws.viewing.clone()
         && !super::widgets::lightbox(ui.ctx(), &mut ws.pictures, &url)

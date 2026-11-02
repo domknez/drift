@@ -376,7 +376,6 @@ fn head(ui: &mut Ui, ws: &mut Workspace, rect: Rect, directory: &Directory, id: 
 
 /// What a notice's button does.
 enum NoticeAction {
-    Answer,
     Retry(bool),
     Undo,
     Reconnect,
@@ -388,9 +387,7 @@ enum NoticeAction {
 fn notice(ui: &mut Ui, ws: &mut Workspace, body: Rect) {
     let p = colors();
     let open = ws.open.clone().unwrap_or_default();
-    let (text, danger, button) = if let Some((_, title, _)) = &ws.ringing {
-        (title.clone(), false, Some(("Answer in Teams", NoticeAction::Answer)))
-    } else if let Some((_, reply, why)) = ws.unsent.as_ref().filter(|(c, ..)| *c == open) {
+    let (text, danger, button) = if let Some((_, reply, why)) = ws.unsent.as_ref().filter(|(c, ..)| *c == open) {
         (format!("Your message wasn't sent. {why}"), true, Some(("Retry", NoticeAction::Retry(*reply))))
     } else if ws.pending_delete.as_ref().is_some_and(|d| d.is_in(&open)) {
         ("Message deleted".to_string(), false, Some(("Undo", NoticeAction::Undo)))
@@ -433,18 +430,12 @@ fn notice(ui: &mut Ui, ws: &mut Workspace, body: Rect) {
             });
     });
     match action {
-        Some(NoticeAction::Answer) => {
-            ui.ctx().open_url(egui::OpenUrl::new_tab(crate::ui::workspace::TEAMS_WEB));
-            ws.ringing = None;
-        }
         Some(NoticeAction::Retry(reply)) => ws.send(ui.ctx(), reply),
         Some(NoticeAction::Undo) => ws.undo_delete(),
         Some(NoticeAction::Reconnect) => ws.refresh(),
         Some(NoticeAction::Dismiss) => {
             // The most pressing one goes; a delete is kept (it just stops being undoable).
-            if ws.ringing.is_some() {
-                ws.ringing = None;
-            } else if ws.unsent.as_ref().is_some_and(|(c, ..)| *c == open) {
+            if ws.unsent.as_ref().is_some_and(|(c, ..)| *c == open) {
                 ws.unsent = None;
             } else if ws.pending_delete.as_ref().is_some_and(|d| d.is_in(&open)) {
                 ws.commit_delete(ui.ctx());
