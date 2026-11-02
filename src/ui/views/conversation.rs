@@ -1421,10 +1421,6 @@ pub fn composer(ui: &mut Ui, ws: &mut Workspace, rect: Rect, hint: &str, reply: 
         .inner;
     emoji_over_text(&t, &mut ws.pictures, &output, p.surface);
     let response = output.response.response;
-    // Typing here: the box says so with an outline in the accent.
-    if response.has_focus() {
-        ui.painter().rect_stroke(inner, CornerRadius::same(16), Stroke::new(1.5, p.accent_fill), egui::StrokeKind::Inside);
-    }
     if response.changed() {
         // What's typed changed: the suggestions start over at the first.
         ws.suggestion = 0;
