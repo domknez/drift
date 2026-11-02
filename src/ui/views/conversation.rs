@@ -1181,6 +1181,25 @@ fn typed(text: &str) -> egui::text::LayoutJob {
 /// a "replying to" or "editing" line above when there's one. Enter sends, Shift+Enter
 /// breaks the line, ↑ in an empty box edits the last message, Esc cancels, `@` offers
 /// people to mention. `reply` is the thread's composer.
+/// Emoji in what's typed, drawn as Teams' pictures over their plain glyphs (a text
+/// box can't draw colour fonts). One whose picture isn't in yet keeps its glyph.
+fn emoji_over_text(ui: &Ui, pictures: &mut Pictures, output: &egui::text_edit::TextEditOutput, behind: egui::Color32) {
+    let galley = &output.galley;
+    let painter = ui.painter().with_clip_rect(output.text_clip_rect);
+    for (i, ch) in galley.text().chars().enumerate() {
+        let Some(key) = crate::model::emoji::key_of(ch) else { continue };
+        let (from, to) = (galley.pos_from_cursor(egui::text::CCursor::new(i)), galley.pos_from_cursor(egui::text::CCursor::new(i + 1)));
+        // At a line's end the next position is on the next row: the glyph keeps its own width then.
+        let right = if (to.min.y - from.min.y).abs() < 1.0 { to.min.x } else { from.min.x + from.height() };
+        let glyph = Rect::from_min_max(from.min, pos2(right, from.max.y)).translate(output.galley_pos.to_vec2());
+        let Some(texture) = pictures.get(&Picture::Emoji(key.to_string())) else { continue };
+        painter.rect_filled(glyph, CornerRadius::ZERO, behind);
+        let side = glyph.height().min(glyph.width() + 4.0) * 0.95;
+        let uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
+        painter.image(texture, Rect::from_center_size(glyph.center(), vec2(side, side)), uv, egui::Color32::WHITE);
+    }
+}
+
 /// What's pasted into the composer: text keeps the links it had (from the clipboard's
 /// HTML), and a picture (a screenshot, say) is attached.
 fn paste(ui: &mut Ui, ws: &mut Workspace, reply: bool) {
@@ -1380,13 +1399,19 @@ pub fn composer(ui: &mut Ui, ws: &mut Workspace, rect: Rect, hint: &str, reply: 
     // No fade at its edges: it darkened the line being typed for the frame a new line
     // takes to grow the box.
     t.spacing_mut().scroll.fade.strength = 0.0;
-    let response = egui::ScrollArea::vertical()
+    let output = egui::ScrollArea::vertical()
         .id_salt(("composer-scroll", reply))
         .scroll_bar_visibility(bar)
         .max_height(tallest)
         .stick_to_bottom(true)
-        .show(&mut t, |ui| ui.add(edit))
+        .show(&mut t, |ui| edit.show(ui))
         .inner;
+    emoji_over_text(&t, &mut ws.pictures, &output, p.surface);
+    let response = output.response.response;
+    // Typing here: the box says so with an outline in the accent.
+    if response.has_focus() {
+        ui.painter().rect_stroke(inner, CornerRadius::same(16), Stroke::new(1.5, p.accent_fill), egui::StrokeKind::Inside);
+    }
     if response.changed() {
         // What's typed changed: the suggestions start over at the first.
         ws.suggestion = 0;
