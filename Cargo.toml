@@ -22,6 +22,8 @@ tungstenite = { version = "0.28", default-features = false, features = ["handsha
 flate2 = "1"
 # Checking a downloaded update against its release's checksums.
 sha2 = "0.11"
+# The clipboard's HTML, for links in pasted text (egui only hands over its plain text).
+arboard = { version = "3.7", default-features = false }
 # The system's file dialog, for attaching pictures.
 rfd = "0.15"
 # The Microsoft sign-in page, shown in a helper process (see login.rs).

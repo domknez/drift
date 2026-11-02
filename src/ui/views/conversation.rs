@@ -2,7 +2,7 @@
 //! with their picture, the user's own on the right), and the composer. In a channel
 //! a post links to its thread. Right-clicking a message reacts, replies or copies.
 
-use crate::model::{Directory, Kind, Message, Picture, text, time};
+use crate::model::{Directory, Kind, Message, Picture, markdown, text, time};
 use crate::ui::pictures::Pictures;
 use crate::ui::style::icons::{self, Icon};
 use crate::ui::style::{colors, metrics, typography as ty};
@@ -918,6 +918,43 @@ fn typed(text: &str) -> egui::text::LayoutJob {
 /// a "replying to" or "editing" line above when there's one. Enter sends, Shift+Enter
 /// breaks the line, ↑ in an empty box edits the last message, Esc cancels, `@` offers
 /// people to mention. `reply` is the thread's composer.
+/// What's pasted into the composer: text keeps the links it had (from the clipboard's
+/// HTML), and a picture (a screenshot, say) is attached.
+fn paste(ui: &mut Ui, ws: &mut Workspace, reply: bool) {
+    let mut pictures = Vec::new();
+    ui.input_mut(|i| {
+        i.events.retain_mut(|event| match event {
+            egui::Event::Paste(text) => {
+                if let Some(html) = arboard::Clipboard::new().ok().and_then(|mut c| c.get().html().ok()) {
+                    *text = markdown::with_pasted_links(text, &html);
+                }
+                true
+            }
+            egui::Event::PasteImage(image) => {
+                pictures.push(image.clone());
+                false
+            }
+            _ => true,
+        })
+    });
+    for image in pictures {
+        match encode_png(&image) {
+            Some(bytes) => ws.attach(reply, "Pasted picture.png", bytes),
+            None => ws.error = Some("Couldn't paste the picture".into()),
+        }
+    }
+}
+
+fn encode_png(image: &egui::ColorImage) -> Option<Vec<u8>> {
+    let mut bytes = Vec::new();
+    let mut encoder = png::Encoder::new(&mut bytes, image.size[0] as u32, image.size[1] as u32);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    let rgba: Vec<u8> = image.pixels.iter().flat_map(|c| c.to_srgba_unmultiplied()).collect();
+    encoder.write_header().ok()?.write_image_data(&rgba).ok()?;
+    Some(bytes)
+}
+
 pub fn composer(ui: &mut Ui, ws: &mut Workspace, rect: Rect, hint: &str, reply: bool) {
     let p = colors();
     let mut rect = rect;
@@ -1023,6 +1060,7 @@ pub fn composer(ui: &mut Ui, ws: &mut Workspace, rect: Rect, hint: &str, reply: 
         if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
             ws.cancel_compose(reply);
         }
+        paste(ui, ws, reply);
         if let Some(first) = people.as_ref().and_then(|p| p.first())
             && ui.input_mut(|i| {
                 i.consume_key(egui::Modifiers::NONE, egui::Key::Tab) || i.consume_key(egui::Modifiers::NONE, egui::Key::Enter)

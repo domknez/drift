@@ -95,6 +95,33 @@ pub fn to_html_with(text: &str, people: &[Mention], custom: &[CustomEmoji]) -> O
 }
 
 /// A list item: whether it's numbered, and its text.
+/// Text pasted from a page, with the links its HTML has written as `[text](url)`:
+/// the clipboard's plain text loses them. Each link's text is found in `plain` after
+/// the one before; one not found (or whose text is its address) stays as it is.
+pub fn with_pasted_links(plain: &str, html: &str) -> String {
+    let blocks = super::text::from_html(html);
+    let mut out = String::with_capacity(plain.len());
+    let mut rest = plain;
+    let links = blocks.iter().flat_map(|b| match b {
+        super::text::Block::Text(runs) | super::text::Block::Quote(runs, _) => runs.as_slice(),
+        _ => &[],
+    });
+    for run in links {
+        let Some(url) = run.span.link.as_deref().filter(|u| is_url(u)) else { continue };
+        let label = run.text.trim();
+        if label.is_empty() || label == url || label.contains(['[', ']']) {
+            continue;
+        }
+        let Some(at) = rest.find(label) else { continue };
+        out.push_str(&rest[..at]);
+        // Parentheses in the address would end the link early.
+        out.push_str(&format!("[{label}]({})", url.replace('(', "%28").replace(')', "%29")));
+        rest = &rest[at + label.len()..];
+    }
+    out.push_str(rest);
+    out
+}
+
 fn list_item(line: &str) -> Option<(bool, &str)> {
     if let Some(rest) = line.strip_prefix("- ").or_else(|| line.strip_prefix("* ")).or_else(|| line.strip_prefix("• ")) {
         return Some((false, rest));
@@ -401,6 +428,16 @@ mod tests {
         assert_eq!(html("**bold** and *it* and ~~gone~~"), "<p><b>bold</b> and <i>it</i> and <s>gone</s></p>");
         assert_eq!(html("keep snake_case_names and 2 * 3 * 4"), "<p>keep snake_case_names and 2 * 3 * 4</p>");
         assert_eq!(html("_soft_ and `**not bold**`"), "<p><i>soft</i> and <code>**not bold**</code></p>");
+    }
+
+    #[test]
+    fn pasted_links_come_back() {
+        let html = r#"<meta charset="utf-8"><a href="https://dev.azure.com/org/Proj%20X/_git/ui/pullrequest/10552">Pull Request 10552</a><span>: feat(trace): toggle (AB#6908)</span>"#;
+        assert_eq!(
+            with_pasted_links("Pull Request 10552: feat(trace): toggle (AB#6908)", html),
+            "[Pull Request 10552](https://dev.azure.com/org/Proj%20X/_git/ui/pullrequest/10552): feat(trace): toggle (AB#6908)"
+        );
+        assert_eq!(with_pasted_links("just text", "<p>just text</p>"), "just text");
     }
 
     #[test]
