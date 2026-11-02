@@ -14,12 +14,12 @@ use super::app::Request;
 use super::style::{colors, metrics};
 use super::updates::Updates;
 use super::workspace::Workspace;
-use crate::settings::Appearance;
+use crate::settings::Look;
 use eframe::egui::{self, CornerRadius, Frame, Rect, ViewportCommand, pos2, vec2};
 
 /// The signed-in window: the top bar, then the list, the conversation, and the
 /// thread when one is open, as panels on the canvas.
-pub fn workspace(ui: &mut egui::Ui, ws: &mut Workspace, theme: Appearance, updates: &Updates) -> Option<Request> {
+pub fn workspace(ui: &mut egui::Ui, ws: &mut Workspace, look: Look, updates: &Updates) -> Option<Request> {
     let p = colors();
     let mut request = None;
     if ui.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::R))) {
@@ -37,6 +37,22 @@ pub fn workspace(ui: &mut egui::Ui, ws: &mut Workspace, theme: Appearance, updat
             ws.section = section;
             ws.filter.clear();
         }
+    }
+    // ⌘+ and ⌘−: everything bigger or smaller; ⌘0: the usual size.
+    let cmd = |key| egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, key);
+    let resize = ui.input_mut(|i| {
+        if i.consume_shortcut(&cmd(egui::Key::Plus)) || i.consume_shortcut(&cmd(egui::Key::Equals)) {
+            Some(look.resized(1))
+        } else if i.consume_shortcut(&cmd(egui::Key::Minus)) {
+            Some(look.resized(-1))
+        } else if i.consume_shortcut(&cmd(egui::Key::Num0)) {
+            Some(Look { text_size: 100, ..look })
+        } else {
+            None
+        }
+    });
+    if let Some(to) = resize.filter(|to| *to != look) {
+        request = Some(Request::Look(to));
     }
     // ⌘T: the quick switcher, to jump to a conversation or a place.
     if ui.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::T))) {
@@ -56,7 +72,9 @@ pub fn workspace(ui: &mut egui::Ui, ws: &mut Workspace, theme: Appearance, updat
     egui::CentralPanel::default().frame(Frame::new().fill(p.canvas)).show(ui, |ui| {
         let full = ui.max_rect();
         let bar = Rect::from_min_size(full.min, vec2(full.width(), metrics::TOP_BAR));
-        request = topbar::show(&mut child(ui, bar), ws, theme, updates);
+        if let Some(asked) = topbar::show(&mut child(ui, bar), ws, look, updates) {
+            request = Some(asked);
+        }
 
         let gap = metrics::GAP;
         let body = Rect::from_min_max(pos2(full.left() + gap, bar.bottom()), pos2(full.right() - gap, full.bottom() - gap));

@@ -39,8 +39,12 @@ pub fn install_fonts(ctx: &egui::Context) {
     ctx.set_fonts(fonts);
 }
 
-pub fn apply(ctx: &egui::Context, dark: bool) {
-    palette::set_dark(dark);
+/// Draw with `theme` and `accent`, `zoom` times the usual size, from now on.
+pub fn apply(ctx: &egui::Context, theme: crate::settings::Theme, accent: crate::settings::Accent, zoom: f32) {
+    let dark = palette::set(theme, accent);
+    ctx.set_zoom_factor(zoom);
+    // Sizes go through the settings (⌘+ and ⌘− are drift's own shortcuts).
+    ctx.options_mut(|o| o.zoom_with_keyboard = false);
     let theme = if dark { egui::Theme::Dark } else { egui::Theme::Light };
     ctx.set_theme(theme);
     ctx.set_visuals_of(theme, visuals(dark));

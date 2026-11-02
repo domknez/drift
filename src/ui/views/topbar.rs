@@ -2,9 +2,10 @@
 //! unread, search, today's meeting with Join, and the user's menu.
 
 use crate::model::{Availability, Conversation, Directory, Kind, Picture, Status, time};
-use crate::settings::Appearance;
+use crate::settings::{Accent, Appearance, Look, TEXT_SIZES, Theme};
 use crate::ui::app::Request;
 use crate::ui::style::icons::{self, Icon};
+use crate::ui::style::palette;
 use crate::ui::style::{colors, metrics, typography as ty};
 use crate::ui::updates::Updates;
 use crate::ui::widgets;
@@ -13,7 +14,7 @@ use eframe::egui::{self, Align2, CornerRadius, Frame, Margin, Rect, RichText, Se
 
 const PILL_HEIGHT: f32 = 36.0;
 
-pub fn show(ui: &mut Ui, ws: &mut Workspace, theme: Appearance, updates: &Updates) -> Option<Request> {
+pub fn show(ui: &mut Ui, ws: &mut Workspace, look: Look, updates: &Updates) -> Option<Request> {
     let p = colors();
     let full = ui.max_rect();
     super::drag_area(ui, full, "topbar-drag");
@@ -59,7 +60,7 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace, theme: Appearance, updates: &Update
     // The user's menu at the far right, a new version before it, then today's meeting.
     let size = 32.0;
     let avatar = Rect::from_min_size(pos2(full.right() - 16.0 - size, cy - size / 2.0), vec2(size, size));
-    let mut request = user_menu(ui, ws, avatar, theme, updates);
+    let mut request = user_menu(ui, ws, avatar, look, updates);
     let mut right = avatar.left() - 12.0;
     if let Some(offer) = updates.offer() {
         let (left, clicked) = update_pill(ui, &offer, right, cy);
@@ -361,7 +362,7 @@ fn menu_label(ui: &mut Ui, text: &str) {
     ui.add_space(8.0);
 }
 
-fn user_menu(ui: &mut Ui, ws: &mut Workspace, rect: Rect, theme: Appearance, updates: &Updates) -> Option<Request> {
+fn user_menu(ui: &mut Ui, ws: &mut Workspace, rect: Rect, look: Look, updates: &Updates) -> Option<Request> {
     let p = colors();
     let me = Picture::Person { id: ws.me_id.clone(), name: ws.me.clone() };
     let picture = if ws.me_id.is_empty() { None } else { ws.pictures.get(&me) };
@@ -443,28 +444,54 @@ fn user_menu(ui: &mut Ui, ws: &mut Workspace, rect: Rect, theme: Appearance, upd
             divider(ui);
         }
 
-        // Appearance, as three segments.
+        // Appearance: light, dark or as the system is; the themes; the accent; the size.
         menu_label(ui, "Appearance");
-        let options = [(Appearance::System, "System"), (Appearance::Light, "Light"), (Appearance::Dark, "Dark")];
-        let (track, _) = ui.allocate_exact_size(vec2(ui.available_width(), 34.0), Sense::hover());
-        let track = track.shrink2(vec2(6.0, 0.0));
-        ui.painter().rect_filled(track, CornerRadius::same(10), p.surface);
-        let w = track.width() / options.len() as f32;
-        for (i, (option, label)) in options.into_iter().enumerate() {
-            let cell = Rect::from_min_size(pos2(track.left() + w * i as f32, track.top()), vec2(w, track.height())).shrink(3.0);
-            let response =
-                ui.interact(cell, ui.scope_id().with(("appearance", i)), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
-            let on = theme == option;
-            if on {
-                ui.painter().rect(cell, CornerRadius::same(8), p.panel, Stroke::new(1.0, p.border), egui::StrokeKind::Inside);
-            } else if response.hovered() {
-                ui.painter().rect_filled(cell, CornerRadius::same(8), p.hover);
+        let modes = [(Appearance::System, "System"), (Appearance::Light, "Light"), (Appearance::Dark, "Dark")];
+        if let Some(mode) = segments(ui, "appearance", &modes, look.mode) {
+            request = Some(Request::Look(Look { mode, ..look }));
+        }
+        ui.add_space(10.0);
+        let dark_now = ui.visuals().dark_mode;
+        ui.horizontal(|ui| {
+            ui.add_space(6.0);
+            ui.spacing_mut().item_spacing.x = 6.0;
+            for theme in Theme::ALL.iter().copied() {
+                // The one in use, and the other kind's pick (used when drift is that kind).
+                let picked = theme == if theme.dark() { look.dark } else { look.light };
+                let in_use = picked && theme.dark() == dark_now;
+                if theme_swatch(ui, theme, picked, in_use).clicked() {
+                    // Picking the other kind's theme switches to it too.
+                    let mut to = if theme.dark() { Look { dark: theme, ..look } } else { Look { light: theme, ..look } };
+                    if theme.dark() != dark_now {
+                        to.mode = if theme.dark() { Appearance::Dark } else { Appearance::Light };
+                    }
+                    request = Some(Request::Look(to));
+                }
             }
-            let font = if on { ty::small_strong() } else { ty::small() };
-            ui.painter().text(cell.center(), egui::Align2::CENTER_CENTER, label, font, if on { p.text } else { p.dim });
-            if response.clicked() {
-                request = Some(Request::Theme(option));
+        });
+        ui.add_space(10.0);
+        ui.horizontal(|ui| {
+            ui.add_space(8.0);
+            ui.spacing_mut().item_spacing.x = 8.0;
+            for accent in Accent::ALL.iter().copied() {
+                let (dot, response) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::click());
+                let response = response.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(accent.label());
+                ui.painter().circle_filled(dot.center(), 9.0, palette::accent_swatch(accent, dark_now));
+                if accent == look.accent {
+                    ui.painter().circle_stroke(dot.center(), 11.0, Stroke::new(1.5, p.text));
+                } else if response.hovered() {
+                    ui.painter().circle_stroke(dot.center(), 11.0, Stroke::new(1.0, p.border));
+                }
+                if response.clicked() {
+                    request = Some(Request::Look(Look { accent, ..look }));
+                }
             }
+        });
+        ui.add_space(10.0);
+        let sizes: Vec<(u16, String)> = TEXT_SIZES.iter().map(|s| (*s, format!("{s}%"))).collect();
+        let sizes: Vec<(u16, &str)> = sizes.iter().map(|(s, l)| (*s, l.as_str())).collect();
+        if let Some(text_size) = segments(ui, "text-size", &sizes, look.text_size).filter(|s| *s != look.text_size) {
+            request = Some(Request::Look(Look { text_size, ..look }));
         }
         ui.add_space(12.0);
         divider(ui);
@@ -527,4 +554,57 @@ fn user_menu(ui: &mut Ui, ws: &mut Workspace, rect: Rect, theme: Appearance, upd
         ui.add_space(2.0);
     });
     request
+}
+
+/// Options side by side in a track, the picked one raised; returns the one clicked.
+fn segments<T: Copy + PartialEq>(ui: &mut Ui, salt: &str, options: &[(T, &str)], picked: T) -> Option<T> {
+    let p = colors();
+    let mut clicked = None;
+    let (track, _) = ui.allocate_exact_size(vec2(ui.available_width(), 34.0), Sense::hover());
+    let track = track.shrink2(vec2(6.0, 0.0));
+    ui.painter().rect_filled(track, CornerRadius::same(10), p.surface);
+    let w = track.width() / options.len() as f32;
+    for (i, (option, label)) in options.iter().enumerate() {
+        let cell = Rect::from_min_size(pos2(track.left() + w * i as f32, track.top()), vec2(w, track.height())).shrink(3.0);
+        let response = ui.interact(cell, ui.scope_id().with((salt, i)), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
+        let on = *option == picked;
+        if on {
+            ui.painter().rect(cell, CornerRadius::same(8), p.panel, Stroke::new(1.0, p.border), egui::StrokeKind::Inside);
+        } else if response.hovered() {
+            ui.painter().rect_filled(cell, CornerRadius::same(8), p.hover);
+        }
+        let font = if on { ty::small_strong() } else { ty::small() };
+        ui.painter().text(cell.center(), egui::Align2::CENTER_CENTER, *label, font, if on { p.text } else { p.dim });
+        if response.clicked() {
+            clicked = Some(*option);
+        }
+    }
+    clicked
+}
+
+/// A theme in small: its canvas with a panel and two lines of text on it.
+fn theme_swatch(ui: &mut Ui, theme: Theme, picked: bool, in_use: bool) -> egui::Response {
+    let p = colors();
+    let (rect, response) = ui.allocate_exact_size(vec2(48.0, 34.0), Sense::click());
+    let response = response.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(theme.label());
+    let (canvas, panel, text) = palette::swatch(theme);
+    let painter = ui.painter();
+    painter.rect_filled(rect, CornerRadius::same(8), canvas);
+    let card = Rect::from_min_max(rect.min + vec2(7.0, 7.0), rect.max - vec2(7.0, 7.0));
+    painter.rect_filled(card, CornerRadius::same(4), panel);
+    for (y, w) in [(card.top() + 6.0, 0.7), (card.top() + 12.0, 0.45)] {
+        let line = Rect::from_min_size(pos2(card.left() + 5.0, y), vec2((card.width() - 10.0) * w, 2.5));
+        painter.rect_filled(line, CornerRadius::same(1), text.gamma_multiply(0.6));
+    }
+    let ring = if in_use {
+        Stroke::new(2.0, p.accent)
+    } else if picked {
+        Stroke::new(1.5, p.dim)
+    } else if response.hovered() {
+        Stroke::new(1.0, p.dim)
+    } else {
+        Stroke::new(1.0, p.border)
+    };
+    painter.rect_stroke(rect, CornerRadius::same(8), ring, egui::StrokeKind::Outside);
+    response
 }

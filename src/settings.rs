@@ -40,11 +40,124 @@ impl Appearance {
     }
 }
 
+/// A choice kept by its key in the settings file.
+macro_rules! choice {
+    ($(#[$doc:meta])* $name:ident { $($(#[$vdoc:meta])* $variant:ident => $key:literal),+ $(,)? }) => {
+        $(#[$doc])*
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        pub enum $name {
+            $($(#[$vdoc])* $variant),+
+        }
+
+        impl $name {
+            pub const ALL: &'static [$name] = &[$($name::$variant),+];
+
+            pub fn key(self) -> &'static str {
+                match self {
+                    $($name::$variant => $key),+
+                }
+            }
+
+            fn from_key(k: &str) -> Option<$name> {
+                $name::ALL.iter().copied().find(|v| v.key() == k)
+            }
+        }
+    };
+}
+
+choice!(
+    /// The greys drift is drawn in: three dark themes and two light ones.
+    Theme {
+        /// Deep ink, nearly black.
+        Midnight => "midnight",
+        /// A softer dark grey.
+        Dim => "dim",
+        /// A bluish slate, between dark and light.
+        Slate => "slate",
+        /// Warm paper.
+        Paper => "paper",
+        /// A neutral, cool light grey.
+        Cool => "cool",
+    }
+);
+
+impl Theme {
+    pub fn label(self) -> &'static str {
+        match self {
+            Theme::Midnight => "Midnight",
+            Theme::Dim => "Dim",
+            Theme::Slate => "Slate",
+            Theme::Paper => "Paper",
+            Theme::Cool => "Cool",
+        }
+    }
+
+    pub fn dark(self) -> bool {
+        matches!(self, Theme::Midnight | Theme::Dim | Theme::Slate)
+    }
+}
+
+choice!(
+    /// The colour of buttons, links and what's picked.
+    Accent {
+        Violet => "violet",
+        Indigo => "indigo",
+        Blue => "blue",
+        Teal => "teal",
+        Green => "green",
+        Orange => "orange",
+        Pink => "pink",
+    }
+);
+
+impl Accent {
+    pub fn label(self) -> &'static str {
+        match self {
+            Accent::Violet => "Violet",
+            Accent::Indigo => "Indigo",
+            Accent::Blue => "Blue",
+            Accent::Teal => "Teal",
+            Accent::Green => "Green",
+            Accent::Orange => "Orange",
+            Accent::Pink => "Pink",
+        }
+    }
+}
+
+/// How big everything is drawn, in percent.
+pub const TEXT_SIZES: [u16; 4] = [90, 100, 110, 125];
+
+/// How drift looks: light, dark or as the system is, the theme for each, the
+/// accent and the size.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Look {
+    pub mode: Appearance,
+    pub light: Theme,
+    pub dark: Theme,
+    pub accent: Accent,
+    pub text_size: u16,
+}
+
+impl Look {
+    /// The next size up (`step` 1) or down (-1), staying within [`TEXT_SIZES`].
+    pub fn resized(self, step: i32) -> Look {
+        let at = TEXT_SIZES.iter().position(|s| *s == self.text_size).unwrap_or(1) as i32;
+        let to = (at + step).clamp(0, TEXT_SIZES.len() as i32 - 1) as usize;
+        Look { text_size: TEXT_SIZES[to], ..self }
+    }
+}
+
 /// The user's preferences, as kept in the settings file. Change them with
 /// [`Prefs::update`], which saves what changed.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Prefs {
     pub theme: Appearance,
+    /// The theme used when drift is light, and the one when it's dark.
+    pub light_theme: Theme,
+    pub dark_theme: Theme,
+    pub accent: Accent,
+    /// How big everything is drawn, in percent (one of [`TEXT_SIZES`]).
+    pub text_size: u16,
     /// The conversation open last (its id).
     pub conversation: Option<String>,
     /// A notification for each new message.
@@ -79,6 +192,10 @@ impl Prefs {
         let get = |k: &str| saved.get(k).map(String::as_str).filter(|v| !v.is_empty());
         Prefs {
             theme: get("theme").and_then(Appearance::from_key).unwrap_or(Appearance::System),
+            light_theme: get("light_theme").and_then(Theme::from_key).filter(|t| !t.dark()).unwrap_or(Theme::Paper),
+            dark_theme: get("dark_theme").and_then(Theme::from_key).filter(|t| t.dark()).unwrap_or(Theme::Midnight),
+            accent: get("accent").and_then(Accent::from_key).unwrap_or(Accent::Violet),
+            text_size: get("text_size").and_then(|v| v.parse().ok()).filter(|s| TEXT_SIZES.contains(s)).unwrap_or(100),
             conversation: get("conversation").map(str::to_string),
             notifications: get("notifications") != Some("false"),
             auto_update: get("auto_update") != Some("false"),
@@ -101,6 +218,20 @@ impl Prefs {
         }
     }
 
+    pub fn look(&self) -> Look {
+        Look { mode: self.theme, light: self.light_theme, dark: self.dark_theme, accent: self.accent, text_size: self.text_size }
+    }
+
+    pub fn set_look(&mut self, look: Look) {
+        self.update(|p| {
+            p.theme = look.mode;
+            p.light_theme = look.light;
+            p.dark_theme = look.dark;
+            p.accent = look.accent;
+            p.text_size = look.text_size;
+        });
+    }
+
     /// Change preferences and save the ones that changed. Keys this version
     /// doesn't know stay in the file as they were.
     pub fn update(&mut self, change: impl FnOnce(&mut Prefs)) {
@@ -119,10 +250,12 @@ impl Prefs {
         }
     }
 
-    fn values(&self) -> [(&'static str, String); 9] {
+    fn values(&self) -> [(&'static str, String); 13] {
         [
+            ("accent", self.accent.key().into()),
             ("auto_update", if self.auto_update { "true" } else { "false" }.into()),
             ("conversation", self.conversation.clone().unwrap_or_default()),
+            ("dark_theme", self.dark_theme.key().into()),
             (
                 "folded",
                 match &self.folded {
@@ -133,9 +266,11 @@ impl Prefs {
             ),
             ("following", self.following.join(",")),
             ("hidden", self.hidden.iter().map(|(id, at)| format!("{id}|{at}")).collect::<Vec<_>>().join(",")),
+            ("light_theme", self.light_theme.key().into()),
             ("muted", self.muted.join(",")),
             ("notifications", if self.notifications { "true" } else { "false" }.into()),
             ("recent_emoji", self.recent_emoji.join(",")),
+            ("text_size", self.text_size.to_string()),
             ("theme", self.theme.key().into()),
         ]
     }
@@ -161,7 +296,7 @@ fn merge(text: &str, changes: &[(&str, String)]) -> String {
 mod tests {
     use super::*;
 
-    const SAVED: &str = "auto_update=false\nconversation=19:abc@thread.v2\nfolded=meetings,team:19:t@thread.tacv2\nfollowing=19:prs@thread.tacv2\nhidden=19:old@thread.v2|1793000000000\nmuted=19:x@thread.v2,19:y\nnotifications=false\nrecent_emoji=yes,wave;0-weu-d1-abc\ntheme=light\n";
+    const SAVED: &str = "accent=teal\nauto_update=false\nconversation=19:abc@thread.v2\ndark_theme=slate\nfolded=meetings,team:19:t@thread.tacv2\nfollowing=19:prs@thread.tacv2\nhidden=19:old@thread.v2|1793000000000\nlight_theme=cool\nmuted=19:x@thread.v2,19:y\nnotifications=false\nrecent_emoji=yes,wave;0-weu-d1-abc\ntext_size=110\ntheme=light\n";
 
     #[test]
     fn reads_a_saved_file() {
@@ -170,6 +305,7 @@ mod tests {
         assert_eq!(p.conversation.as_deref(), Some("19:abc@thread.v2"));
         assert!(!p.auto_update);
         assert_eq!(p.following, ["19:prs@thread.tacv2"]);
+        assert_eq!((p.light_theme, p.dark_theme, p.accent, p.text_size), (Theme::Cool, Theme::Slate, Accent::Teal, 110));
     }
 
     #[test]

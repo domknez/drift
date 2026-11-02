@@ -7,7 +7,7 @@ use super::views;
 use super::workspace::{Outcome, Section, Workspace};
 use crate::backend::Backend;
 use crate::demo;
-use crate::settings::{Appearance, Prefs};
+use crate::settings::{Accent, Appearance, Prefs, Theme};
 use crate::teams::Teams;
 use crate::teams::auth::Session;
 use eframe::egui;
@@ -15,8 +15,8 @@ use std::sync::Arc;
 
 pub struct App {
     prefs: Prefs,
-    /// The theme last applied.
-    dark: Option<bool>,
+    /// The theme, accent and size last applied.
+    applied: Option<(Theme, Accent, u16)>,
     screen: Screen,
     updates: Updates,
     /// `DRIFT_SCREENSHOT=<file.png>`: save the window once it has loaded, then quit.
@@ -60,7 +60,8 @@ impl SignIn {
 
 /// What the views ask the app for.
 pub enum Request {
-    Theme(Appearance),
+    /// The theme, accent or size changed.
+    Look(crate::settings::Look),
     Notifications(bool),
     /// Turn updating automatically on or off.
     AutoUpdate(bool),
@@ -82,7 +83,9 @@ impl App {
         // `DRIFT_DEMO=1`: the made-up workspace, with settings that are never saved.
         if std::env::var_os("DRIFT_DEMO").is_some() {
             let theme = std::env::var("DRIFT_THEME").unwrap_or_default();
-            let prefs = Prefs::parse(&format!("theme={theme}"));
+            // DRIFT_PREFS: more settings, `key=value` separated by `;`.
+            let more = std::env::var("DRIFT_PREFS").unwrap_or_default().replace(';', "\n");
+            let prefs = Prefs::parse(&format!("theme={theme}\n{more}"));
             // DRIFT_DEMO_OPEN picks the conversation, DRIFT_DEMO_TAB the tab.
             let open = std::env::var("DRIFT_DEMO_OPEN").unwrap_or_else(|_| demo::OPEN.to_string());
             let mut workspace = Workspace::new(&cc.egui_ctx, Arc::new(demo::Demo), Some(open.clone()));
@@ -142,7 +145,7 @@ impl App {
                 Ok("meetings") => Section::Meetings,
                 _ => Section::Chats,
             };
-            return App { prefs, dark: None, screen: Screen::Signed(Box::new(workspace)), updates: Updates::demo(), capture };
+            return App { prefs, applied: None, screen: Screen::Signed(Box::new(workspace)), updates: Updates::demo(), capture };
         }
         let prefs = Prefs::load();
         let screen = match Session::stored() {
@@ -152,7 +155,7 @@ impl App {
             None => Screen::SignIn(SignIn::new(None)),
         };
         let updates = Updates::new(prefs.auto_update);
-        App { prefs, dark: None, screen, updates, capture }
+        App { prefs, applied: None, screen, updates, capture }
     }
 
     /// Take the screenshot once the workspace has loaded, save it and quit.
@@ -202,15 +205,17 @@ impl App {
             Appearance::Light => false,
             Appearance::System => ctx.input(|i| i.raw.system_theme) != Some(egui::Theme::Light),
         };
-        if self.dark != Some(dark) {
-            self.dark = Some(dark);
-            style::apply(ctx, dark);
+        let theme = if dark { self.prefs.dark_theme } else { self.prefs.light_theme };
+        let now = (theme, self.prefs.accent, self.prefs.text_size);
+        if self.applied != Some(now) {
+            self.applied = Some(now);
+            style::apply(ctx, theme, self.prefs.accent, f32::from(self.prefs.text_size) / 100.0);
         }
     }
 
     fn handle(&mut self, ctx: &egui::Context, request: Request) {
         match request {
-            Request::Theme(theme) => self.prefs.update(|p| p.theme = theme),
+            Request::Look(look) => self.prefs.set_look(look),
             Request::Notifications(on) => self.prefs.update(|p| p.notifications = on),
             Request::AutoUpdate(on) => {
                 self.updates.auto = on;
@@ -287,7 +292,7 @@ impl eframe::App for App {
                 let following_before = workspace.following.clone();
                 let recent_before = workspace.recent_emoji.clone();
                 let hidden_before = workspace.hidden.clone();
-                request = views::workspace(ui, workspace, self.prefs.theme, &self.updates);
+                request = views::workspace(ui, workspace, self.prefs.look(), &self.updates);
                 if workspace.open != before {
                     let open = workspace.open.clone();
                     self.prefs.update(|p| p.conversation = open);
