@@ -74,11 +74,16 @@ fn session(teams: &Teams, endpoint: &str, connections: &mut u64, to: &dyn Fn(Pus
     let skype = teams.session().skype()?;
     let info = allocate(&skype, endpoint)?;
     *connections += 1;
-    let sid = handshake(&skype, &info, endpoint, *connections)?;
+    let (sid, heartbeat) = handshake(&skype, &info, endpoint, *connections)?;
+    // The server's heartbeats and the answers to drift's pings stop: the socket is dead.
+    let silent_for = heartbeat.max(PING_EVERY * 2) + Duration::from_secs(15);
     *connections += 1;
     let mut socket = dial(&skype, &info, &sid, endpoint, *connections)?;
     log_info!("trouter: connected");
     let mut pinged = Instant::now();
+    // When anything last came: pings are answered, so a long silence means the socket
+    // died quietly (the computer slept, the network changed) and it's opened again.
+    let mut heard = Instant::now();
     let mut registered: Option<Instant> = None;
     let mut sequence = 0u64;
     loop {
@@ -87,11 +92,18 @@ fn session(teams: &Teams, endpoint: &str, connections: &mut u64, to: &dyn Fn(Pus
             send(&mut socket, format!("5:{sequence}+::{{\"name\":\"ping\"}}"))?;
             pinged = Instant::now();
         }
+        if heard.elapsed() >= silent_for {
+            return Err(Error::Network("no answer from the push service".into()));
+        }
         if registered.is_some_and(|at| at.elapsed() >= Duration::from_secs(REGISTRATION_TTL - 60)) {
             register(teams, &info.surl, endpoint)?;
             registered = Some(Instant::now());
         }
-        let frame = match socket.read() {
+        let read = socket.read();
+        if read.is_ok() {
+            heard = Instant::now();
+        }
+        let frame = match read {
             Ok(Message::Text(text)) => text.to_string(),
             Ok(Message::Close(_)) => return Err(Error::Network("the socket was closed".into())),
             Ok(_) => continue,
@@ -176,7 +188,9 @@ fn query(info: &Info, endpoint: &str, connection: u64) -> String {
 }
 
 /// The socket.io session id.
-fn handshake(skype: &Skype, info: &Info, endpoint: &str, connection: u64) -> Result<String> {
+/// A socket.io session: its id, and how long the server may stay silent (its
+/// heartbeat timeout).
+fn handshake(skype: &Skype, info: &Info, endpoint: &str, connection: u64) -> Result<(String, Duration)> {
     let url = format!("{}/socket.io/1/?{}", info.socketio, query(info, endpoint, connection));
     let answer = http::fetch(&url, &[("X-Skypetoken", &skype.token)])?;
     // `<sid>:<heartbeat>:<close timeout>:<transports>`
@@ -185,7 +199,8 @@ fn handshake(skype: &Skype, info: &Info, endpoint: &str, connection: u64) -> Res
     if sid.is_empty() {
         return Err(Error::Service("no socket.io session from trouter".into()));
     }
-    Ok(sid.to_string())
+    let heartbeat = text.split(':').nth(1).and_then(|h| h.trim().parse::<u64>().ok()).filter(|h| *h > 0).unwrap_or(60);
+    Ok((sid.to_string(), Duration::from_secs(heartbeat)))
 }
 
 fn dial(skype: &Skype, info: &Info, sid: &str, endpoint: &str, connection: u64) -> Result<Socket> {
