@@ -18,12 +18,19 @@ pub struct Switcher {
     query: String,
     /// The row picked with the arrows.
     index: usize,
+    /// A message to forward to the conversation picked (then only conversations are listed).
+    forward: Option<crate::model::Message>,
 }
 
 impl Switcher {
+    /// Pick where to forward `message` to.
+    pub fn forwarding(message: crate::model::Message) -> Switcher {
+        Switcher { forward: Some(message), ..Switcher::default() }
+    }
+
     /// Open with `query` typed (for the demo).
     pub fn with(query: &str) -> Switcher {
-        Switcher { query: query.to_string(), index: 0 }
+        Switcher { query: query.to_string(), ..Switcher::default() }
     }
 }
 
@@ -62,7 +69,11 @@ pub fn show(ctx: &egui::Context, ws: &mut Workspace) {
         return;
     }
     let query = switcher.query.trim().to_lowercase();
-    let rows = rows(ws, &query);
+    let mut rows = rows(ws, &query);
+    if switcher.forward.is_some() {
+        let feed = |id: &str| ws.directory.as_ref().and_then(|d| d.conversation(id)).is_some_and(|c| c.kind == Kind::Feed);
+        rows.retain(|r| matches!(&r.target, Target::Conversation(id) if !feed(id)));
+    }
     if down {
         switcher.index = (switcher.index + 1).min(rows.len().saturating_sub(1));
     }
@@ -101,7 +112,14 @@ pub fn show(ctx: &egui::Context, ws: &mut Workspace) {
                             icons::paint(ui.painter(), icon, Icon::Search, p.dim);
                             ui.add_space(10.0);
                             let edit = egui::TextEdit::singleline(&mut switcher.query)
-                                .hint_text(RichText::new("Jump to a conversation, channel or place").color(p.faint))
+                                .hint_text(
+                                    RichText::new(if switcher.forward.is_some() {
+                                        "Forward to a chat or channel"
+                                    } else {
+                                        "Jump to a conversation, channel or place"
+                                    })
+                                    .color(p.faint),
+                                )
                                 .font(ty::body())
                                 .frame(Frame::NONE)
                                 .desired_width(f32::INFINITY);
@@ -143,12 +161,20 @@ pub fn show(ctx: &egui::Context, ws: &mut Workspace) {
                     ui.add_space(6.0);
                     ui.painter().hline(ui.min_rect().x_range(), ui.cursor().top(), Stroke::new(1.0, p.line));
                     Frame::new().inner_margin(Margin::symmetric(18, 10)).show(ui, |ui| {
-                        ui.label(RichText::new("↑ ↓  select      ↵  open      esc  close").font(ty::meta()).color(p.faint));
+                        let keys = if switcher.forward.is_some() {
+                            "↑ ↓  select      ↵  forward there      esc  close"
+                        } else {
+                            "↑ ↓  select      ↵  open      esc  close"
+                        };
+                        ui.label(RichText::new(keys).font(ty::meta()).color(p.faint));
                     });
                 });
         });
     if let Some(target) = chosen {
-        go(ctx, ws, target);
+        match (switcher.forward, target) {
+            (Some(message), Target::Conversation(to)) => ws.forward(ctx, &message, &to),
+            (_, target) => go(ctx, ws, target),
+        }
     } else if !close {
         ws.switcher = Some(switcher);
     }

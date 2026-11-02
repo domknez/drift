@@ -44,6 +44,8 @@ pub enum Action {
     UnreadFrom(String),
     /// See a picture big.
     View(String),
+    /// Pick a conversation to forward the message to.
+    Forward(Message),
 }
 
 /// Do what a click on a message asked for; `reply` when it came from the thread.
@@ -72,6 +74,7 @@ pub fn apply(ui: &Ui, ws: &mut Workspace, action: Action, reply: bool) {
         }
         Action::View(url) => ws.viewing = Some(url),
         Action::UnreadFrom(message) => ws.unread_from(ui.ctx(), &message),
+        Action::Forward(message) => ws.switcher = Some(super::switcher::Switcher::forwarding(message)),
         Action::Earlier => {
             ws.newest += crate::ui::workspace::NEWEST;
             ws.earlier_from = ws.list_height.as_ref().map(|(_, h)| *h);
@@ -797,6 +800,10 @@ fn message_menu(ui: &mut Ui, m: &Message, mine: bool, thread: bool, view: &View,
     }
     if thread && ui.button("Reply in thread").clicked() {
         *action = Some(Action::OpenThread(m.id.clone()));
+        ui.close();
+    }
+    if ui.button("Forward…").clicked() {
+        *action = Some(Action::Forward(m.clone()));
         ui.close();
     }
     ui.separator();

@@ -216,6 +216,7 @@ pub struct Workspace {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Chore {
     Delete,
+    Forward,
     React,
     Pin,
     MarkRead,
@@ -1077,6 +1078,7 @@ impl Workspace {
                 // Asked again with the next messages.
                 Chore::MarkRead => self.marked = None,
                 Chore::Delete => self.error = Some(format!("Couldn't delete the message. {e}")),
+                Chore::Forward => self.error = Some(format!("Couldn't forward the message. {e}")),
                 Chore::React => self.error = Some(format!("Couldn't add the reaction. {e}")),
                 Chore::Pin => {
                     self.error = Some(format!("Couldn't pin or unpin it. {e}"));
@@ -1318,6 +1320,15 @@ impl Workspace {
         }
     }
 
+    /// Forward a message to another conversation (as a quote, saying who wrote it where).
+    pub fn forward(&mut self, ctx: &egui::Context, message: &Message, to: &str) {
+        let place =
+            self.open.as_deref().and_then(|o| self.directory.as_ref()?.conversation(o)).map_or("a chat".to_string(), |c| c.title.clone());
+        let outgoing = markdown::Outgoing { html: forwarded_html(message, &place), mentions: Vec::new() };
+        let (backend, to) = (self.backend.clone(), to.to_string());
+        self.chores.push((Chore::Forward, Load::start(ctx, move || backend.send(&to, &outgoing).map(|()| false))));
+    }
+
     /// The user typed in the composer: the others hear of it, once every few seconds.
     pub fn typed(&mut self) {
         let Some(open) = self.open.clone() else { return };
@@ -1499,6 +1510,13 @@ fn quote_html(m: &Message) -> String {
     )
 }
 
+/// A message forwarded: who wrote it and where, then all of it, as a quote.
+fn forwarded_html(m: &Message, place: &str) -> String {
+    let esc = |s: &str| s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
+    let body = markdown::to_html_with(&text::to_markdown(&m.body), &[], &[]).html;
+    format!("<p><i>Forwarded from {name} in {place}</i></p><blockquote>{body}</blockquote>", name = esc(&m.author.name), place = esc(place),)
+}
+
 /// Who a one-to-one chat is with.
 fn person(c: &Conversation) -> Option<&str> {
     match c.members.as_slice() {
@@ -1647,6 +1665,15 @@ mod tests {
         newer(&mut directory, "19:priya", "Alex Morgan", "8:orgid:other-alex");
         ws.notify_new(&ctx, &directory);
         assert_eq!(ws.toasts.conversations(), ["19:release", "19:priya"]);
+    }
+
+    #[test]
+    fn forwards_say_who_wrote_it_where() {
+        let ws = workspace("19:maya");
+        let m = ws.messages.iter().flatten().find(|m| m.id == "3006").unwrap();
+        let html = forwarded_html(m, "Maya <& co>");
+        assert!(html.starts_with("<p><i>Forwarded from Alex Morgan in Maya &lt;&amp; co&gt;</i></p><blockquote>"));
+        assert!(html.contains("<b>release cut at 15:00</b>"));
     }
 
     #[test]
