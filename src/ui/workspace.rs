@@ -140,7 +140,13 @@ pub struct Workspace {
     sending: Load<(), Error>,
     /// Writes in the background (reactions, read marks); true asks to fetch the
     /// messages again after.
-    chores: Vec<Load<bool, Error>>,
+    chores: Vec<(Chore, Load<bool, Error>)>,
+    /// The message being sent, and one that couldn't be (with why), in its conversation.
+    outbox: Option<Outbox>,
+    pub unsent: Option<(String, bool, String)>,
+    pub pending_delete: Option<PendingDelete>,
+    /// Teams couldn't be reached the last time it was asked.
+    pub offline: bool,
     /// The conversation and message last marked read, so it's marked once.
     marked: Option<(String, String)>,
     /// Show a notification for each new message (the user's setting).
@@ -194,6 +200,42 @@ pub struct Workspace {
     /// New messages shown in the corner while drift is in front.
     pub toasts: super::toasts::Toasts,
 }
+
+/// Work done behind the UI, and what its failing means for the user.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Chore {
+    Delete,
+    React,
+    Pin,
+    MarkRead,
+}
+
+/// A message on its way: all of it, to put back in the composer if it fails.
+#[derive(Clone)]
+struct Outbox {
+    conversation: String,
+    reply: bool,
+    text: String,
+    attachments: Vec<Attachment>,
+    quoting: Option<Message>,
+    editing: Option<String>,
+}
+
+/// A message deleted on screen, sent to the service once its Undo has run out.
+pub struct PendingDelete {
+    conversation: String,
+    message: Message,
+    at: Instant,
+}
+
+impl PendingDelete {
+    pub fn is_in(&self, conversation: &str) -> bool {
+        self.conversation == conversation
+    }
+}
+
+/// How long a deleted message can be brought back.
+const UNDO_FOR: Duration = Duration::from_secs(5);
 
 /// A picture waiting in a composer to go with the next message.
 #[derive(Clone)]
@@ -311,6 +353,10 @@ impl Workspace {
             drafts_loaded: false,
             sending: Load::Idle,
             chores: Vec::new(),
+            outbox: None,
+            unsent: None,
+            pending_delete: None,
+            offline: false,
             marked: None,
             notifications: true,
             seen: HashMap::new(),
@@ -362,11 +408,22 @@ impl Workspace {
         self.attachments.retain(|(r, _)| *r != reply);
         let mut message =
             if text.is_empty() { markdown::Outgoing::default() } else { markdown::to_html_with(&text, &self.people(), &self.custom_emoji) };
-        if let Some(quoted) = self.quoting.take_if(|(r, _)| *r == reply).map(|(_, m)| m) {
-            message.html = quote_html(&quoted) + &message.html;
+        let quoting = self.quoting.take_if(|(r, _)| *r == reply).map(|(_, m)| m);
+        if let Some(quoted) = &quoting {
+            message.html = quote_html(quoted) + &message.html;
         }
         let editing = self.editing.take_if(|(r, _)| *r == reply).map(|(_, id)| id);
         self.draft_mut(reply).clear();
+        // Kept until it's sent: a failure puts it all back.
+        self.unsent = None;
+        self.outbox = Some(Outbox {
+            conversation: open.clone(),
+            reply,
+            text: text.clone(),
+            attachments: pictures.clone(),
+            quoting,
+            editing: editing.clone(),
+        });
         let backend = self.backend.clone();
         self.sending = Load::start(ctx, move || {
             // Pictures go up first; the message then shows them under its text.
@@ -456,13 +513,65 @@ impl Workspace {
     }
 
     /// Delete one of the user's messages: gone at once, deleted behind.
+    /// Delete one of the user's messages: gone from the screen at once, from Teams once
+    /// its Undo has run out (a delete still waiting goes right away).
     pub fn delete(&mut self, ctx: &egui::Context, message: &str) {
         let Some(open) = self.open.clone() else { return };
-        if let Some(messages) = self.messages.as_mut() {
-            messages.retain(|m| m.id != message);
+        if let Some(pending) = self.pending_delete.take() {
+            self.send_delete(ctx, pending);
         }
-        let (backend, message) = (self.backend.clone(), message.to_string());
-        self.chores.push(Load::start(ctx, move || backend.delete(&open, &message).map(|()| true)));
+        let Some(messages) = self.messages.as_mut() else { return };
+        let Some(at) = messages.iter().position(|m| m.id == message) else { return };
+        let message = messages.remove(at);
+        self.pending_delete = Some(PendingDelete { conversation: open, message, at: Instant::now() });
+    }
+
+    /// Bring back the message deleted last, while its Undo lasts.
+    pub fn undo_delete(&mut self) {
+        let Some(pending) = self.pending_delete.take() else { return };
+        if self.open.as_deref() == Some(pending.conversation.as_str())
+            && let Some(messages) = self.messages.as_mut()
+        {
+            let key = |m: &Message| (m.at, m.id.parse::<i64>().unwrap_or(0));
+            let at = messages.partition_point(|m| key(m) < key(&pending.message));
+            messages.insert(at, pending.message);
+        }
+    }
+
+    /// Delete the message waiting for its Undo now.
+    pub fn commit_delete(&mut self, ctx: &egui::Context) {
+        if let Some(pending) = self.pending_delete.take() {
+            self.send_delete(ctx, pending);
+        }
+    }
+
+    fn send_delete(&mut self, ctx: &egui::Context, pending: PendingDelete) {
+        let (backend, conversation, id) = (self.backend.clone(), pending.conversation, pending.message.id);
+        self.chores.push((Chore::Delete, Load::start(ctx, move || backend.delete(&conversation, &id).map(|()| true))));
+    }
+
+    /// Put a message that couldn't be sent back where it was written (or, if another
+    /// conversation is open, among the drafts), and say so.
+    fn put_back(&mut self, outbox: Outbox, why: String) {
+        let here = self.open.as_deref() == Some(outbox.conversation.as_str());
+        let reply = outbox.reply;
+        if here && self.draft(reply).trim().is_empty() {
+            *self.draft_mut(reply) = outbox.text;
+            self.attachments.extend(outbox.attachments.into_iter().map(|a| (reply, a)));
+            if let Some(m) = outbox.quoting {
+                self.quoting = Some((reply, m));
+            }
+            if let Some(id) = outbox.editing {
+                self.editing = Some((reply, id));
+            }
+        } else if !outbox.text.trim().is_empty() {
+            let draft = self.drafts.entry(outbox.conversation.clone()).or_default();
+            if !draft.is_empty() {
+                draft.push_str("\n\n");
+            }
+            draft.push_str(&outbox.text);
+        }
+        self.unsent = Some((outbox.conversation, reply, why));
     }
 
     /// The people who can be mentioned: those the user chats with, and everyone who
@@ -500,7 +609,7 @@ impl Workspace {
         }
         m.reactions.retain(|r| r.count > 0);
         let (backend, message, key) = (self.backend.clone(), message.to_string(), key.to_string());
-        self.chores.push(Load::start(ctx, move || backend.react(&open, &message, &key, add).map(|()| true)));
+        self.chores.push((Chore::React, Load::start(ctx, move || backend.react(&open, &message, &key, add).map(|()| true))));
     }
 
     /// Notifications for messages newer than the last ones seen: in chats and meeting
@@ -713,7 +822,7 @@ impl Workspace {
             c.pinned = pinned;
         }
         let (backend, id) = (self.backend.clone(), id.to_string());
-        self.chores.push(Load::start(ctx, move || backend.pin(&id, pinned).map(|()| false)));
+        self.chores.push((Chore::Pin, Load::start(ctx, move || backend.pin(&id, pinned).map(|()| false))));
     }
 
     /// Mark a conversation read (up to now), or unread (from its newest message on).
@@ -728,7 +837,7 @@ impl Workspace {
             self.marked = Some((id.to_string(), last));
         }
         let (backend, id) = (self.backend.clone(), id.to_string());
-        self.chores.push(Load::start(ctx, move || backend.mark_read(&id, &up_to.to_string()).map(|()| false)));
+        self.chores.push((Chore::MarkRead, Load::start(ctx, move || backend.mark_read(&id, &up_to.to_string()).map(|()| false))));
     }
 
     /// Set the user's status (`None`: by activity again). It shows set right away.
@@ -772,7 +881,7 @@ impl Workspace {
         self.marked = Some((id.clone(), last));
         let backend = self.backend.clone();
         let up_to = (at - 1).to_string();
-        self.chores.push(Load::start(ctx, move || backend.mark_read(&id, &up_to).map(|()| false)));
+        self.chores.push((Chore::MarkRead, Load::start(ctx, move || backend.mark_read(&id, &up_to).map(|()| false))));
     }
 
     /// Whether a conversation is hidden: hidden in drift, and nothing newer since.
@@ -832,13 +941,14 @@ impl Workspace {
         }
         self.marked = Some((open.clone(), last.clone()));
         let backend = self.backend.clone();
-        self.chores.push(Load::start(ctx, move || backend.mark_read(&open, &last).map(|()| false)));
+        self.chores.push((Chore::MarkRead, Load::start(ctx, move || backend.mark_read(&open, &last).map(|()| false))));
     }
 
     /// Collect finished loads and start the ones that are due.
     pub fn tick(&mut self, ctx: &egui::Context) -> Option<Outcome> {
         self.pictures.begin_frame();
         if let Some(result) = self.sending.take() {
+            let outbox = self.outbox.take();
             match result {
                 Ok(()) => {
                     self.error = None;
@@ -846,8 +956,19 @@ impl Workspace {
                     self.read_at = None;
                 }
                 Err(Error::SignedOut) => return Some(Outcome::SignedOut),
-                Err(e) => self.failed(e),
+                Err(e) => {
+                    log_warn!("sending: {e}");
+                    if let Some(outbox) = outbox {
+                        self.put_back(outbox, e.to_string());
+                    }
+                }
             }
+        }
+        // A deleted message whose Undo ran out goes to the service.
+        if let Some(pending) = self.pending_delete.take_if(|p| p.at.elapsed() >= UNDO_FOR) {
+            self.send_delete(ctx, pending);
+        } else if self.pending_delete.is_some() {
+            ctx.request_repaint_after(Duration::from_millis(250));
         }
         // The service pushed changes: fetch what they touch now.
         while let Ok(push) = self.pushes.try_recv() {
@@ -890,15 +1011,31 @@ impl Workspace {
             crate::notify::badge(unread);
         }
         let mut refetch = false;
-        for chore in &mut self.chores {
-            match chore.take() {
+        let mut failed = Vec::new();
+        for (chore, load) in &mut self.chores {
+            match load.take() {
                 Some(Ok(again)) => refetch |= again,
                 Some(Err(Error::SignedOut)) => return Some(Outcome::SignedOut),
-                Some(Err(e)) => log_warn!("{e}"),
+                Some(Err(e)) => failed.push((*chore, e)),
                 None => {}
             }
         }
-        self.chores.retain(Load::is_running);
+        self.chores.retain(|(_, load)| load.is_running());
+        for (chore, e) in failed {
+            log_warn!("{chore:?}: {e}");
+            // What's on screen goes back to what the service has.
+            refetch = true;
+            match chore {
+                // Asked again with the next messages.
+                Chore::MarkRead => self.marked = None,
+                Chore::Delete => self.error = Some(format!("Couldn't delete the message. {e}")),
+                Chore::React => self.error = Some(format!("Couldn't add the reaction. {e}")),
+                Chore::Pin => {
+                    self.error = Some(format!("Couldn't pin or unpin it. {e}"));
+                    self.directory_at = None;
+                }
+            }
+        }
         if refetch {
             self.messages_at = None;
         }
@@ -924,6 +1061,7 @@ impl Workspace {
                     self.directory = Some(directory);
                     self.check_new();
                     self.error = None;
+                    self.offline = false;
                 }
                 Err(Error::SignedOut) => return Some(Outcome::SignedOut),
                 Err(e) => self.failed(e),
@@ -1024,8 +1162,12 @@ impl Workspace {
                     {
                         self.thread = Some(root);
                     }
+                    let mut messages = messages;
+                    // One deleted on screen stays deleted while its Undo lasts.
+                    if let Some(p) = self.pending_delete.as_ref().filter(|p| p.conversation == id) {
+                        messages.retain(|m| m.id != p.message.id);
+                    }
                     self.messages = Some(messages);
-                    self.error = None;
                     self.mark_read(ctx);
                     // Finding while the messages came in: show the newest match.
                     if self.side == Side::Found && self.focus.is_none() && self.find.as_deref().is_some_and(|q| !q.trim().is_empty()) {
@@ -1118,9 +1260,14 @@ impl Workspace {
         None
     }
 
+    /// Something couldn't be fetched: Teams unreachable shows as being offline (and
+    /// clears when it answers again), anything else as an error.
     fn failed(&mut self, e: Error) {
         log_warn!("{e}");
-        self.error = Some(e.to_string());
+        match e {
+            Error::Network(_) => self.offline = true,
+            e => self.error = Some(e.to_string()),
+        }
     }
 
     /// Every half-written message, the open conversation's included (not an edit).
@@ -1230,7 +1377,7 @@ impl Workspace {
         feed.unread = false;
         let backend = self.backend.clone();
         let message = newest.to_string();
-        self.chores.push(Load::start(ctx, move || backend.mark_read(&id, &message).map(|()| false)));
+        self.chores.push((Chore::MarkRead, Load::start(ctx, move || backend.mark_read(&id, &message).map(|()| false))));
     }
 
     /// Fetch everything again now.
@@ -1261,5 +1408,68 @@ fn person(c: &Conversation) -> Option<&str> {
     match c.members.as_slice() {
         [one] if c.kind == Kind::Chat => Some(one.id.as_str()),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn workspace(open: &str) -> Workspace {
+        let ctx = egui::Context::default();
+        let mut ws = Workspace::new(&ctx, Arc::new(crate::demo::Demo), Some(open.to_string()));
+        ws.messages = Some(crate::demo::Demo.messages(open).unwrap());
+        ws
+    }
+
+    fn outbox(conversation: &str, text: &str) -> Outbox {
+        Outbox { conversation: conversation.into(), reply: false, text: text.into(), attachments: Vec::new(), quoting: None, editing: None }
+    }
+
+    #[test]
+    fn a_message_that_failed_goes_back_where_it_was_written() {
+        let mut ws = workspace("19:maya");
+        ws.put_back(outbox("19:maya", "see you at 1"), "HTTP 503".into());
+        assert_eq!(ws.draft, "see you at 1");
+        assert!(ws.unsent.as_ref().is_some_and(|(c, reply, why)| c == "19:maya" && !reply && why == "HTTP 503"));
+    }
+
+    #[test]
+    fn a_failed_message_from_elsewhere_becomes_that_conversations_draft() {
+        let mut ws = workspace("19:maya");
+        ws.draft = "typing here".into();
+        ws.put_back(outbox("19:tomas", "rebased"), "offline".into());
+        assert_eq!(ws.draft, "typing here");
+        assert_eq!(ws.drafts.get("19:tomas").map(String::as_str), Some("rebased"));
+    }
+
+    #[test]
+    fn a_deleted_message_comes_back_on_undo() {
+        let mut ws = workspace("19:maya");
+        let ctx = egui::Context::default();
+        let before: Vec<String> = ws.messages.iter().flatten().map(|m| m.id.clone()).collect();
+        ws.delete(&ctx, "3004");
+        assert!(!ws.messages.iter().flatten().any(|m| m.id == "3004"));
+        ws.undo_delete();
+        assert_eq!(ws.messages.iter().flatten().map(|m| m.id.clone()).collect::<Vec<_>>(), before);
+        assert!(ws.pending_delete.is_none());
+    }
+
+    #[test]
+    fn moving_between_conversations() {
+        let mut ws = workspace("19:maya");
+        ws.directory = Some(crate::demo::Demo.directory().unwrap());
+        let first = ws.neighbour(1, false);
+        assert!(first.is_some_and(|id| id != "19:maya"));
+        // From the newest, up goes nowhere.
+        ws.open = Some(crate::demo::OPEN.to_string());
+        let newest = {
+            let mut all: Vec<_> =
+                ws.directory.as_ref().unwrap().conversations.iter().filter(|c| c.last.is_some() && c.kind != Kind::Feed).collect();
+            all.sort_by_key(|c| std::cmp::Reverse(c.last.as_ref().map_or(0, |l| l.at)));
+            all[0].id.clone()
+        };
+        ws.open = Some(newest);
+        assert_eq!(ws.neighbour(-1, false), None);
     }
 }

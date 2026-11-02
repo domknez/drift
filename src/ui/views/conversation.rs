@@ -209,6 +209,7 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace) {
     if let Some(action) = action {
         apply(ui, ws, action, false);
     }
+    notice(ui, ws, body);
     if can_write {
         let rect = Rect::from_min_max(pos2(full.left(), bottom), full.max);
         let name = conversation.as_ref().map_or(String::new(), |c| c.title.clone());
@@ -296,7 +297,6 @@ fn head(ui: &mut Ui, ws: &mut Workspace, rect: Rect, directory: &Directory, id: 
     // is shown of how many, and ↑ ↓ to go between them (also Shift+Enter / Enter).
     if ws.find.is_some() {
         let field = Rect::from_min_size(pos2(x - 300.0, rect.center().y - 17.0), vec2(300.0, 34.0));
-        x = field.left() - 8.0;
         ui.painter().rect(field, CornerRadius::same(10), p.surface, Stroke::new(1.5, p.accent_fill), egui::StrokeKind::Inside);
         icons::paint(
             ui.painter(),
@@ -354,10 +354,80 @@ fn head(ui: &mut Ui, ws: &mut Workspace, rect: Rect, directory: &Directory, id: 
             ws.stop_find();
         }
     }
-    if let Some(error) = &ws.error {
-        let r = Rect::from_min_max(pos2(x - 260.0, rect.top()), pos2(x, rect.bottom()));
-        let mut e = ui.new_child(egui::UiBuilder::new().max_rect(r).layout(Layout::right_to_left(Align::Center)));
-        e.add(egui::Label::new(RichText::new(error).font(ty::small()).color(p.danger)).truncate());
+}
+
+/// What a notice's button does.
+enum NoticeAction {
+    Retry(bool),
+    Undo,
+    Reconnect,
+    Dismiss,
+}
+
+/// One notice over the top of the conversation, the most pressing first: a message
+/// that couldn't be sent, a delete that can still be undone, Teams out of reach, an error.
+fn notice(ui: &mut Ui, ws: &mut Workspace, body: Rect) {
+    let p = colors();
+    let open = ws.open.clone().unwrap_or_default();
+    let (text, danger, button) = if let Some((_, reply, why)) = ws.unsent.as_ref().filter(|(c, ..)| *c == open) {
+        (format!("Your message wasn't sent. {why}"), true, Some(("Retry", NoticeAction::Retry(*reply))))
+    } else if ws.pending_delete.as_ref().is_some_and(|d| d.is_in(&open)) {
+        ("Message deleted".to_string(), false, Some(("Undo", NoticeAction::Undo)))
+    } else if ws.offline {
+        ("Can't reach Teams. Trying again…".to_string(), true, Some(("Retry now", NoticeAction::Reconnect)))
+    } else if let Some(error) = &ws.error {
+        (error.clone(), true, None)
+    } else {
+        return;
+    };
+    let width = (body.width() - 40.0).min(560.0);
+    let area = Rect::from_center_size(pos2(body.center().x, body.top() + 30.0), vec2(width, 38.0));
+    let mut action = None;
+    egui::Area::new(egui::Id::unique("notice")).order(egui::Order::Foreground).fixed_pos(area.min).show(ui.ctx(), |ui| {
+        Frame::new()
+            .fill(p.panel)
+            .stroke(Stroke::new(1.0, if danger { p.danger.gamma_multiply(0.6) } else { p.border }))
+            .corner_radius(CornerRadius::same(12))
+            .shadow(egui::Shadow { offset: [0, 4], blur: 14, spread: 0, color: egui::Color32::from_black_alpha(40) })
+            .inner_margin(Margin { left: 14, right: 6, top: 6, bottom: 6 })
+            .show(ui, |ui| {
+                ui.set_width(width - 20.0);
+                ui.horizontal(|ui| {
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if widgets::icon_button(ui, Icon::Close, "Dismiss").clicked() {
+                            action = Some(NoticeAction::Dismiss);
+                        }
+                        if let Some((label, act)) = button {
+                            let label = RichText::new(label).font(ty::small_strong()).color(p.accent);
+                            if ui.add(egui::Button::new(label).frame(false)).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                                action = Some(act);
+                            }
+                        }
+                        ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                            let color = if danger { p.danger } else { p.text };
+                            ui.add(egui::Label::new(RichText::new(text).font(ty::small()).color(color)).truncate());
+                        });
+                    });
+                });
+            });
+    });
+    match action {
+        Some(NoticeAction::Retry(reply)) => ws.send(ui.ctx(), reply),
+        Some(NoticeAction::Undo) => ws.undo_delete(),
+        Some(NoticeAction::Reconnect) => ws.refresh(),
+        Some(NoticeAction::Dismiss) => {
+            // The most pressing one goes; a delete is kept (it just stops being undoable).
+            if ws.unsent.as_ref().is_some_and(|(c, ..)| *c == open) {
+                ws.unsent = None;
+            } else if ws.pending_delete.as_ref().is_some_and(|d| d.is_in(&open)) {
+                ws.commit_delete(ui.ctx());
+            } else if ws.offline {
+                ws.offline = false;
+            } else {
+                ws.error = None;
+            }
+        }
+        None => {}
     }
 }
 
