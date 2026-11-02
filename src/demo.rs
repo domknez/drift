@@ -261,6 +261,10 @@ impl Backend for Demo {
         if conversation != OPEN {
             let (who, line) = match conversation {
                 "19:tomas" => (ME, "rebased, should be green now"),
+                // Links as a bot writes them: Markdown, and a bare address.
+                "19:nightly@thread.tacv2" => {
+                    ("repos", "[Nightly #812](https://ci.example.com/runs/812): 2 failed, 418 passed. Log: https://ci.example.com/runs/812/log.")
+                }
                 _ => ("priya", "cut is at 15:00 today"),
             };
             return Ok(vec![message("2001", None, who, today(10, 0), &format!("<p>{line}</p>"), None, vec![])]);

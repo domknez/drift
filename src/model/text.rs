@@ -48,7 +48,63 @@ pub fn plain(text: &str) -> Vec<Block> {
     if text.trim().is_empty() {
         Vec::new()
     } else {
-        vec![Block::Text(vec![Inline { text: text.trim().to_string(), span: Span::default() }])]
+        vec![Block::Text(linkify(vec![Inline { text: text.trim().to_string(), span: Span::default() }]))]
+    }
+}
+
+/// Links written out in text become link runs: Markdown's `[text](url)` (bots and
+/// connectors send it as is) and bare `http(s)://` addresses.
+fn linkify(runs: Vec<Inline>) -> Vec<Inline> {
+    let mut out: Vec<Inline> = Vec::with_capacity(runs.len());
+    let mut push = |text: &str, span: Span| {
+        if text.is_empty() {
+            return;
+        }
+        match out.last_mut() {
+            Some(last) if last.span == span => last.text.push_str(text),
+            _ => out.push(Inline { text: text.to_string(), span }),
+        }
+    };
+    for run in runs {
+        if run.span.link.is_some() || run.span.code || run.span.mention || run.span.emoji.is_some() {
+            push(&run.text, run.span);
+            continue;
+        }
+        let mut rest = run.text.as_str();
+        while let Some((at, len, label, url)) = next_link(rest) {
+            push(&rest[..at], run.span.clone());
+            push(label, Span { link: Some(url.to_string()), ..run.span.clone() });
+            rest = &rest[at + len..];
+        }
+        push(rest, run.span);
+    }
+    out
+}
+
+/// The first link in `s`: where it starts, how long it is, its text and its address.
+fn next_link(s: &str) -> Option<(usize, usize, &str, &str)> {
+    let web = |u: &str| u.starts_with("https://") || u.starts_with("http://");
+    let markdown = s.match_indices('[').find_map(|(open, _)| {
+        let close = open + s[open..].find("](")?;
+        let label = &s[open + 1..close];
+        let end = close + 2 + s[close + 2..].find(')')?;
+        let url = &s[close + 2..end];
+        (!label.is_empty() && !label.contains(['[', '\n']) && web(url) && !url.contains(char::is_whitespace)).then_some((
+            open,
+            end + 1 - open,
+            label,
+            url,
+        ))
+    });
+    let bare = ["https://", "http://"].iter().filter_map(|p| s.find(p)).min().map(|at| {
+        let end = s[at..].find(|c: char| c.is_whitespace() || matches!(c, '<' | '>' | '"')).map_or(s.len(), |e| at + e);
+        // Punctuation closing a sentence isn't part of the address.
+        let url = s[at..end].trim_end_matches(['.', ',', ';', ':', '!', '?', ')', ']', '\'']);
+        (at, url.len(), url, url)
+    });
+    match (markdown, bare) {
+        (Some(m), Some(b)) => Some(if b.0 < m.0 { b } else { m }),
+        (m, b) => m.or(b),
     }
 }
 
@@ -441,7 +497,7 @@ impl Runs {
         while self.runs.first().is_some_and(|r| r.text.trim().is_empty()) {
             self.runs.remove(0);
         }
-        self.runs
+        linkify(self.runs)
     }
 }
 
@@ -648,6 +704,23 @@ mod tests {
             blocks[1],
             Block::Image { url: "https://us-api.asm.skype.com/v1/objects/0-wus-d1-abc/views/imgo".into(), size: Some((640, 480)) }
         );
+    }
+
+    #[test]
+    fn links_written_out_become_links() {
+        let blocks =
+            from_html("<p>[Build 42](https://ci.example.com/b/42) failed, see https://ci.example.com/log. Or [not a link](ftp://x)</p>");
+        let r = runs(&blocks);
+        assert_eq!(
+            r.iter().map(|r| (r.text.as_str(), r.span.link.as_deref())).collect::<Vec<_>>(),
+            [
+                ("Build 42", Some("https://ci.example.com/b/42")),
+                (" failed, see ", None),
+                ("https://ci.example.com/log", Some("https://ci.example.com/log")),
+                (". Or [not a link](ftp://x)", None),
+            ]
+        );
+        assert_eq!(runs(&plain("PR [#7](https://x.io/7)"))[1].span.link.as_deref(), Some("https://x.io/7"));
     }
 
     #[test]
