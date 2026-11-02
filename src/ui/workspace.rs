@@ -455,7 +455,7 @@ impl Workspace {
         } else {
             open.clone()
         };
-        let text = self.draft(reply).trim().to_string();
+        let text = crate::model::emoji::emoticons(self.draft(reply).trim());
         let pictures: Vec<Attachment> = self.attachments.iter().filter(|(r, _)| *r == reply).map(|(_, a)| a.clone()).collect();
         if (text.is_empty() && pictures.is_empty()) || self.sending.is_running() {
             return;

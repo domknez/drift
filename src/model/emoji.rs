@@ -46,6 +46,66 @@ pub const PICKER: [(&str, &str); 40] = [
     ("bug", "🐛"),
 ];
 
+/// Text emoticons Teams turns into emoji as they're typed.
+const EMOTICONS: [(&str, &str); 20] = [
+    (":)", "🙂"),
+    (":-)", "🙂"),
+    ("(:", "🙂"),
+    (":D", "😄"),
+    (":-D", "😄"),
+    ("xD", "😆"),
+    ("XD", "😆"),
+    (";)", "😉"),
+    (";-)", "😉"),
+    (":(", "🙁"),
+    (":-(", "🙁"),
+    (":'(", "😢"),
+    (":P", "😛"),
+    (":p", "😛"),
+    (":-P", "😛"),
+    (":O", "😮"),
+    (":o", "😮"),
+    (":|", "😐"),
+    ("<3", "❤"),
+    ("(y)", "👍"),
+];
+
+/// The emoji a word stands for, if it's an emoticon.
+pub fn emoticon(word: &str) -> Option<&'static str> {
+    EMOTICONS.iter().find(|(e, _)| *e == word).map(|(_, ch)| *ch)
+}
+
+/// `text` with its emoticons as emoji: whole words only (a link's `:/` or a time's
+/// `8:30` stay), and nothing in `code`.
+pub fn emoticons(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut in_code = false;
+    for (i, line) in text.split('\n').enumerate() {
+        if i > 0 {
+            out.push('\n');
+        }
+        if line.trim_start().starts_with("```") {
+            in_code = !in_code;
+            out.push_str(line);
+            continue;
+        }
+        let mut ticks = 0;
+        let mut first = true;
+        for word in line.split(' ') {
+            if !first {
+                out.push(' ');
+            }
+            first = false;
+            match emoticon(word).filter(|_| !in_code && ticks % 2 == 0) {
+                Some(ch) => out.push_str(ch),
+                None => out.push_str(word),
+            }
+            ticks += word.matches('`').count();
+        }
+    }
+    out
+}
+
 /// The key of an emoji character (a trailing variation selector is ignored): the
 /// picker's own first, then Teams' catalog (emoji proper, not the letter-like
 /// symbols it also has, such as © or ™).
@@ -181,6 +241,18 @@ pub fn html(key: &str, ch: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn emoticons_become_emoji() {
+        assert_eq!(emoticons("ok :) see you <3"), "ok 🙂 see you ❤");
+        assert_eq!(emoticons(":D"), "😄");
+        assert_eq!(emoticons("at 8:30, https://x.io/a:)b"), "at 8:30, https://x.io/a:)b");
+        assert_eq!(emoticons("`:)` and :)"), "`:)` and 🙂");
+        assert_eq!(emoticons("```\n:)\n```\n:("), "```\n:)\n```\n🙁");
+        assert_eq!(emoticon("(y)"), Some("👍"));
+        // A list's "B)" or "8)" isn't one.
+        assert_eq!(emoticons("option B) or 8) maybe"), "option B) or 8) maybe");
+    }
 
     #[test]
     fn knows_its_characters() {

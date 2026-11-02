@@ -1204,6 +1204,20 @@ fn emoji_over_text(ui: &Ui, pictures: &mut Pictures, output: &egui::text_edit::T
     }
 }
 
+/// When the draft ends with an emoticon and a space or new line, the emoticon becomes
+/// its emoji (not in `code`); whether it did.
+fn emoticon_typed(draft: &mut String) -> bool {
+    let Some(end) = draft.chars().last().filter(|c| *c == ' ' || *c == '\n') else { return false };
+    let body = &draft[..draft.len() - end.len_utf8()];
+    let start = body.rfind([' ', '\n']).map_or(0, |i| i + 1);
+    let Some(ch) = crate::model::emoji::emoticon(&body[start..]) else { return false };
+    if body[..start].matches('`').count() % 2 == 1 {
+        return false;
+    }
+    draft.replace_range(start..body.len(), ch);
+    true
+}
+
 /// A file's size, as people read it.
 fn size_text(bytes: usize) -> String {
     match bytes {
@@ -1426,6 +1440,10 @@ pub fn composer(ui: &mut Ui, ws: &mut Workspace, rect: Rect, hint: &str, reply: 
     emoji_over_text(&t, &mut ws.pictures, &output, p.surface);
     let response = output.response.response;
     if response.changed() {
+        // An emoticon just finished (a space or a new line after it) turns into its emoji.
+        if emoticon_typed(ws.draft_mut(reply)) {
+            set_cursor_to_end(ui, id, ws.draft(reply));
+        }
         // What's typed changed: the suggestions start over at the first.
         ws.suggestion = 0;
         if !reply {
@@ -1699,5 +1717,21 @@ fn set_cursor_to_end(ui: &Ui, id: egui::Id, text: &str) {
         let end = egui::text::CCursor::new(text.chars().count());
         state.cursor.set_char_range(Some(egui::text::CCursorRange::one(end)));
         state.store(ui.ctx(), id);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::emoticon_typed;
+
+    #[test]
+    fn emoticons_turn_into_emoji_as_typed() {
+        let mut draft = "nice :) ".to_string();
+        assert!(emoticon_typed(&mut draft));
+        assert_eq!(draft, "nice 🙂 ");
+        let mut code = "`x :) ".to_string();
+        assert!(!emoticon_typed(&mut code));
+        let mut half = "nice :)".to_string();
+        assert!(!emoticon_typed(&mut half));
     }
 }
