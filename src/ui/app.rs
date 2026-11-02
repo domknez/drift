@@ -15,8 +15,9 @@ use std::sync::Arc;
 
 pub struct App {
     prefs: Prefs,
-    /// The theme, accent and size last applied.
+    /// The theme, accent and size last applied, and the size the smallest window was set for.
     applied: Option<(Theme, Accent, u16)>,
+    min_size_for: Option<u16>,
     screen: Screen,
     updates: Updates,
     /// `DRIFT_SCREENSHOT=<file.png>`: save the window once it has loaded, then quit.
@@ -152,6 +153,7 @@ impl App {
             return App {
                 prefs,
                 applied: None,
+                min_size_for: None,
                 screen: Screen::Signed(Box::new(workspace)),
                 updates: Updates::demo(),
                 capture,
@@ -168,7 +170,7 @@ impl App {
             None => Screen::SignIn(SignIn::new(None)),
         };
         let updates = Updates::new(prefs.auto_update);
-        App { prefs, applied: None, screen, updates, capture, keep_drafts: true, saved_drafts: None, drafts_at: None }
+        App { prefs, applied: None, min_size_for: None, screen, updates, capture, keep_drafts: true, saved_drafts: None, drafts_at: None }
     }
 
     /// Take the screenshot once the workspace has loaded, save it and quit.
@@ -223,6 +225,14 @@ impl App {
         if self.applied != Some(now) {
             self.applied = Some(now);
             style::apply(ctx, theme, self.prefs.accent, f32::from(self.prefs.text_size) / 100.0);
+        }
+        // The smallest window grows with the text, so the panels still fit: its size is
+        // in points, which the size scales, once the size is in effect.
+        let zoom = f32::from(self.prefs.text_size) / 100.0;
+        if self.min_size_for != Some(self.prefs.text_size) && (ctx.zoom_factor() - zoom).abs() < 0.001 {
+            self.min_size_for = Some(self.prefs.text_size);
+            let [w, h] = super::metrics::MIN_WINDOW_SIZE;
+            ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(egui::vec2(w, h)));
         }
     }
 

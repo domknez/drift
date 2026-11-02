@@ -12,6 +12,9 @@ pub const PANEL_RADIUS: u8 = 16;
 pub const LIST_WIDTH: f32 = 300.0;
 /// The thread on the right.
 pub const THREAD_WIDTH: f32 = 380.0;
+/// The conversation beside an open thread at its narrowest; narrower, the thread
+/// lies over it.
+pub const MAIN_NARROWEST: f32 = 360.0;
 pub const HEADER: f32 = 64.0;
 /// A list row: an avatar beside a name and a preview.
 pub const ROW: f32 = 54.0;

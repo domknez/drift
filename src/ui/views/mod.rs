@@ -107,15 +107,22 @@ pub fn workspace(ui: &mut egui::Ui, ws: &mut Workspace, look: Look, updates: &Up
 
         let gap = metrics::GAP;
         let body = Rect::from_min_max(pos2(full.left() + gap, bar.bottom()), pos2(full.right() - gap, full.bottom() - gap));
-        let list = Rect::from_min_size(body.min, vec2(metrics::LIST_WIDTH, body.height()));
+        // Narrow (a small window, or big text): the list gives way first, then the
+        // thread lies over the conversation instead of beside it.
+        let list_width = metrics::LIST_WIDTH.min(body.width() * 0.36);
+        let list = Rect::from_min_size(body.min, vec2(list_width, body.height()));
         let mut main = Rect::from_min_max(pos2(list.right() + gap, body.top()), body.max);
-        if ws.thread.is_some() {
-            let thread = Rect::from_min_max(pos2(body.right() - metrics::THREAD_WIDTH, body.top()), body.max);
+        let thread = Rect::from_min_max(pos2(body.right() - metrics::THREAD_WIDTH.min(main.width()), body.top()), body.max);
+        let beside = thread.left() - gap - main.left() >= metrics::MAIN_NARROWEST;
+        if ws.thread.is_some() && beside {
             main.max.x = thread.left() - gap;
             thread::show(&mut panel(ui, thread), ws);
         }
         list::show(&mut panel(ui, list), ws);
         conversation::show(&mut panel(ui, main), ws);
+        if ws.thread.is_some() && !beside {
+            thread::show(&mut panel(ui, thread), ws);
+        }
         if let Some(id) = ws.toasts.show(ui.ctx(), main) {
             ws.side = super::workspace::Side::List;
             ws.open(&id);
