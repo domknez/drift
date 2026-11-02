@@ -18,6 +18,8 @@ pub struct App {
     /// The theme, accent and size last applied, and the size the smallest window was set for.
     applied: Option<(Theme, Accent, u16)>,
     min_size_for: Option<u16>,
+    /// The list's width changed by a drag not yet saved.
+    list_width_changed: bool,
     screen: Screen,
     updates: Updates,
     /// `DRIFT_SCREENSHOT=<file.png>`: save the window once it has loaded, then quit.
@@ -154,6 +156,7 @@ impl App {
                 prefs,
                 applied: None,
                 min_size_for: None,
+                list_width_changed: false,
                 screen: Screen::Signed(Box::new(workspace)),
                 updates: Updates::demo(),
                 capture,
@@ -170,7 +173,18 @@ impl App {
             None => Screen::SignIn(SignIn::new(None)),
         };
         let updates = Updates::new(prefs.auto_update);
-        App { prefs, applied: None, min_size_for: None, screen, updates, capture, keep_drafts: true, saved_drafts: None, drafts_at: None }
+        App {
+            prefs,
+            applied: None,
+            min_size_for: None,
+            list_width_changed: false,
+            screen,
+            updates,
+            capture,
+            keep_drafts: true,
+            saved_drafts: None,
+            drafts_at: None,
+        }
     }
 
     /// Take the screenshot once the workspace has loaded, save it and quit.
@@ -311,6 +325,10 @@ impl eframe::App for App {
                 }
                 if !workspace.drafts_loaded {
                     workspace.drafts_loaded = true;
+                    // The list's width as it was left (read with the drafts, once).
+                    if let Some(width) = self.prefs.list_width {
+                        workspace.list_width = f32::from(width);
+                    }
                     if self.keep_drafts {
                         let mut saved = crate::settings::load_drafts();
                         if let Some(open) = &workspace.open
@@ -337,6 +355,7 @@ impl eframe::App for App {
                 let folded_before = workspace.folded.clone();
                 let muted_before = workspace.muted_here.clone();
                 let following_before = workspace.following.clone();
+                let width_before = workspace.list_width;
                 let recent_before = workspace.recent_emoji.clone();
                 let hidden_before = workspace.hidden.clone();
                 request = views::workspace(ui, workspace, self.prefs.look(), &self.updates);
@@ -375,6 +394,15 @@ impl eframe::App for App {
                     let mut muted: Vec<String> = workspace.muted_here.iter().flatten().cloned().collect();
                     muted.sort();
                     self.prefs.update(|p| p.muted = muted);
+                }
+                // Saved once the drag ends (not on every frame of it).
+                if workspace.list_width != width_before {
+                    self.list_width_changed = true;
+                }
+                if self.list_width_changed && !ui.input(|i| i.pointer.any_down()) {
+                    self.list_width_changed = false;
+                    let width = workspace.list_width.round() as u16;
+                    self.prefs.update(|p| p.list_width = (f32::from(width) != super::metrics::LIST_WIDTH).then_some(width));
                 }
                 if workspace.following != following_before {
                     let mut following: Vec<String> = workspace.following.iter().flatten().cloned().collect();

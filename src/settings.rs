@@ -194,6 +194,8 @@ pub struct Prefs {
     pub accent: Accent,
     /// How big everything is drawn, in percent (one of [`TEXT_SIZES`]).
     pub text_size: u16,
+    /// How wide the list is (points); None for drift's default.
+    pub list_width: Option<u16>,
     /// The conversation open last (its id).
     pub conversation: Option<String>,
     /// A notification for each new message.
@@ -232,6 +234,7 @@ impl Prefs {
             dark_theme: get("dark_theme").and_then(Theme::from_key).filter(|t| t.dark()).unwrap_or(Theme::Midnight),
             accent: get("accent").and_then(Accent::from_key).unwrap_or(Accent::Violet),
             text_size: get("text_size").and_then(|v| v.parse().ok()).filter(|s| TEXT_SIZES.contains(s)).unwrap_or(100),
+            list_width: get("list_width").and_then(|v| v.parse().ok()),
             conversation: get("conversation").map(str::to_string),
             notifications: get("notifications") != Some("false"),
             auto_update: get("auto_update") != Some("false"),
@@ -286,7 +289,7 @@ impl Prefs {
         }
     }
 
-    fn values(&self) -> [(&'static str, String); 13] {
+    fn values(&self) -> [(&'static str, String); 14] {
         [
             ("accent", self.accent.key().into()),
             ("auto_update", if self.auto_update { "true" } else { "false" }.into()),
@@ -303,6 +306,7 @@ impl Prefs {
             ("following", self.following.join(",")),
             ("hidden", self.hidden.iter().map(|(id, at)| format!("{id}|{at}")).collect::<Vec<_>>().join(",")),
             ("light_theme", self.light_theme.key().into()),
+            ("list_width", self.list_width.map_or(String::new(), |w| w.to_string())),
             ("muted", self.muted.join(",")),
             ("notifications", if self.notifications { "true" } else { "false" }.into()),
             ("recent_emoji", self.recent_emoji.join(",")),
@@ -332,7 +336,7 @@ fn merge(text: &str, changes: &[(&str, String)]) -> String {
 mod tests {
     use super::*;
 
-    const SAVED: &str = "accent=teal\nauto_update=false\nconversation=19:abc@thread.v2\ndark_theme=slate\nfolded=meetings,team:19:t@thread.tacv2\nfollowing=19:prs@thread.tacv2\nhidden=19:old@thread.v2|1793000000000\nlight_theme=cool\nmuted=19:x@thread.v2,19:y\nnotifications=false\nrecent_emoji=yes,wave;0-weu-d1-abc\ntext_size=110\ntheme=light\n";
+    const SAVED: &str = "accent=teal\nauto_update=false\nconversation=19:abc@thread.v2\ndark_theme=slate\nfolded=meetings,team:19:t@thread.tacv2\nfollowing=19:prs@thread.tacv2\nhidden=19:old@thread.v2|1793000000000\nlight_theme=cool\nlist_width=360\nmuted=19:x@thread.v2,19:y\nnotifications=false\nrecent_emoji=yes,wave;0-weu-d1-abc\ntext_size=110\ntheme=light\n";
 
     #[test]
     fn reads_a_saved_file() {
@@ -342,6 +346,7 @@ mod tests {
         assert!(!p.auto_update);
         assert_eq!(p.following, ["19:prs@thread.tacv2"]);
         assert_eq!((p.light_theme, p.dark_theme, p.accent, p.text_size), (Theme::Cool, Theme::Slate, Accent::Teal, 110));
+        assert_eq!(p.list_width, Some(360));
     }
 
     #[test]

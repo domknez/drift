@@ -158,6 +158,8 @@ pub struct Workspace {
     pub offline: bool,
     /// The person or emoji picked with the arrows in the composer's suggestions.
     pub suggestion: usize,
+    /// How wide the list is (dragged by the user, kept in the settings).
+    pub list_width: f32,
     /// The keyboard shortcuts' sheet is open.
     pub shortcuts: bool,
     /// When the others were last told the user is typing (and where).
@@ -388,6 +390,7 @@ impl Workspace {
             pending_delete: None,
             offline: false,
             shortcuts: false,
+            list_width: crate::ui::style::metrics::LIST_WIDTH,
             suggestion: 0,
             typing: HashMap::new(),
             typing_sent: None,

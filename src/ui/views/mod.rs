@@ -109,8 +109,9 @@ pub fn workspace(ui: &mut egui::Ui, ws: &mut Workspace, look: Look, updates: &Up
         let body = Rect::from_min_max(pos2(full.left() + gap, bar.bottom()), pos2(full.right() - gap, full.bottom() - gap));
         // Narrow (a small window, or big text): the list gives way first, then the
         // thread lies over the conversation instead of beside it.
-        let list_width = metrics::LIST_WIDTH.min(body.width() * 0.36);
+        let list_width = ws.list_width.clamp(metrics::LIST_NARROWEST, (body.width() * 0.5).max(metrics::LIST_NARROWEST));
         let list = Rect::from_min_size(body.min, vec2(list_width, body.height()));
+
         let mut main = Rect::from_min_max(pos2(list.right() + gap, body.top()), body.max);
         let thread = Rect::from_min_max(pos2(body.right() - metrics::THREAD_WIDTH.min(main.width()), body.top()), body.max);
         let beside = thread.left() - gap - main.left() >= metrics::MAIN_NARROWEST;
@@ -122,6 +123,21 @@ pub fn workspace(ui: &mut egui::Ui, ws: &mut Workspace, look: Look, updates: &Up
         conversation::show(&mut panel(ui, main), ws);
         if ws.thread.is_some() && !beside {
             thread::show(&mut panel(ui, thread), ws);
+        }
+        // The gap beside the list widens or narrows it when dragged (a double click
+        // puts it back). Added last, over the panels' edges, so it gets the pointer there.
+        let handle = Rect::from_min_max(pos2(list.right() - 3.0, body.top()), pos2(list.right() + gap + 3.0, body.bottom()));
+        let drag = ui.interact(handle, ui.scope_id().with("list-width"), egui::Sense::click_and_drag());
+        let drag = drag.on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
+        if drag.dragged() {
+            ws.list_width = (list_width + drag.drag_delta().x).clamp(metrics::LIST_NARROWEST, metrics::LIST_WIDEST);
+        }
+        if drag.double_clicked() {
+            ws.list_width = metrics::LIST_WIDTH;
+        }
+        if drag.hovered() || drag.dragged() {
+            let x = list.right() + gap / 2.0;
+            ui.painter().vline(x, body.y_range().shrink(24.0), egui::Stroke::new(2.0, p.accent_fill.gamma_multiply(0.7)));
         }
         if let Some(id) = ws.toasts.show(ui.ctx(), main) {
             ws.side = super::workspace::Side::List;

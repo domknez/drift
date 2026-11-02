@@ -8,8 +8,10 @@ pub const LIGHTS: f32 = if cfg!(target_os = "macos") { 92.0 } else { 14.0 };
 /// Space between the panels and around them.
 pub const GAP: f32 = 10.0;
 pub const PANEL_RADIUS: u8 = 16;
-/// The list on the left.
+/// The list on the left, as it starts; it can be dragged between the narrowest and widest.
 pub const LIST_WIDTH: f32 = 300.0;
+pub const LIST_NARROWEST: f32 = 220.0;
+pub const LIST_WIDEST: f32 = 640.0;
 /// The thread on the right.
 pub const THREAD_WIDTH: f32 = 380.0;
 /// The conversation beside an open thread at its narrowest; narrower, the thread
