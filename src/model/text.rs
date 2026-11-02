@@ -110,13 +110,25 @@ fn next_link(s: &str) -> Option<(usize, usize, &str, &str)> {
 
 /// The text alone, on one line (for previews and notifications).
 pub fn flatten(body: &[Block]) -> String {
+    flatten_with(body, |r| r.text.clone())
+}
+
+/// On one line like [`flatten`], with links kept as Markdown's `[text](url)`.
+pub fn flatten_keeping_links(body: &[Block]) -> String {
+    flatten_with(body, |r| match &r.span.link {
+        Some(url) if *url != r.text => format!("[{}]({url})", r.text),
+        _ => r.text.clone(),
+    })
+}
+
+fn flatten_with(body: &[Block], run: impl Fn(&Inline) -> String) -> String {
     let mut words = Vec::new();
     for block in body {
         match block {
-            Block::Text(runs) | Block::Quote(runs, _) => words.extend(runs.iter().map(|r| r.text.as_str())),
-            Block::Table { rows, .. } => words.extend(rows.iter().flatten().flatten().map(|r| r.text.as_str())),
-            Block::Code(text) => words.push(text),
-            Block::Image { .. } => words.push("[image]"),
+            Block::Text(runs) | Block::Quote(runs, _) => words.extend(runs.iter().map(&run)),
+            Block::Table { rows, .. } => words.extend(rows.iter().flatten().flatten().map(&run)),
+            Block::Code(text) => words.push(text.clone()),
+            Block::Image { .. } => words.push("[image]".into()),
         }
     }
     words.join(" ").split_whitespace().collect::<Vec<_>>().join(" ")
