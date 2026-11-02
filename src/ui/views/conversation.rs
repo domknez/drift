@@ -283,7 +283,8 @@ fn head(ui: &mut Ui, ws: &mut Workspace, rect: Rect, directory: &Directory, id: 
     if square(ui, Icon::Members, "People here").clicked() {
         ws.side = if ws.side == Side::People { Side::List } else { Side::People };
     }
-    if square(ui, Icon::Search, "Find in this conversation (⌘F)").clicked()
+    let find_keys = ui.ctx().format_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::F));
+    if square(ui, Icon::Search, &format!("Find in this conversation ({find_keys})")).clicked()
         || ui.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::F)))
     {
         if ws.find.is_some() {
@@ -636,13 +637,18 @@ fn continues(prev: &Message, m: &Message) -> bool {
     prev.author.id == m.author.id && m.at - prev.at < metrics::GROUP_GAP
 }
 
+/// The id of a message's "More actions" menu.
+fn more_menu_id(conversation: &str, message: &str) -> egui::Id {
+    egui::Id::unique(("message-more", conversation, message))
+}
+
 /// The bar over a message while the pointer's on it: quick reactions, quote, and a
 /// menu of the rest. It stays while its menu is open.
 fn hover_bar(ui: &mut Ui, pictures: &mut Pictures, m: &Message, mine: bool, thread: bool, view: &View, bubble: Rect) -> Option<Action> {
     let conversation = view.conversation;
     const CELL: f32 = 32.0;
     let p = colors();
-    let more_id = egui::Id::unique(("message-more", conversation, &m.id));
+    let more_id = more_menu_id(conversation, &m.id);
     let emoji_id = egui::Id::unique(("message-emoji", conversation, &m.id));
     let menu_open = egui::Popup::is_id_open(ui.ctx(), more_id) || egui::Popup::is_id_open(ui.ctx(), emoji_id);
     let cells = QUICK_REACTIONS.len() + 3;
@@ -682,6 +688,7 @@ fn hover_bar(ui: &mut Ui, pictures: &mut Pictures, m: &Message, mine: bool, thre
     for (i, (key, emoji)) in QUICK_REACTIONS.iter().enumerate() {
         let rect = cell(i);
         let response = ui.interact(rect, ui.scope_id().with(("react", &m.id, i)), Sense::click()).on_hover_text(*key);
+        widgets::control(ui, &response, egui::Role::Button, &format!("React with {key}"));
         if response.hovered() {
             ui.painter().rect_filled(rect.shrink(1.0), CornerRadius::same(8), p.hover);
         }
@@ -700,6 +707,7 @@ fn hover_bar(ui: &mut Ui, pictures: &mut Pictures, m: &Message, mine: bool, thre
     // Any other emoji, from the whole set.
     let rect = cell(QUICK_REACTIONS.len());
     let others = ui.interact(rect, ui.scope_id().with(("emoji", &m.id)), Sense::click()).on_hover_text("More reactions");
+    widgets::control(ui, &others, egui::Role::Button, "More reactions");
     if others.hovered() || egui::Popup::is_id_open(ui.ctx(), emoji_id) {
         ui.painter().rect_filled(rect.shrink(1.0), CornerRadius::same(8), p.hover);
     }
@@ -718,6 +726,7 @@ fn hover_bar(ui: &mut Ui, pictures: &mut Pictures, m: &Message, mine: bool, thre
     // Quote: reply with this message quoted.
     let rect = cell(QUICK_REACTIONS.len() + 1);
     let quote = ui.interact(rect, ui.scope_id().with(("quote", &m.id)), Sense::click()).on_hover_text("Reply with quote");
+    widgets::control(ui, &quote, egui::Role::Button, "Reply with quote");
     if quote.hovered() {
         ui.painter().rect_filled(rect.shrink(1.0), CornerRadius::same(8), p.hover);
     }
@@ -728,6 +737,7 @@ fn hover_bar(ui: &mut Ui, pictures: &mut Pictures, m: &Message, mine: bool, thre
     // More: the rest of the message's menu.
     let rect = cell(QUICK_REACTIONS.len() + 2);
     let more = ui.interact(rect, ui.scope_id().with(("more", &m.id)), Sense::click()).on_hover_text("More actions");
+    widgets::control(ui, &more, egui::Role::Button, "More actions");
     if more.hovered() || menu_open {
         ui.painter().rect_filled(rect.shrink(1.0), CornerRadius::same(8), p.hover);
     }
@@ -880,6 +890,27 @@ pub fn bubble(
     let left = if mine { ui.max_rect().right() - width } else { ui.max_rect().left() + indent };
     let area = Rect::from_min_size(pos2(left, ui.cursor().top()), vec2(width, height));
     let response = ui.interact(area, ui.next_auto_id().with(("bubble", &m.id)), Sense::click());
+    // From the keyboard (Tab reaches each message): read out who, when and what; R
+    // replies with a quote, E edits and Delete deletes one of the user's, Shift+F10
+    // opens its menu.
+    let said = format!("{}, {}: {}", if mine { "You" } else { m.author.name.as_str() }, time::clock(m.at), text::flatten(&m.body));
+    widgets::control(ui, &response, egui::Role::ListItem, &said);
+    if response.gained_focus() {
+        response.scroll_to_me(Some(Align::Center));
+    }
+    if response.has_focus() {
+        let key = |k| ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, k));
+        if key(egui::Key::R) {
+            action = Some(Action::Quote(m.clone()));
+        } else if mine && key(egui::Key::E) {
+            action = Some(Action::Edit(m.clone()));
+        } else if mine && (key(egui::Key::Delete) || key(egui::Key::Backspace)) {
+            action = Some(Action::Delete(m.id.clone()));
+        } else if ui.input_mut(|i| i.consume_key(egui::Modifiers::SHIFT, egui::Key::F10)) {
+            // The hover bar's menu (the bar shows while it's open).
+            egui::Popup::open_id(ui.ctx(), more_menu_id(view.conversation, &m.id));
+        }
+    }
 
     let layout = if mine { Layout::right_to_left(Align::Min) } else { Layout::left_to_right(Align::Min) };
     let row = ui.with_layout(layout, |ui| {
@@ -1467,6 +1498,7 @@ pub fn composer(ui: &mut Ui, ws: &mut Workspace, rect: Rect, hint: &str, reply: 
         );
     }
     let click = ui.interact(send_rect, ui.scope_id().with(("send", reply)), Sense::click());
+    widgets::control(ui, &click, egui::Role::Button, if editing { "Save the edit" } else { "Send" });
     let fill = if has_text && !sending { p.accent_fill } else { p.border };
     ui.painter().rect_filled(send_rect, CornerRadius::same(12), fill);
     let icon = if editing { Icon::Check } else { Icon::Send };

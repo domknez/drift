@@ -185,6 +185,7 @@ fn chips(ui: &mut Ui, ws: &mut Workspace, at: egui::Pos2) {
         let rect = Rect::from_min_size(pos2(x, at.y), vec2(galley.size().x + 22.0, 28.0));
         let response =
             ui.interact(rect, ui.scope_id().with(("chip", label)), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
+        widgets::control(ui, &response, egui::Role::RadioButton, label);
         let on = ws.chip == chip;
         let (fill, fg) = if on {
             (p.text, p.panel)
@@ -645,6 +646,8 @@ fn row(ui: &mut Ui, ws: &mut Workspace, d: &Directory, c: &Conversation) {
     let p = colors();
     let selected = ws.open.as_deref() == Some(c.id.as_str());
     let (outer, response) = ui.allocate_exact_size(vec2(ui.available_width(), metrics::ROW + 2.0), Sense::click());
+    let unread = if c.unread && !c.muted { ", unread" } else { "" };
+    widgets::control(ui, &response, egui::Role::ListItem, &format!("{}{unread}", c.title));
     let rect = Rect::from_min_size(outer.min + vec2(8.0, 1.0), vec2(outer.width() - 16.0, metrics::ROW));
     if selected || response.hovered() {
         ui.painter().rect_filled(rect, CornerRadius::same(12), if selected { p.selected } else { p.hover });

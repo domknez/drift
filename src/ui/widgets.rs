@@ -94,10 +94,21 @@ pub fn icon(ui: &mut Ui, icon: Icon, size: f32, color: Color32) -> Response {
     response
 }
 
+/// What a control drift draws itself is, for screen readers (its kind and name),
+/// and a ring around it while the keyboard is on it.
+pub fn control(ui: &Ui, response: &Response, kind: egui::Role, name: &str) {
+    response.widget_info(|| egui::WidgetInfo::labeled(kind, ui.is_enabled(), name));
+    if response.has_focus() {
+        let ring = Stroke::new(2.0, colors().accent);
+        ui.painter().rect_stroke(response.rect.expand(1.0), CornerRadius::same(8), ring, egui::StrokeKind::Outside);
+    }
+}
+
 /// A borderless square button with an icon, highlighted under the pointer.
 pub fn icon_button(ui: &mut Ui, icon: Icon, hint: &str) -> Response {
     let p = colors();
     let (rect, response) = ui.allocate_exact_size(vec2(30.0, 30.0), Sense::click());
+    control(ui, &response, egui::Role::Button, hint);
     if response.hovered() {
         ui.painter().rect_filled(rect, CornerRadius::same(metrics::RADIUS), p.hover);
     }

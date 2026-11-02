@@ -4,6 +4,7 @@
 pub mod conversation;
 pub mod emoji_picker;
 pub mod list;
+mod shortcuts;
 pub mod sign_in;
 mod splash;
 pub mod switcher;
@@ -78,6 +79,10 @@ pub fn workspace(ui: &mut egui::Ui, ws: &mut Workspace, look: Look, updates: &Up
     {
         ws.set_read(ui.ctx(), &id, false);
     }
+    // ⌘/: the keyboard shortcuts.
+    if ui.input_mut(|i| i.consume_shortcut(&shortcuts::opener())) {
+        ws.shortcuts = !ws.shortcuts;
+    }
     // ⌘T: the quick switcher, to jump to a conversation or a place.
     if ui.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::T))) {
         ws.switcher = if ws.switcher.is_some() { None } else { Some(switcher::Switcher::default()) };
@@ -117,6 +122,7 @@ pub fn workspace(ui: &mut egui::Ui, ws: &mut Workspace, look: Look, updates: &Up
         }
     });
     switcher::show(ui.ctx(), ws);
+    shortcuts::show(ui.ctx(), &mut ws.shortcuts);
     start_up(ui.ctx(), ws);
     if let Some(url) = ws.viewing.clone()
         && !super::widgets::lightbox(ui.ctx(), &mut ws.pictures, &url)

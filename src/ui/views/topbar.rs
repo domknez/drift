@@ -49,7 +49,9 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace, look: Look, updates: &Updates) -> O
     let mut tx = group.left() + 4.0;
     for (i, ((section, icon, label, badge), w)) in tabs.into_iter().zip(widths).enumerate() {
         let rect = Rect::from_min_size(pos2(tx, group.top() + 4.0), vec2(w, group.height() - 8.0));
-        if tab(ui, rect, icon, label, badge, ws.section == section).on_hover_text(format!("⌘{}", i + 1)).clicked() {
+        let number = [egui::Key::Num1, egui::Key::Num2, egui::Key::Num3, egui::Key::Num4][i.min(3)];
+        let keys = ui.ctx().format_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, number));
+        if tab(ui, rect, icon, label, badge, ws.section == section).on_hover_text(keys).clicked() {
             ws.section = section;
             ws.filter.clear();
         }
@@ -137,6 +139,7 @@ fn tab_width(ui: &Ui, label: &str, badge: Badge) -> f32 {
 fn tab(ui: &mut Ui, rect: Rect, icon: Icon, label: &str, badge: Badge, on: bool) -> egui::Response {
     let p = colors();
     let response = ui.interact(rect, ui.scope_id().with(("tab", label)), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
+    widgets::control(ui, &response, egui::Role::Tab, label);
     let (fill, fg) = if on {
         (p.accent_fill, p.on_accent)
     } else if response.hovered() {
@@ -193,7 +196,8 @@ fn search(ui: &mut Ui, ws: &mut Workspace, rect: Rect) {
             ws.hits = None;
         }
     } else {
-        ui.painter().text(pos2(right - 2.0, rect.center().y), Align2::RIGHT_CENTER, "⌘K", ty::mono_small(), p.faint);
+        let keys = ui.ctx().format_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::K));
+        ui.painter().text(pos2(right - 2.0, rect.center().y), Align2::RIGHT_CENTER, keys, ty::mono_small(), p.faint);
     }
 
     // The text field, exactly one line tall and centred in the pill.
@@ -476,6 +480,7 @@ fn user_menu(ui: &mut Ui, ws: &mut Workspace, rect: Rect, look: Look, updates: &
             for accent in Accent::ALL.iter().copied() {
                 let (dot, response) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::click());
                 let response = response.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(accent.label());
+                widgets::control(ui, &response, egui::Role::RadioButton, &format!("{} accent", accent.label()));
                 ui.painter().circle_filled(dot.center(), 9.0, palette::accent_swatch(accent, dark_now));
                 if accent == look.accent {
                     ui.painter().circle_stroke(dot.center(), 11.0, Stroke::new(1.5, p.text));
@@ -541,22 +546,20 @@ fn user_menu(ui: &mut Ui, ws: &mut Workspace, rect: Rect, look: Look, updates: &
         ui.add_space(4.0);
         divider(ui);
 
-        // The keyboard shortcuts, on hover.
-        let (row, response) = ui.allocate_exact_size(vec2(ui.available_width(), 32.0), Sense::hover());
-        let response = response.on_hover_ui(|ui| {
-            ui.set_min_width(260.0);
-            egui::Grid::new("shortcuts").num_columns(2).spacing(vec2(16.0, 4.0)).show(ui, |ui| {
-                for (keys, what) in SHORTCUTS {
-                    ui.label(RichText::new(*keys).font(ty::small_strong()).color(p.text));
-                    ui.label(RichText::new(*what).font(ty::small()).color(p.dim));
-                    ui.end_row();
-                }
-            });
-        });
+        // The keyboard shortcuts, in a sheet.
+        let (row, response) = ui.allocate_exact_size(vec2(ui.available_width(), 32.0), Sense::click());
+        let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
+        widgets::control(ui, &response, egui::Role::Button, "Keyboard shortcuts");
         if response.hovered() {
             ui.painter().rect_filled(row.shrink2(vec2(2.0, 2.0)), CornerRadius::same(8), p.hover);
         }
         ui.painter().text(pos2(row.left() + 10.0, row.center().y), egui::Align2::LEFT_CENTER, "Keyboard shortcuts", ty::small(), p.dim);
+        let keys = ui.ctx().format_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Slash));
+        ui.painter().text(pos2(row.right() - 10.0, row.center().y), egui::Align2::RIGHT_CENTER, keys, ty::meta(), p.faint);
+        if response.clicked() {
+            ws.shortcuts = true;
+            ui.close();
+        }
         divider(ui);
 
         // Signing out.
@@ -599,6 +602,7 @@ fn segments<T: Copy + PartialEq>(ui: &mut Ui, salt: &str, options: &[(T, &str)],
     for (i, (option, label)) in options.iter().enumerate() {
         let cell = Rect::from_min_size(pos2(track.left() + w * i as f32, track.top()), vec2(w, track.height())).shrink(3.0);
         let response = ui.interact(cell, ui.scope_id().with((salt, i)), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
+        widgets::control(ui, &response, egui::Role::RadioButton, label);
         let on = *option == picked;
         if on {
             ui.painter().rect(cell, CornerRadius::same(8), p.panel, Stroke::new(1.0, p.border), egui::StrokeKind::Inside);
@@ -619,6 +623,7 @@ fn theme_swatch(ui: &mut Ui, theme: Theme, picked: bool, in_use: bool) -> egui::
     let p = colors();
     let (rect, response) = ui.allocate_exact_size(vec2(48.0, 34.0), Sense::click());
     let response = response.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(theme.label());
+    widgets::control(ui, &response, egui::Role::RadioButton, &format!("{} theme", theme.label()));
     let (canvas, panel, text) = palette::swatch(theme);
     let painter = ui.painter();
     painter.rect_filled(rect, CornerRadius::same(8), canvas);
@@ -640,16 +645,3 @@ fn theme_swatch(ui: &mut Ui, theme: Theme, picked: bool, in_use: bool) -> egui::
     painter.rect_stroke(rect, CornerRadius::same(8), ring, egui::StrokeKind::Outside);
     response
 }
-
-/// What the keyboard does, for the menu.
-const SHORTCUTS: &[(&str, &str)] = &[
-    ("⌘K", "Search"),
-    ("⌘T", "Go to a conversation"),
-    ("⌘1 – ⌘4", "Activity, Chats, Teams, Calendar"),
-    ("⌥↑  ⌥↓", "Previous or next conversation"),
-    ("⌥⇧↑  ⌥⇧↓", "Previous or next unread"),
-    ("⌘⇧U", "Mark as unread"),
-    ("↑", "Edit your last message"),
-    ("⌘+  ⌘−  ⌘0", "Bigger, smaller, usual size"),
-    ("⌘R", "Refresh"),
-];

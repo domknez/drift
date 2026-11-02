@@ -149,6 +149,8 @@ pub struct Workspace {
     pub pending_delete: Option<PendingDelete>,
     /// Teams couldn't be reached the last time it was asked.
     pub offline: bool,
+    /// The keyboard shortcuts' sheet is open.
+    pub shortcuts: bool,
     /// The conversation and message last marked read, so it's marked once.
     marked: Option<(String, String)>,
     /// Show a notification for each new message (the user's setting).
@@ -360,6 +362,7 @@ impl Workspace {
             unsent: None,
             pending_delete: None,
             offline: false,
+            shortcuts: false,
             marked: None,
             notifications: true,
             seen: HashMap::new(),

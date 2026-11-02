@@ -7,7 +7,7 @@ license = "MIT"
 repository = "https://github.com/domknez/drift"
 
 [dependencies]
-eframe = { version = "0.37", default-features = false, features = ["glow", "default_fonts", "clipboard", "links", "wayland", "x11"] }
+eframe = { version = "0.37", default-features = false, features = ["accesskit", "glow", "default_fonts", "clipboard", "links", "wayland", "x11"] }
 fastrand = "2"
 keyring-core = "1"
 # Profile pictures arrive as JPEG, team pictures as PNG.
