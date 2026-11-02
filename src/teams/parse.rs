@@ -277,7 +277,8 @@ fn reactions(v: &Value, me: &str) -> Vec<Reaction> {
             let users = e["users"].as_array()?;
             let mine = users.iter().any(|u| u["mri"].as_str() == Some(me));
             let key = str_of(e, &["key"])?.to_string();
-            (!users.is_empty()).then_some(Reaction { key, count: users.len(), mine })
+            let who = users.iter().filter_map(|u| u["mri"].as_str().map(str::to_string)).collect();
+            (!users.is_empty()).then_some(Reaction { key, count: users.len(), mine, who })
         })
         .collect()
 }
@@ -578,7 +579,8 @@ mod tests {
         assert_eq!((m[0].root.as_deref(), m[1].root.as_deref()), (None, Some("1")));
         assert_eq!(m[1].author, Author { id: ME.into(), name: "Alex".into() });
         assert!(m[1].edited);
-        assert_eq!(m[1].reactions, [Reaction { key: "like".into(), count: 2, mine: true }]);
+        assert_eq!((m[1].reactions[0].key.as_str(), m[1].reactions[0].count, m[1].reactions[0].mine), ("like", 2, true));
+        assert!(m[1].reactions[0].who.contains(&ME.to_string()));
     }
 
     #[test]

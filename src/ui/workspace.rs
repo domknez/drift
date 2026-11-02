@@ -694,6 +694,19 @@ impl Workspace {
         self.unsent = Some((outbox.conversation, reply, why));
     }
 
+    /// Names by id of everyone the user is seen with (for who reacted): the people of
+    /// the open conversation and of the chats, the user as "You".
+    pub fn names(&self) -> HashMap<String, String> {
+        let mut names: HashMap<String, String> = self.people().into_iter().map(|p| (p.id, p.name)).collect();
+        if let Some(c) = self.open.as_deref().and_then(|o| self.directory.as_ref()?.conversation(o)) {
+            names.extend(c.members.iter().map(|m| (m.id.clone(), m.name.clone())));
+        }
+        if !self.me_id.is_empty() {
+            names.insert(self.me_id.clone(), "You".into());
+        }
+        names
+    }
+
     /// The people who can be mentioned: those the user chats with, and everyone who
     /// wrote in the open conversation.
     pub fn people(&self) -> Vec<Mention> {
@@ -719,12 +732,17 @@ impl Workspace {
         let Some(open) = self.open.clone() else { return };
         let Some(m) = self.messages.as_mut().and_then(|ms| ms.iter_mut().find(|m| m.id == message)) else { return };
         let add = !m.reactions.iter().any(|r| r.key == key && r.mine);
+        let me = self.me_id.clone();
         match m.reactions.iter_mut().find(|r| r.key == key) {
             Some(r) => {
                 r.mine = add;
                 r.count = if add { r.count + 1 } else { r.count.saturating_sub(1) };
+                r.who.retain(|w| *w != me);
+                if add {
+                    r.who.push(me);
+                }
             }
-            None if add => m.reactions.push(crate::model::Reaction { key: key.to_string(), count: 1, mine: true }),
+            None if add => m.reactions.push(crate::model::Reaction { key: key.to_string(), count: 1, mine: true, who: vec![me] }),
             None => {}
         }
         m.reactions.retain(|r| r.count > 0);

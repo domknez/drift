@@ -145,6 +145,7 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace) {
             let focus = ws.focus.clone();
             let read_by = ws.read_by.clone();
             let members = conversation.as_ref().map(|c| c.members.clone()).unwrap_or_default();
+            let names = ws.names();
             let custom_emoji = ws.custom_emoji.clone();
             let recent_emoji = ws.recent_emoji.clone().unwrap_or_default();
             let mut view = View {
@@ -162,6 +163,7 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace) {
                 new_after: ws.new_after,
                 new_scrolled: ws.new_scrolled || ws.focus.is_some(),
                 members: &members,
+                names: &names,
             };
             let mut area = egui::ScrollArea::vertical().id_salt(("messages", &id)).stick_to_bottom(true).auto_shrink([false, false]);
             if let Some(y) = ws.scroll_to.take() {
@@ -551,6 +553,8 @@ pub struct View<'a> {
     pub new_scrolled: bool,
     /// Who's in the chat, for the names of those who've read a message.
     pub members: &'a [crate::model::Mention],
+    /// Names by id, for who reacted.
+    pub names: &'a HashMap<String, String>,
 }
 
 /// Who has read a message of the user's (by name) and who hasn't yet, in a chat
@@ -1029,14 +1033,14 @@ pub fn bubble(
         if mine {
             ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
                 ui.add_space(inset);
-                if let Some(key) = widgets::reactions(ui, pictures, &m.reactions, true) {
+                if let Some(key) = widgets::reactions(ui, pictures, &m.reactions, true, view.names) {
                     action = Some(Action::React { message: m.id.clone(), key });
                 }
             });
         } else {
             ui.horizontal(|ui| {
                 ui.add_space(indent + inset - ui.spacing().item_spacing.x);
-                if let Some(key) = widgets::reactions(ui, pictures, &m.reactions, false) {
+                if let Some(key) = widgets::reactions(ui, pictures, &m.reactions, false, view.names) {
                     action = Some(Action::React { message: m.id.clone(), key });
                 }
             });

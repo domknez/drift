@@ -201,6 +201,8 @@ pub struct Reaction {
     pub count: usize,
     /// The signed-in user is among those who reacted.
     pub mine: bool,
+    /// Who reacted (their ids), as far as the service says.
+    pub who: Vec<String>,
 }
 
 impl Reaction {
@@ -418,7 +420,7 @@ mod tests {
     use super::Reaction;
 
     fn emoji(key: &str) -> String {
-        Reaction { key: key.into(), count: 1, mine: false }.emoji()
+        Reaction { key: key.into(), count: 1, mine: false, who: Vec::new() }.emoji()
     }
 
     #[test]

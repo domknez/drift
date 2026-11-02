@@ -199,7 +199,9 @@ impl Backend for Demo {
             return Ok(activity());
         }
         if conversation == "19:maya" {
-            let like = |mine| vec![Reaction { key: "like".into(), count: 1, mine }];
+            let like = |mine: bool| {
+                vec![Reaction { key: "like".into(), count: 1, mine, who: vec![if mine { ME.into() } else { "8:orgid:maya".into() }] }]
+            };
             return Ok(vec![
                 message(
                     "3001",
@@ -244,7 +246,7 @@ impl Backend for Demo {
                     today(10, 25),
                     "<blockquote itemtype=\"http://schema.skype.com/Reply\" itemid=\"3004\"><strong itemprop=\"mri\">Maya Lindqvist</strong><p itemprop=\"preview\">Maybe scale it by deltaY instead of a fixed step?</p></blockquote><p>Good catch, I'll try that after stand-up.</p>",
                     None,
-                    vec![Reaction { key: "praying".into(), count: 1, mine: false }],
+                    vec![Reaction { key: "praying".into(), count: 1, mine: false, who: vec!["8:orgid:maya".into()] }],
                 ),
                 message(
                     "3006",
@@ -326,8 +328,8 @@ impl Backend for Demo {
                 "<p>Can someone take a look at <a href=\"https://example.com/pr/10500\">#10500</a> before the release cut? It only touches <code>trigger_rule()</code>, the rest is tests.</p>",
                 None,
                 vec![
-                    Reaction { key: "1f440_eyes".into(), count: 2, mine: true },
-                    Reaction { key: "praying".into(), count: 1, mine: false },
+                    Reaction { key: "1f440_eyes".into(), count: 2, mine: true, who: vec![ME.into(), "8:orgid:lea".into()] },
+                    Reaction { key: "praying".into(), count: 1, mine: false, who: vec!["8:orgid:priya".into()] },
                 ],
             ),
             message(

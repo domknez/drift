@@ -518,9 +518,36 @@ pub fn card(ui: &mut Ui, card: &Card) {
     }
 }
 
+/// Who reacted, for reading: "You, Maya Lindqvist and 2 others".
+fn reacted(r: &Reaction, names: &std::collections::HashMap<String, String>) -> String {
+    let mut who: Vec<String> = r.who.iter().map(|id| names.get(id).cloned().unwrap_or_else(|| "Someone".into())).collect();
+    // The user first, then the rest by name.
+    who.sort_by_key(|n| (n != "You", n.clone()));
+    let unknown = r.count.saturating_sub(who.len());
+    let shown = 4;
+    let more = who.len().saturating_sub(shown) + unknown;
+    who.truncate(shown);
+    match (who.as_slice(), more) {
+        ([], n) => format!("{n} {}", if n == 1 { "person" } else { "people" }),
+        (names, 0) => match names {
+            [one] => one.clone(),
+            [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+            [] => unreachable!(),
+        },
+        (names, n) => format!("{} and {n} {}", names.join(", "), if n == 1 { "other" } else { "others" }),
+    }
+}
+
 /// Reactions under a message, as small pills; the user's own ones in the accent.
 /// Clicking one returns its key (to add it, or take it back).
-pub fn reactions(ui: &mut Ui, pictures: &mut Pictures, reactions: &[Reaction], right: bool) -> Option<String> {
+/// Who reacted shows on hover (`names` by id; someone not among them as "Someone").
+pub fn reactions(
+    ui: &mut Ui,
+    pictures: &mut Pictures,
+    reactions: &[Reaction],
+    right: bool,
+    names: &std::collections::HashMap<String, String>,
+) -> Option<String> {
     if reactions.is_empty() {
         return None;
     }
@@ -554,7 +581,9 @@ pub fn reactions(ui: &mut Ui, pictures: &mut Pictures, reactions: &[Reaction], r
                 (None, None) => {}
             }
             ui.painter().galley(egui::pos2(emoji.right() + 4.0, rect.center().y - count.size().y / 2.0), count, text);
-            if response.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+            let who = reacted(r, names);
+            let tip = format!("{who} reacted with {}", r.emoji());
+            if response.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(tip).clicked() {
                 clicked = Some(r.key.clone());
             }
         }
@@ -564,7 +593,23 @@ pub fn reactions(ui: &mut Ui, pictures: &mut Pictures, reactions: &[Reaction], r
 
 #[cfg(test)]
 mod tests {
-    use super::{initials, split_matches};
+
+    #[test]
+    fn says_who_reacted() {
+        let names: std::collections::HashMap<String, String> =
+            [("me", "You"), ("m", "Maya Lindqvist"), ("t", "Tomás Rivera"), ("l", "Lea Novak"), ("p", "Priya Nair"), ("j", "Jonas Weber")]
+                .iter()
+                .map(|(i, n)| (i.to_string(), n.to_string()))
+                .collect();
+        let r = |who: &[&str], count| Reaction { key: "like".into(), count, mine: false, who: who.iter().map(|w| w.to_string()).collect() };
+        assert_eq!(reacted(&r(&["m"], 1), &names), "Maya Lindqvist");
+        assert_eq!(reacted(&r(&["t", "me"], 2), &names), "You and Tomás Rivera");
+        assert_eq!(reacted(&r(&["m", "t", "l", "p", "j", "me"], 6), &names), "You, Jonas Weber, Lea Novak, Maya Lindqvist and 2 others");
+        assert_eq!(reacted(&r(&["x"], 1), &names), "Someone");
+        assert_eq!(reacted(&r(&[], 3), &names), "3 people");
+    }
+
+    use super::{Reaction, initials, reacted, split_matches};
 
     #[test]
     fn finds_matches_to_mark() {
