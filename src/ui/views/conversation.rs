@@ -1318,6 +1318,9 @@ pub fn composer(ui: &mut Ui, ws: &mut Workspace, rect: Rect, hint: &str, reply: 
         .stick_to_bottom(true)
         .show(&mut t, |ui| ui.add(edit))
         .inner;
+    if response.changed() && !reply {
+        ws.typed();
+    }
     let text_height = response.rect.height().round();
     if text_height != ws.composer_text[usize::from(reply)] {
         ws.composer_text[usize::from(reply)] = text_height;
@@ -1488,15 +1491,13 @@ pub fn composer(ui: &mut Ui, ws: &mut Workspace, rect: Rect, hint: &str, reply: 
         set_cursor_to_end(ui, id, ws.draft(reply));
         response.request_focus();
     }
-    if response.has_focus() || has_text {
+    // Under the box: who's typing (in the conversation, not its thread), else the Markdown it takes.
+    let below = pos2(inner.left() + 16.0, inner.bottom() + BELOW / 2.0 + 1.0);
+    if let Some(typing) = (!reply).then(|| ws.typing(ui.ctx())).flatten() {
+        ui.painter().text(below, egui::Align2::LEFT_CENTER, typing, ty::meta(), p.dim);
+    } else if response.has_focus() || has_text {
         let tip = "**bold**  *italic*  ~~strike~~  `code`  > quote  - list";
-        ui.painter().text(
-            pos2(inner.left() + 16.0, inner.bottom() + BELOW / 2.0 + 1.0),
-            egui::Align2::LEFT_CENTER,
-            tip,
-            ty::meta(),
-            p.faint,
-        );
+        ui.painter().text(below, egui::Align2::LEFT_CENTER, tip, ty::meta(), p.faint);
     }
     let click = ui.interact(send_rect, ui.scope_id().with(("send", reply)), Sense::click());
     widgets::control(ui, &click, egui::Role::Button, if editing { "Save the edit" } else { "Send" });

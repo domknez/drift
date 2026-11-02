@@ -260,9 +260,22 @@ fn pushes(url: &str, body: &Value) -> Vec<Push> {
     let resource = &body["resource"];
     let conversation = match body["resourceType"].as_str().unwrap_or("") {
         "NewMessage" | "MessageUpdate" => {
+            let kind = resource["messagetype"].as_str().unwrap_or("");
             // Typing comes as messages too.
-            if resource["messagetype"].as_str().is_some_and(|t| t.starts_with("Control/")) {
-                return Vec::new();
+            if kind.starts_with("Control/") {
+                let typing = kind == "Control/Typing";
+                if !typing && kind != "Control/ClearTyping" {
+                    return Vec::new();
+                }
+                let from = resource["from"].as_str().unwrap_or("");
+                let id = from.rsplit('/').next().unwrap_or(from).to_string();
+                let name = resource["imdisplayname"].as_str().unwrap_or("").to_string();
+                return resource["conversationLink"]
+                    .as_str()
+                    .and_then(conversation_of)
+                    .map(|conversation| Push::Typing { conversation, id, name, typing })
+                    .into_iter()
+                    .collect();
             }
             resource["conversationLink"].as_str().and_then(conversation_of)
         }
@@ -377,8 +390,12 @@ mod tests {
             "conversationLink": "https://emea.ng.msg.teams.microsoft.com/v1/users/ME/conversations/19:abc@thread.v2;messageid=17",
         }});
         assert!(matches!(&pushes("/v4/f/x/messaging", &new)[..], [Push::Conversation(c)] if c == "19:abc@thread.v2"));
-        let typing = json!({"type": "EventMessage", "resourceType": "NewMessage", "resource": {"messagetype": "Control/Typing", "conversationLink": "x/conversations/19:a"}});
-        assert!(pushes("/messaging", &typing).is_empty());
+        let typing = json!({"type": "EventMessage", "resourceType": "NewMessage", "resource": {"messagetype": "Control/Typing",
+            "conversationLink": "x/conversations/19:a", "from": "https://x/v1/users/ME/contacts/8:orgid:maya", "imdisplayname": "Maya"}});
+        assert!(matches!(&pushes("/messaging", &typing)[..],
+            [Push::Typing { conversation, id, name, typing: true }] if conversation == "19:a" && id == "8:orgid:maya" && name == "Maya"));
+        let other = json!({"type": "EventMessage", "resourceType": "NewMessage", "resource": {"messagetype": "Control/LiveState", "conversationLink": "x/conversations/19:a"}});
+        assert!(pushes("/messaging", &other).is_empty());
         assert!(pushes("/unifiedPresenceService", &new).is_empty());
     }
 

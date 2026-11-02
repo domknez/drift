@@ -573,6 +573,17 @@ impl Backend for Teams {
         self.chat_write(Method::Post, &path, &self.message_body(message))
     }
 
+    fn typing(&self, conversation: &str) -> Result<()> {
+        let path = format!("/v1/users/ME/conversations/{}/messages", http::encode(conversation));
+        let body = serde_json::json!({
+            "content": "",
+            "messagetype": "Control/Typing",
+            "contenttype": "Application/Message",
+            "imdisplayname": Backend::me(self),
+        });
+        self.chat_write(Method::Post, &path, &body)
+    }
+
     fn upload_image(&self, conversation: &str, name: &str, bytes: &[u8], mime: &str) -> Result<String> {
         // Two steps: register the object (readable by the conversation), then its bytes.
         let skype = self.session().skype()?;

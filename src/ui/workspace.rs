@@ -151,6 +151,10 @@ pub struct Workspace {
     pub offline: bool,
     /// The keyboard shortcuts' sheet is open.
     pub shortcuts: bool,
+    /// When the others were last told the user is typing (and where).
+    typing_sent: Option<(String, Instant)>,
+    /// Who's typing where (by conversation: their id and name, and when they last said so).
+    typing: HashMap<String, Vec<(String, String, Instant)>>,
     /// The conversation and message last marked read, so it's marked once.
     marked: Option<(String, String)>,
     /// Show a notification for each new message (the user's setting).
@@ -363,6 +367,8 @@ impl Workspace {
             pending_delete: None,
             offline: false,
             shortcuts: false,
+            typing: HashMap::new(),
+            typing_sent: None,
             marked: None,
             notifications: true,
             seen: HashMap::new(),
@@ -1003,12 +1009,21 @@ impl Workspace {
         while let Ok(push) = self.pushes.try_recv() {
             match push {
                 Push::Live(live) => self.live = live,
+                Push::Typing { conversation, id, name, typing } => {
+                    let who = self.typing.entry(conversation).or_default();
+                    who.retain(|(i, ..)| *i != id);
+                    if typing && id != self.me_id && !name.is_empty() {
+                        who.push((id, name, Instant::now()));
+                    }
+                }
                 Push::Everything => {
                     self.directory_at = None;
                     self.messages_at = None;
                     self.activity_at = None;
                 }
                 Push::Conversation(id) => {
+                    // A message in: whoever was typing it is done.
+                    self.typing.remove(&id);
                     self.directory_at = None;
                     if self.open.as_deref() == Some(id.as_str()) {
                         self.messages_at = None;
@@ -1297,6 +1312,44 @@ impl Workspace {
             Error::Network(_) => self.offline = true,
             e => self.error = Some(e.to_string()),
         }
+    }
+
+    /// The user typed in the composer: the others hear of it, once every few seconds.
+    pub fn typed(&mut self) {
+        let Some(open) = self.open.clone() else { return };
+        if self.draft.trim().is_empty()
+            || self.typing_sent.as_ref().is_some_and(|(c, at)| *c == open && at.elapsed() < Duration::from_secs(5))
+        {
+            return;
+        }
+        self.typing_sent = Some((open.clone(), Instant::now()));
+        let backend = self.backend.clone();
+        // Not a chore: nobody needs to hear if it didn't go.
+        std::thread::spawn(move || {
+            if let Err(e) = backend.typing(&open) {
+                log_debug!("telling the others of typing: {e}");
+            }
+        });
+    }
+
+    /// "Maya is typing…" for the open conversation, if anyone is (Teams says so again
+    /// every few seconds while they type; a message from them ends it too).
+    pub fn typing(&mut self, ctx: &egui::Context) -> Option<String> {
+        const LASTS: Duration = Duration::from_secs(6);
+        let open = self.open.as_ref()?;
+        let who = self.typing.get_mut(open)?;
+        who.retain(|(.., at)| at.elapsed() < LASTS);
+        let names: Vec<&str> = who.iter().map(|(_, name, _)| name.split_whitespace().next().unwrap_or(name)).collect();
+        if names.is_empty() {
+            return None;
+        }
+        ctx.request_repaint_after(Duration::from_secs(1));
+        Some(match names.as_slice() {
+            [one] => format!("{one} is typing…"),
+            [a, b] => format!("{a} and {b} are typing…"),
+            [a, rest @ ..] => format!("{a} and {} others are typing…", rest.len()),
+            [] => unreachable!(),
+        })
     }
 
     /// Every half-written message, the open conversation's included (not an edit).
@@ -1590,6 +1643,21 @@ mod tests {
         newer(&mut directory, "19:priya", "Alex Morgan", "8:orgid:other-alex");
         ws.notify_new(&ctx, &directory);
         assert_eq!(ws.toasts.conversations(), ["19:release", "19:priya"]);
+    }
+
+    #[test]
+    fn says_who_is_typing() {
+        let mut ws = workspace("19:release");
+        let ctx = egui::Context::default();
+        assert_eq!(ws.typing(&ctx), None);
+        let now = Instant::now();
+        ws.typing.insert("19:release".into(), vec![("8:orgid:priya".into(), "Priya Nair".into(), now)]);
+        assert_eq!(ws.typing(&ctx).as_deref(), Some("Priya is typing…"));
+        ws.typing.get_mut("19:release").unwrap().push(("8:orgid:lea".into(), "Lea Novak".into(), now));
+        assert_eq!(ws.typing(&ctx).as_deref(), Some("Priya and Lea are typing…"));
+        // Said long ago: over.
+        ws.typing.insert("19:release".into(), vec![("8:orgid:priya".into(), "Priya Nair".into(), now - Duration::from_secs(10))]);
+        assert_eq!(ws.typing(&ctx), None);
     }
 
     #[test]

@@ -37,6 +37,8 @@ pub enum Push {
     Everything,
     /// Whether pushes are coming (the socket is up).
     Live(bool),
+    /// Someone started (or stopped) typing in a conversation: who (id, name).
+    Typing { conversation: ConversationId, id: String, name: String, typing: bool },
 }
 
 /// A signed-in chat service. Calls block; the UI makes them on background threads.
@@ -59,6 +61,12 @@ pub trait Backend: Send + Sync {
     /// Send a message to a conversation. For a channel reply, `conversation` is
     /// `<channel id>;messageid=<post id>`; for a new post, the channel id.
     fn send(&self, conversation: &str, message: &Outgoing) -> Result<()>;
+
+    /// Tell the others in a conversation the user is typing (Teams shows it for a few seconds).
+    fn typing(&self, conversation: &str) -> Result<()> {
+        let _ = conversation;
+        Ok(())
+    }
 
     /// Upload a picture for a message in `conversation`: the address to put in it.
     fn upload_image(&self, conversation: &str, name: &str, bytes: &[u8], mime: &str) -> Result<String>;
