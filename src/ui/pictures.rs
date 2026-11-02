@@ -133,7 +133,9 @@ fn worker(queue: &Queue, tx: &Sender<(String, Option<ColorImage>)>, backend: &dy
         let image = match backend.picture(&picture) {
             Ok(bytes) => decode(&bytes),
             Err(e) => {
-                log_debug!("no picture for {}: {e}", picture.key());
+                // Without a picture's query (signed addresses carry their key there).
+                let key = picture.key();
+                log_debug!("no picture for {}: {e}", key.split('?').next().unwrap_or(&key));
                 None
             }
         };

@@ -105,7 +105,19 @@ fn open(path: &std::path::Path) -> std::io::Result<File> {
     if std::fs::metadata(path).is_ok_and(|m| m.len() > MAX_FILE_BYTES) {
         std::fs::rename(path, path.with_extension("log.1"))?;
     }
-    File::options().create(true).append(true).open(path)
+    let mut options = File::options();
+    options.create(true).append(true);
+    // Only the user's: it names conversations and services.
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    let file = options.open(path)?;
+    // A log made before this rule keeps its old mode until it's tightened here.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = file.set_permissions(std::fs::Permissions::from_mode(0o600));
+    }
+    Ok(file)
 }
 
 #[doc(hidden)]

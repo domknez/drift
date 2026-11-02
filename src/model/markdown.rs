@@ -134,7 +134,7 @@ fn list_item(line: &str) -> Option<(bool, &str)> {
 }
 
 fn escape(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
 }
 
 /// One line's inline markup: code, links, mentions, then emphasis on the plain text.
@@ -428,6 +428,11 @@ mod tests {
         assert_eq!(html("**bold** and *it* and ~~gone~~"), "<p><b>bold</b> and <i>it</i> and <s>gone</s></p>");
         assert_eq!(html("keep snake_case_names and 2 * 3 * 4"), "<p>keep snake_case_names and 2 * 3 * 4</p>");
         assert_eq!(html("_soft_ and `**not bold**`"), "<p><i>soft</i> and <code>**not bold**</code></p>");
+    }
+
+    #[test]
+    fn quotes_cant_add_attributes() {
+        assert_eq!(html("[x](https://a/\"onmouseover=\"x)"), "<p><a href=\"https://a/&quot;onmouseover=&quot;x\">x</a></p>");
     }
 
     #[test]

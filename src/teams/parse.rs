@@ -125,6 +125,7 @@ pub fn conversations(v: &Value) -> Vec<Conversation> {
             let join_url = embedded(&props["meetingInfo"])["meetingJoinUrl"]
                 .as_str()
                 .or(embedded(&cprops["meetingInfo"])["meetingJoinUrl"].as_str())
+                .filter(|u| text::safe_link(u))
                 .map(str::to_string);
             Some(Conversation {
                 id,
@@ -256,7 +257,8 @@ fn files(v: &Value) -> Vec<File> {
         .filter_map(|f| {
             let name = str_of(f, &["fileName", "title"])?.to_string();
             let info = &f["fileInfo"];
-            let url = str_of(info, &["shareUrl", "fileUrl"]).or_else(|| str_of(f, &["objectUrl"]))?.to_string();
+            let url =
+                str_of(info, &["shareUrl", "fileUrl"]).or_else(|| str_of(f, &["objectUrl"])).filter(|u| text::safe_link(u))?.to_string();
             Some(File { name, url })
         })
         .collect()
@@ -312,7 +314,7 @@ fn walk(v: &Value, found: &mut Found) {
             let kind = o.get("type").and_then(Value::as_str).unwrap_or("");
             let text = |k: &str| o.get(k).and_then(Value::as_str);
             if found.link.is_none() && kind == "Action.OpenUrl" {
-                found.link = text("url").map(str::to_string);
+                found.link = text("url").filter(|u| text::safe_link(u)).map(str::to_string);
             }
             if matches!(kind, "TextBlock" | "TextRun") {
                 if let Some(t) = text("text") {
@@ -346,7 +348,7 @@ fn strip_link(s: &str, link: &mut Option<String>) -> String {
         out.push_str(&rest[..open]);
         out.push_str(&rest[open + 1..close]);
         if link.is_none() {
-            *link = Some(rest[close + 2..end].to_string());
+            *link = Some(rest[close + 2..end].to_string()).filter(|u| text::safe_link(u));
         }
         rest = &rest[end + 1..];
     }
@@ -430,7 +432,7 @@ pub fn meetings(v: &Value) -> Vec<Meeting> {
                 end,
                 organizer: str_of(e, &["organizerName"]).unwrap_or("").to_string(),
                 location: str_of(e, &["location"]).unwrap_or("").to_string(),
-                join_url: str_of(e, &["skypeTeamsMeetingUrl", "joinOnlineMeetingUrl"]).map(str::to_string),
+                join_url: str_of(e, &["skypeTeamsMeetingUrl", "joinOnlineMeetingUrl"]).filter(|u| text::safe_link(u)).map(str::to_string),
                 chat: str_of(&e["skypeTeamsDataObject"], &["cid"]).map(str::to_string),
                 cancelled: e["isCancelled"].as_bool().unwrap_or(false),
                 response: str_of(e, &["myResponseType"]).unwrap_or("").to_string(),

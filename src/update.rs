@@ -172,9 +172,7 @@ pub fn stage(release: &Release, progress: &Arc<AtomicU32>) -> Result<Staged, Str
         .map_err(|e| format!("checksums: {e}"))?;
     let expected = expected_sha256(&sums, &name).ok_or_else(|| format!("no checksum for {name}"))?;
 
-    let work = std::env::temp_dir().join(format!("drift-update-{}", release.version));
-    let _ = std::fs::remove_dir_all(&work);
-    std::fs::create_dir_all(&work).map_err(|e| e.to_string())?;
+    let work = private_dir(&release.version)?;
     let file = work.join(&name);
     let actual = download(url, &file, progress)?;
     if actual != expected {
@@ -191,6 +189,24 @@ pub fn stage(release: &Release, progress: &Arc<AtomicU32>) -> Result<Staged, Str
     let _ = std::fs::remove_dir_all(&work);
     unpacked?;
     Ok(Staged { version: release.version.clone(), target, path })
+}
+
+/// A new folder for the download, only the user's: made fresh under a name no one
+/// can guess (`/tmp` is shared on Linux, and another user could otherwise prepare
+/// it, then swap the file between its check and its unpacking).
+fn private_dir(version: &str) -> Result<PathBuf, String> {
+    for _ in 0..8 {
+        let dir = std::env::temp_dir().join(format!("drift-update-{version}-{:016x}", fastrand::u64(..)));
+        let mut builder = std::fs::DirBuilder::new();
+        #[cfg(unix)]
+        std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+        match builder.create(&dir) {
+            Ok(()) => return Ok(dir),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(format!("a folder for the download: {e}")),
+        }
+    }
+    Err("a folder for the download: none free".into())
 }
 
 /// Swap the staged copy in place of the running one. Quick (renames only), so it can
@@ -351,6 +367,16 @@ fn path_str(p: &Path) -> Result<&str, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn downloads_go_to_a_private_folder() {
+        use std::os::unix::fs::PermissionsExt;
+        let (a, b) = (private_dir("9.9.9").unwrap(), private_dir("9.9.9").unwrap());
+        assert_ne!(a, b);
+        assert_eq!(std::fs::metadata(&a).unwrap().permissions().mode() & 0o777, 0o700);
+        let _ = (std::fs::remove_dir(&a), std::fs::remove_dir(&b));
+    }
 
     #[cfg(unix)]
     #[test]

@@ -43,6 +43,13 @@ pub enum Block {
     },
 }
 
+/// Whether a link from a message may be opened: web and mail addresses only (not
+/// `file:`, `javascript:`, or an app's own scheme someone put in a message).
+pub fn safe_link(url: &str) -> bool {
+    let lower = url.trim_start().to_ascii_lowercase();
+    ["https://", "http://", "mailto:"].iter().any(|s| lower.starts_with(s))
+}
+
 /// Plain text, as it is.
 pub fn plain(text: &str) -> Vec<Block> {
     if text.trim().is_empty() {
@@ -373,7 +380,7 @@ impl Builder {
             n if is_block(n) => self.runs.block(),
             _ => {}
         }
-        let link = (name == "a").then(|| attr(attrs, "href").map(|h| decode(&h))).flatten();
+        let link = (name == "a").then(|| attr(attrs, "href").map(|h| decode(&h))).flatten().filter(|h| safe_link(h));
         let mention = attr(attrs, "itemtype").is_some_and(|t| t.ends_with("/Mention"));
         self.stack.push(Open { name: if mention { "mention".into() } else { name }, link });
     }
@@ -750,6 +757,16 @@ mod tests {
         assert!(only_emoji(&from_html("<p>👍 🙂</p>")));
         assert!(!only_emoji(&from_html("<p>ok 👍</p>")));
         assert!(!only_emoji(&from_html("<p>no emoji</p>")));
+    }
+
+    #[test]
+    fn only_web_and_mail_links_open() {
+        let r = runs(&from_html(
+            r#"<p><a href="javascript:alert(1)">a</a> <a href="file:///etc/passwd">b</a> <a href="mailto:x@y.z">c</a></p>"#,
+        ))
+        .to_vec();
+        let links: Vec<_> = r.iter().map(|r| r.span.link.as_deref()).collect();
+        assert_eq!(links, [None, Some("mailto:x@y.z")]);
     }
 
     #[test]

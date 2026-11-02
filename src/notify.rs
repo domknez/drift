@@ -31,6 +31,9 @@ pub fn show(title: &str, subtitle: Option<&str>, body: &str, on_click: impl FnOn
             Some(subtitle) => format!("{subtitle}: {body}"),
             None => body.to_string(),
         };
+        // Some Linux notification servers read the body as markup.
+        #[cfg(unix)]
+        let (title, body) = (escape_markup(title), escape_markup(&body));
         let title = title.to_string();
         let spawned = std::thread::Builder::new().name("notification".into()).spawn(move || {
             let mut n = notify_rust::Notification::new();
@@ -80,6 +83,11 @@ pub fn chime() {
             }
         });
     }
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn escape_markup(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
 }
 
 /// The number on the Dock icon (nothing for 0). Call from the main thread.
