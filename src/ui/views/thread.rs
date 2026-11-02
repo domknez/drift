@@ -62,6 +62,8 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace) {
                 top_at: None,
                 custom_emoji: &custom_emoji,
                 recent_emoji: &recent_emoji,
+                new_after: None,
+                new_scrolled: true,
             };
             action = conversation::list(ui, &mut ws.pictures, &thread, &mut view);
             ws.focus_scrolled |= view.scrolled;

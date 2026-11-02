@@ -174,6 +174,10 @@ impl Backend for Demo {
                 });
             }
         }
+        // Read up to yesterday's messages: today's are new.
+        if let Some(maya) = conversations.iter_mut().find(|c| c.id == "19:maya") {
+            maya.read_up_to = Some(3002);
+        }
         Ok(Directory { teams, conversations })
     }
 

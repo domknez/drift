@@ -155,6 +155,8 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace) {
                 top_at: None,
                 custom_emoji: &custom_emoji,
                 recent_emoji: &recent_emoji,
+                new_after: ws.new_after,
+                new_scrolled: ws.new_scrolled || ws.focus.is_some(),
             };
             let mut area = egui::ScrollArea::vertical().id_salt(("messages", &id)).stick_to_bottom(true).auto_shrink([false, false]);
             if let Some(y) = ws.scroll_to.take() {
@@ -199,6 +201,7 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace) {
             if ws.thread.is_none() || !is_channel {
                 ws.focus_scrolled |= view.scrolled;
             }
+            ws.new_scrolled |= view.new_scrolled;
         }
     }
     if let Some(action) = action {
@@ -430,6 +433,11 @@ pub struct View<'a> {
     /// For reacting with any emoji: the organisation's, and those picked lately.
     pub custom_emoji: &'a [crate::model::CustomEmoji],
     pub recent_emoji: &'a [String],
+    /// The last message read before the conversation was opened (by id): a "New
+    /// messages" line goes above the first one after it from someone else.
+    pub new_after: Option<i64>,
+    /// Set once the list has been scrolled to that line (or there's none to scroll to).
+    pub new_scrolled: bool,
 }
 
 /// Whether `focus` is one of the replies to `m`.
@@ -457,6 +465,12 @@ pub fn list(ui: &mut Ui, pictures: &mut Pictures, messages: &[Message], view: &m
     if let Some(at) = view.focus.and_then(|f| shown.iter().position(|m| m.id == f || thread_has(&replies, m, f))) {
         start = start.min(at);
     }
+    let first_new = view.new_after.and_then(|after| {
+        shown.iter().position(|m| m.id.parse::<i64>().is_ok_and(|id| id > after) && (view.me.is_empty() || m.author.id != view.me))
+    });
+    if let Some(at) = first_new {
+        start = start.min(at);
+    }
     if start > 0 {
         ui.vertical_centered(|ui| {
             let label = RichText::new("Show earlier messages").font(ty::small_strong()).color(colors().accent);
@@ -478,6 +492,13 @@ pub fn list(ui: &mut Ui, pictures: &mut Pictures, messages: &[Message], view: &m
         if new_day {
             day_pill(ui, m.at);
         }
+        if first_new == Some(start + i) {
+            let line = new_messages(ui);
+            if !view.new_scrolled {
+                ui.scroll_to_rect(line, Some(Align::Min));
+                view.new_scrolled = true;
+            }
+        }
         let prev_thread = prev.is_some_and(|prev| replies.contains_key(prev.id.as_str()));
         let first = new_day || prev_thread || !prev.is_some_and(|prev| continues(prev, m));
         let last = !thread.is_empty() || !next.is_some_and(|n| continues(m, n) && time::day_number(n.at) == time::day_number(m.at));
@@ -490,6 +511,22 @@ pub fn list(ui: &mut Ui, pictures: &mut Pictures, messages: &[Message], view: &m
         }
     }
     action
+}
+
+/// A line with "New messages" above the first unread one.
+fn new_messages(ui: &mut Ui) -> Rect {
+    let p = colors();
+    ui.add_space(8.0);
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 18.0), Sense::hover());
+    let galley = ui.painter().layout_no_wrap("New messages".into(), ty::meta(), p.accent);
+    let label = Rect::from_center_size(rect.center(), galley.size() + vec2(16.0, 0.0));
+    let stroke = Stroke::new(1.0, p.accent.gamma_multiply(0.6));
+    ui.painter().hline(rect.left()..=label.left(), rect.center().y, stroke);
+    ui.painter().hline(label.right()..=rect.right(), rect.center().y, stroke);
+    ui.painter().galley(label.center() - galley.size() / 2.0, galley, p.accent);
+    ui.add_space(2.0);
+    // Some room above it when it's scrolled to the top.
+    rect.expand2(vec2(0.0, 40.0))
 }
 
 fn continues(prev: &Message, m: &Message) -> bool {

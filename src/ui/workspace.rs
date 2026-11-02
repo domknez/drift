@@ -78,6 +78,12 @@ pub struct Workspace {
     /// A message to show and mark (opened from Activity), until it has been scrolled to.
     pub focus: Option<String>,
     pub focus_scrolled: bool,
+    /// The open conversation had unread messages: the last one read before (by id),
+    /// for the "New messages" line, and whether the list has been scrolled to it.
+    pub new_after: Option<i64>,
+    pub new_scrolled: bool,
+    /// Whether `new_after` has been taken from the list (it may come after the open).
+    new_checked: bool,
     /// The reply being typed in the open thread.
     pub reply_draft: String,
     /// A message quoted in the reply being written (true: in the thread's composer).
@@ -263,6 +269,9 @@ impl Workspace {
             thread: None,
             focus: None,
             focus_scrolled: false,
+            new_after: None,
+            new_scrolled: false,
+            new_checked: false,
             reply_draft: String::new(),
             quoting: None,
             editing: None,
@@ -837,6 +846,7 @@ impl Workspace {
                         self.messages_at = None;
                     }
                     self.directory = Some(directory);
+                    self.check_new();
                     self.error = None;
                 }
                 Err(Error::SignedOut) => return Some(Outcome::SignedOut),
@@ -1059,8 +1069,21 @@ impl Workspace {
         self.quoting = None;
         self.editing = None;
         self.attachments.clear();
-        // Read here; Teams itself still counts it until it's read there.
-        if let Some(c) = self.directory.as_mut().and_then(|d| d.conversations.iter_mut().find(|c| c.id == id)) {
+        self.new_after = None;
+        self.new_scrolled = false;
+        self.new_checked = false;
+        self.check_new();
+    }
+
+    /// Where the open conversation's unread messages start, from the list (once per
+    /// opening); it's read from then on.
+    fn check_new(&mut self) {
+        let Some(id) = self.open.clone() else { return };
+        let Some(c) = self.directory.as_mut().and_then(|d| d.conversations.iter_mut().find(|c| c.id == id)) else { return };
+        if !self.new_checked {
+            self.new_checked = true;
+            self.new_after = c.read_up_to.filter(|_| c.unread);
+            // Read here; Teams itself still counts it until it's read there.
             c.unread = false;
         }
     }
