@@ -248,8 +248,14 @@ pub fn rich_text(ui: &mut Ui, pictures: &mut Pictures, body: &[Inline], color: C
                     }
                     let highlight = HIGHLIGHT.with(|h| h.borrow().clone());
                     match (&s.link, highlight) {
+                        // A link is text like the rest (selected and copied with it, wrapped
+                        // when long) that opens its address when clicked.
                         (Some(url), _) => {
-                            ui.add(egui::Hyperlink::from_label_and_url(rich.color(p.accent), url));
+                            let link = ui.add(egui::Label::new(rich.color(p.accent)).selectable(true).sense(Sense::click()));
+                            let link = link.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(url);
+                            if link.clicked() {
+                                ui.ctx().open_url(egui::OpenUrl::new_tab(url));
+                            }
                         }
                         (None, Some(query)) if text.to_lowercase().contains(&query) => {
                             // The found text, marked; the rest as it is.
