@@ -51,22 +51,33 @@ a fraction of the memory the official app keeps busy doing nothing.
 - **Activity:** who mentioned you or replied, what they wrote and where; a click
   opens that very message, marked (in its thread if it's a reply)
 - **Notifications** for new messages in your chats and meeting chats, and for mentions
-  and replies (Activity); a click opens the conversation. Muted chats and the one on
-  screen stay quiet; the Dock icon shows how many chats are unread. Off in the menu
-  under your picture
+  and replies (Activity), with a sound of drift's own; a click opens the conversation.
+  Channels you pick ("Notify about every post") notify for every post. Muted chats and
+  the one on screen stay quiet; the Dock icon shows how many chats are unread. Off in
+  the menu under your picture
+- **Meeting reminders** a minute before each meeting; a click joins it
+- **Who has read it:** "Seen by" under your last message, and in group chats the names
+  in a message's menu
+- **Drafts:** what you leave half-written stays with its conversation, also after a
+  restart; a "New messages" line marks where unread messages start
+- **Files** shared in messages, opened in the browser; links in pasted text are kept,
+  and a pasted screenshot is attached
 - **Your status:** available, busy, do not disturb, be right back, appear away or
   appear offline, from the menu under your picture; a dot on the avatar of everyone
   you chat with shows theirs (out of office too)
 - **Live:** new messages arrive as they're sent, pushed by Teams
-- **Quick switcher (⌘T)** to jump to any chat, channel or tab; ⌘1–⌘4 for the tabs
+- **Quick switcher (⌘T)** to jump to any chat, channel or tab; ⌘1–⌘4 for the tabs;
+  ⌥↑ ⌥↓ for the previous or next conversation (with ⇧, the next unread); the menu
+  under your picture lists every shortcut
 - **Pin and unpin** chats and channels from their right-click menu
 - **Read here, read in Teams:** opening a conversation marks it read for Teams too
 - **Messages as written:** bold, italics, strikethrough, code, tables, quotes, links,
   mentions and emoji; reactions under them; cards from bots and connectors (pull
   requests, alerts) as one compact row that opens its link
 - **Updates itself** from the GitHub releases, installing on restart
-- **Modern UI:** panels floating on a canvas, a deep ink dark and a warm paper light
-  theme (or follow the system) with one violet accent, Geist and Geist Mono
+- **Modern UI:** panels floating on a canvas; three dark themes (Midnight, Dim, Slate)
+  and two light ones (Paper, Cool), or follow the system; seven accent colours; text
+  from 90 to 125% (⌘+ ⌘−); Geist and Geist Mono
 - Runs on macOS, Linux and Windows
 
 ## Install
