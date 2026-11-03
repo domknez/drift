@@ -47,7 +47,7 @@ objc2-app-kit = { version = "0.3", default-features = false, features = [
     "NSView",
     "NSWindow",
 ] }
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSError", "NSObject", "NSData", "NSGeometry"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSError", "NSObject", "NSData", "NSGeometry", "NSProcessInfo"] }
 # The window behind egui's, to move the traffic lights.
 raw-window-handle = "0.6"
 # Notifications from the app bundle, through the system's notification center.

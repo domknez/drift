@@ -1979,7 +1979,9 @@ mod tests {
         ws.me_id = crate::demo::ME.into();
         let count = ws.messages.as_ref().unwrap().len();
         let mut m = ws.messages.as_ref().unwrap()[0].clone();
-        (m.id, m.at, m.author.id) = ("9001".into(), crate::model::time::now_ms(), "8:orgid:maya".into());
+        // After the newest (the demo's are at fixed times of today, some maybe still to come).
+        let newest = ws.messages.as_ref().unwrap().iter().map(|m| m.at).max().unwrap();
+        (m.id, m.at, m.author.id) = ("9001".into(), newest + 1000, "8:orgid:maya".into());
         ws.pushed("19:maya", m.clone());
         assert_eq!(ws.messages.as_ref().unwrap().len(), count + 1);
         assert_eq!(ws.messages.as_ref().unwrap().last().unwrap().id, "9001");

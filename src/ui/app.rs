@@ -86,6 +86,7 @@ impl App {
         // past the limit egui shows the half-measured frame, and the list jumps.
         cc.egui_ctx.options_mut(|o| o.max_passes = std::num::NonZeroUsize::new(4).expect("not zero"));
         crate::notify::init();
+        keep_waking(&cc.egui_ctx);
         let capture = std::env::var_os("DRIFT_SCREENSHOT").map(|path| Capture { path: path.into(), frames: 0, requested: false });
         // `DRIFT_DEMO=1`: the made-up workspace, with settings that are never saved.
         if std::env::var_os("DRIFT_DEMO").is_some() {
@@ -287,6 +288,18 @@ impl eframe::App for App {
         self.updates.apply_on_exit();
     }
 
+    /// The work behind the window (answers, pushes, notifications, activity for the
+    /// status), run also while the window is covered or on another desktop: then no
+    /// `ui` pass runs, and without it Teams would see the user as away.
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if let Screen::Signed(workspace) = &mut self.screen
+            && let Some(Outcome::SignedOut) = workspace.tick(ctx)
+        {
+            Session::sign_out();
+            self.screen = Screen::SignIn(SignIn::new(Some("Your sign-in has expired. Please sign in again.".into())));
+        }
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         // The traffic lights level with the top bar's middle (the size changes it).
@@ -310,11 +323,6 @@ impl eframe::App for App {
                 views::sign_in::show(ui, sign_in);
             }
             Screen::Signed(workspace) => {
-                if let Some(Outcome::SignedOut) = workspace.tick(&ctx) {
-                    Session::sign_out();
-                    self.screen = Screen::SignIn(SignIn::new(Some("Your sign-in has expired. Please sign in again.".into())));
-                    return;
-                }
                 let before = workspace.open.clone();
                 workspace.notifications = self.prefs.notifications;
                 if workspace.muted_here.is_none() {
@@ -425,4 +433,22 @@ fn save_png(path: &std::path::Path, image: &egui::ColorImage) -> Result<(), Stri
     encoder.set_depth(png::BitDepth::Eight);
     let rgba: Vec<u8> = image.pixels.iter().flat_map(|c| c.to_array()).collect();
     encoder.write_header().and_then(|mut w| w.write_image_data(&rgba)).map_err(|e| e.to_string())
+}
+
+/// While the window is hidden eframe runs [`eframe::App::logic`] only when asked to,
+/// and a delayed request isn't one: woken every few seconds, the work behind the window
+/// (and with it the user's status) goes on. macOS isn't to nap the app meanwhile.
+fn keep_waking(ctx: &egui::Context) {
+    const EVERY: std::time::Duration = std::time::Duration::from_secs(5);
+    crate::idle::no_app_nap();
+    let ctx = ctx.clone();
+    let spawned = std::thread::Builder::new().name("wake".into()).spawn(move || {
+        loop {
+            std::thread::sleep(EVERY);
+            ctx.request_repaint();
+        }
+    });
+    if let Err(e) = spawned {
+        log_warn!("could not start the wake-up timer: {e}");
+    }
 }
