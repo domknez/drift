@@ -81,6 +81,12 @@ pub trait Backend: Send + Sync {
         Ok(())
     }
 
+    /// A person's sign-in address (user principal name), by id: what Teams' links take.
+    fn address(&self, person: &str) -> Result<Option<String>> {
+        let _ = person;
+        Ok(None)
+    }
+
     /// Upload a picture for a message in `conversation`: the address to put in it.
     fn upload_image(&self, conversation: &str, name: &str, bytes: &[u8], mime: &str) -> Result<String>;
 

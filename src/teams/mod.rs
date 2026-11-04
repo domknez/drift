@@ -315,6 +315,17 @@ impl Teams {
     }
 
     fn look_up(&self, ids: &[&String]) -> Result<()> {
+        let mut found = Vec::new();
+        for batch in ids.chunks(200) {
+            let batch: Vec<&str> = batch.iter().map(|s| s.as_str()).collect();
+            found.extend(parse::profiles(&self.short_profiles(&batch)?));
+        }
+        self.names.lock().unwrap_or_else(|e| e.into_inner()).extend(found);
+        Ok(())
+    }
+
+    /// People's short profiles (name, sign-in address, …), by id (at most 200).
+    fn short_profiles(&self, ids: &[&str]) -> Result<Value> {
         let (skype, bearer) = {
             let mut session = self.session();
             (session.skype()?, format!("Bearer {}", session.access(SPACES)?))
@@ -323,16 +334,9 @@ impl Teams {
             "{}/beta/users/fetchShortProfile?isMailAddress=false&canBeSmtpAddress=false&enableGuest=true&includeIBBarredUsers=true&skypeTeamsInfo=true&includeBots=true",
             skype.middle_tier
         );
-        let mut found = Vec::new();
-        for batch in ids.chunks(200) {
-            // The web client starts the list with an empty id.
-            let body: Value = std::iter::once("").chain(batch.iter().map(|s| s.as_str())).collect::<Vec<_>>().into();
-            let answer =
-                http::request(Method::Post, &url, &[("Authorization", &bearer), ("X-Skypetoken", &skype.token)], Body::Json(&body))?;
-            found.extend(parse::profiles(&answer));
-        }
-        self.names.lock().unwrap_or_else(|e| e.into_inner()).extend(found);
-        Ok(())
+        // The web client starts the list with an empty id.
+        let body: Value = std::iter::once("").chain(ids.iter().copied()).collect::<Vec<_>>().into();
+        http::request(Method::Post, &url, &[("Authorization", &bearer), ("X-Skypetoken", &skype.token)], Body::Json(&body))
     }
 }
 
@@ -778,6 +782,10 @@ impl Backend for Teams {
             Body::None,
         )?;
         Ok(parse::custom_emoji(&answer, &skype.ams))
+    }
+
+    fn address(&self, person: &str) -> Result<Option<String>> {
+        Ok(parse::address(&self.short_profiles(&[person])?, person))
     }
 
     fn report_activity(&self, active: bool) -> Result<()> {

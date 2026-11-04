@@ -417,6 +417,10 @@ impl Backend for Demo {
         Ok(())
     }
 
+    fn address(&self, person: &str) -> Result<Option<String>> {
+        Ok(person.strip_prefix("8:orgid:").map(|name| format!("{name}@halcyon.example")))
+    }
+
     fn read_by(&self, conversation: &str) -> Result<Vec<(String, i64)>> {
         // Maya has read everything the user sent her.
         Ok(match conversation {

@@ -1,5 +1,5 @@
-//! A call ringing: a bar over the top of the window with who's calling, Accept
-//! (the call is taken in Teams on the web) and Decline.
+//! A call ringing: a bar over the top of the window with who's calling, Call back
+//! (from Teams on the web: drift can't take the call itself) and Decline.
 
 use crate::model::Picture;
 use crate::ui::style::icons::Icon;
@@ -49,7 +49,11 @@ pub fn show(ctx: &egui::Context, ws: &mut Workspace) {
                     });
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         ui.spacing_mut().item_spacing.x = 8.0;
-                        if pill(ui, "Accept", Icon::Video, GREEN, "Answer in Teams on the web").clicked() {
+                        let tip = match &call.address {
+                            Some(_) => format!("Call {} from Teams on the web", call.name),
+                            None => "Open Teams on the web to call back".to_string(),
+                        };
+                        if pill(ui, "Call back", Icon::Phone, GREEN, &tip).clicked() {
                             answer = Some(true);
                         }
                         let tip = "Stop ringing here (it still rings on your other devices)";
@@ -58,10 +62,13 @@ pub fn show(ctx: &egui::Context, ws: &mut Workspace) {
                         }
                     });
                 });
+                // drift can't take the call: say where it's answered.
+                ui.add_space(8.0);
+                ui.label(RichText::new("Answer on your phone, or call back from Teams on the web").font(ty::small()).color(p.faint));
             });
     });
     match answer {
-        Some(true) => ws.accept_call(ctx),
+        Some(true) => ws.call_back(ctx),
         Some(false) => ws.decline_call(),
         None => {}
     }

@@ -47,6 +47,8 @@ pub enum Icon {
     Download,
     /// A page with a folded corner: a shared file.
     File,
+    /// A handset: a call.
+    Phone,
 }
 
 /// Paint `icon` into the square `rect`.
@@ -161,6 +163,26 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             painter.rect_stroke(Rect::from_min_max(at(3.5, 4.5), at(20.5, 19.5)), 2.0 * s, stroke, eframe::egui::StrokeKind::Middle);
             circle(9.0, 9.5, 1.6);
             line(&[(4.0, 17.5), (10.0, 12.5), (13.5, 15.5), (16.0, 13.5), (20.0, 17.0)]);
+        }
+        Icon::Phone => {
+            // A handset, earpiece up left and mouthpiece down right.
+            line(&[
+                (5.0, 3.5),
+                (8.5, 3.5),
+                (10.5, 8.0),
+                (8.5, 10.0),
+                (14.0, 15.5),
+                (16.0, 13.5),
+                (20.5, 15.5),
+                (20.5, 19.0),
+                (18.5, 20.5),
+                (14.0, 20.0),
+                (9.0, 17.0),
+                (6.0, 14.0),
+                (4.0, 10.0),
+                (3.5, 5.5),
+                (5.0, 3.5),
+            ]);
         }
         Icon::File => {
             line(&[(14.0, 3.0), (6.0, 3.0), (6.0, 21.0), (19.0, 21.0), (19.0, 8.0), (14.0, 3.0), (14.0, 8.0), (19.0, 8.0)]);

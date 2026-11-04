@@ -482,10 +482,29 @@ pub fn profiles(v: &Value) -> Vec<(String, String)> {
         .collect()
 }
 
+/// The sign-in address of `person` in a profile lookup's answer.
+pub fn address(v: &Value, person: &str) -> Option<String> {
+    let list = v["value"].as_array().filter(|a| !a.is_empty()).or(v["resolvedUsers"].as_array());
+    let found = list.into_iter().flatten().find(|p| p["mri"].as_str() == Some(person))?;
+    str_of(found, &["userPrincipalName", "email"]).filter(|a| a.contains('@')).map(str::to_string)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn reads_a_sign_in_address() {
+        let v = json!({"value": [
+            {"mri": "8:orgid:a", "displayName": "Lea Novak", "userPrincipalName": "lea@halcyon.example"},
+            {"mri": "8:orgid:b", "displayName": "Jonas Weber", "email": "jonas@halcyon.example"},
+            {"mri": "8:orgid:c", "displayName": "Nobody"}]});
+        assert_eq!(address(&v, "8:orgid:a").as_deref(), Some("lea@halcyon.example"));
+        assert_eq!(address(&v, "8:orgid:b").as_deref(), Some("jonas@halcyon.example"));
+        assert_eq!(address(&v, "8:orgid:c"), None);
+        assert_eq!(address(&v, "8:orgid:x"), None);
+    }
 
     #[test]
     fn reads_custom_emoji() {

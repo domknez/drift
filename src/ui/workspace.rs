@@ -160,8 +160,10 @@ pub struct Workspace {
     pub suggestion: usize,
     /// How wide the list is (dragged by the user, kept in the settings).
     pub list_width: f32,
-    /// Someone calling (answered in Teams on the web).
+    /// Someone calling (answered on another device, or called back from here).
     pub ringing: Option<Ringing>,
+    /// The caller's sign-in address, for calling them back: the call's id with it.
+    address_load: Load<(String, Option<String>), Error>,
     /// When the ring last sounded.
     rang_at: Option<Instant>,
     /// The keyboard shortcuts' sheet is open.
@@ -261,13 +263,14 @@ impl PendingDelete {
     }
 }
 
-/// A call ringing: its id, who's calling (id, name), whether it's a group call, and
-/// since when.
+/// A call ringing: its id, who's calling (id, name, and sign-in address once looked
+/// up), whether it's a group call, and since when.
 #[derive(Clone)]
 pub struct Ringing {
     pub id: String,
     pub from: String,
     pub name: String,
+    pub address: Option<String>,
     pub group: bool,
     pub since: Instant,
 }
@@ -406,6 +409,7 @@ impl Workspace {
             offline: false,
             shortcuts: false,
             ringing: None,
+            address_load: Load::Idle,
             rang_at: None,
             list_width: crate::ui::style::metrics::LIST_WIDTH,
             suggestion: 0,
@@ -1301,6 +1305,16 @@ impl Workspace {
                 Err(e) => log_debug!("custom emoji: {e}"),
             }
         }
+        if let Some(result) = self.address_load.take() {
+            match result {
+                Ok((call, address)) => {
+                    if let Some(ringing) = self.ringing.as_mut().filter(|r| r.id == call) {
+                        ringing.address = address;
+                    }
+                }
+                Err(e) => log_debug!("the caller's address: {e}"),
+            }
+        }
         if let Some(result) = self.status_load.take() {
             match result {
                 Ok(status) => self.status = Some(status),
@@ -1451,27 +1465,29 @@ impl Workspace {
         }
     }
 
-    /// Someone's calling: a notification (a click answers in Teams on the web), and in
-    /// the window a bar with Accept and Decline that rings until one is clicked or
-    /// it would have stopped ringing.
+    /// Someone's calling: a notification (a click brings drift up), and in the window
+    /// a bar with Call back and Decline that rings until one is clicked or it would
+    /// have stopped ringing. drift can't take the call itself: it's answered on
+    /// another device, or the caller is called back from Teams on the web.
     fn called(&mut self, ctx: &egui::Context, id: String, from: &str, name: String, group: bool) {
         if from == self.me_id || self.ringing.as_ref().is_some_and(|r| r.id == id) {
             return;
         }
         let title = if group { format!("{name} is calling (group call)") } else { format!("{name} is calling") };
         let ctx2 = ctx.clone();
-        crate::notify::show(&title, Some("Call"), "Click to answer in Teams on the web", move || {
-            ctx2.open_url(egui::OpenUrl::new_tab(TEAMS_WEB));
-            ctx2.request_repaint();
-        });
-        self.ringing = Some(Ringing { id, from: from.to_string(), name, group, since: Instant::now() });
+        crate::notify::show(&title, Some("Call"), "Answer on your phone, or call back from drift", move || ctx2.request_repaint());
+        let backend = self.backend.clone();
+        let (call, person) = (id.clone(), from.to_string());
+        self.address_load = Load::start(ctx, move || backend.address(&person).map(|a| (call, a)));
+        self.ringing = Some(Ringing { id, from: from.to_string(), name, address: None, group, since: Instant::now() });
         self.rang_at = None;
     }
 
-    /// Answer the ringing call: Teams on the web opens, where it's taken.
-    pub fn accept_call(&mut self, ctx: &egui::Context) {
-        if self.ringing.take().is_some() {
-            ctx.open_url(egui::OpenUrl::new_tab(TEAMS_WEB));
+    /// Call the caller back (the ringing stops): Teams on the web opens calling them,
+    /// or opens as it is when their address isn't known.
+    pub fn call_back(&mut self, ctx: &egui::Context) {
+        if let Some(call) = self.ringing.take() {
+            ctx.open_url(egui::OpenUrl::new_tab(call_back_link(call.address.as_deref())));
         }
     }
 
@@ -1798,8 +1814,18 @@ fn person(c: &Conversation) -> Option<&str> {
     }
 }
 
-/// Teams on the web, where a call is answered (drift doesn't take calls itself).
-pub const TEAMS_WEB: &str = "https://teams.microsoft.com/";
+/// Teams on the web, where a caller is called back (drift doesn't take calls itself).
+const TEAMS_WEB: &str = "https://teams.microsoft.com/";
+
+/// The link that has Teams on the web call `address` (a sign-in address, as Teams'
+/// call links take); Teams on the web itself without one.
+fn call_back_link(address: Option<&str>) -> String {
+    match address.filter(|a| a.contains('@')) {
+        Some(address) => url::Url::parse_with_params("https://teams.microsoft.com/l/call/0/0", [("users", address)])
+            .map_or_else(|_| TEAMS_WEB.to_string(), String::from),
+        None => TEAMS_WEB.to_string(),
+    }
+}
 
 /// How long before a meeting it's reminded of, and how long after its start still.
 const REMIND_BEFORE: i64 = 60_000;
@@ -2038,5 +2064,20 @@ mod tests {
         };
         ws.open = Some(newest);
         assert_eq!(ws.neighbour(-1, false), None);
+    }
+
+    #[test]
+    fn calls_back_by_address() {
+        assert_eq!(
+            call_back_link(Some("lea.novak@halcyon.example")),
+            "https://teams.microsoft.com/l/call/0/0?users=lea.novak%40halcyon.example"
+        );
+        assert_eq!(
+            call_back_link(Some("o'neil+x@halcyon.example")),
+            "https://teams.microsoft.com/l/call/0/0?users=o%27neil%2Bx%40halcyon.example"
+        );
+        // Not an address (an id, say): Teams on the web as it is.
+        assert_eq!(call_back_link(Some("8:orgid:lea")), TEAMS_WEB);
+        assert_eq!(call_back_link(None), TEAMS_WEB);
     }
 }
