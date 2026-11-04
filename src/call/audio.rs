@@ -52,17 +52,20 @@ impl Sink for Discard {
 }
 
 /// A sine wave.
+#[cfg(test)]
 pub struct Tone {
     pub hz: f32,
     phase: f32,
 }
 
+#[cfg(test)]
 impl Tone {
     pub fn new(hz: f32) -> Self {
         Tone { hz, phase: 0.0 }
     }
 }
 
+#[cfg(test)]
 impl Source for Tone {
     fn read(&mut self, frame: &mut [f32]) {
         for s in frame {

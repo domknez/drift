@@ -40,6 +40,7 @@ cat > "$app/Contents/Info.plist" <<PLIST
   <key>LSMinimumSystemVersion</key><string>$MACOSX_DEPLOYMENT_TARGET</string>
   <key>LSApplicationCategoryType</key><string>public.app-category.business</string>
   <key>NSHighResolutionCapable</key><true/>
+  <key>NSMicrophoneUsageDescription</key><string>drift uses the microphone for the calls you answer.</string>
   <key>NSUserNotificationAlertStyle</key><string>banner</string>
   <key>NSHumanReadableCopyright</key><string>MIT License. Free and open source.</string>
 </dict>

@@ -3,7 +3,6 @@
 //! talks to Teams; the signalling around it does.
 //!
 //! The engine needs the `calls` feature. Without it, [`Media::answer`] says so.
-#![allow(dead_code, unused_imports, reason = "the accept flow doesn't use it yet")]
 
 #[cfg(feature = "calls")]
 mod audio;
@@ -19,6 +18,7 @@ pub use engine::Media;
 
 /// A STUN or TURN server, as Teams' relay tokens list them.
 #[derive(Debug, Clone, Default)]
+#[cfg_attr(not(feature = "calls"), allow(dead_code, reason = "only the engine reads them"))]
 pub struct IceServer {
     pub urls: Vec<String>,
     pub username: String,

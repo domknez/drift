@@ -49,6 +49,10 @@ pub enum Icon {
     File,
     /// A handset: a call.
     Phone,
+    /// A microphone: the call hears the user.
+    Mic,
+    /// A microphone with a slash: muted in a call.
+    MicOff,
 }
 
 /// Paint `icon` into the square `rect`.
@@ -163,6 +167,15 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             painter.rect_stroke(Rect::from_min_max(at(3.5, 4.5), at(20.5, 19.5)), 2.0 * s, stroke, eframe::egui::StrokeKind::Middle);
             circle(9.0, 9.5, 1.6);
             line(&[(4.0, 17.5), (10.0, 12.5), (13.5, 15.5), (16.0, 13.5), (20.0, 17.0)]);
+        }
+        Icon::Mic | Icon::MicOff => {
+            painter.rect_stroke(Rect::from_min_max(at(9.0, 3.0), at(15.0, 14.0)), 3.0 * s, stroke, eframe::egui::StrokeKind::Middle);
+            arc(12.0, 11.0, 6.0, 0.0, PI);
+            line(&[(12.0, 17.0), (12.0, 21.0)]);
+            line(&[(9.0, 21.0), (15.0, 21.0)]);
+            if icon == Icon::MicOff {
+                line(&[(4.0, 3.5), (20.0, 20.5)]);
+            }
         }
         Icon::Phone => {
             // A handset, earpiece up left and mouthpiece down right.

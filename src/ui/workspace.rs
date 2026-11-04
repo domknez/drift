@@ -169,6 +169,10 @@ pub struct Workspace {
     address_load: Load<(String, Option<String>), Error>,
     /// When the ring last sounded.
     rang_at: Option<Instant>,
+    /// The call answered here, while it lasts.
+    pub in_call: Option<InCall>,
+    /// Answering a call: its media once it's accepted.
+    answer_load: Load<crate::call::Media, String>,
     /// The keyboard shortcuts' sheet is open.
     pub shortcuts: bool,
     /// When the others were last told the user is typing (and where).
@@ -264,6 +268,17 @@ impl PendingDelete {
     pub fn is_in(&self, conversation: &str) -> bool {
         self.conversation == conversation
     }
+}
+
+/// A call answered here: who with, its media once it's up, since when it's been
+/// connected, and whether the microphone is muted.
+pub struct InCall {
+    pub id: String,
+    pub from: String,
+    pub name: String,
+    media: Option<crate::call::Media>,
+    pub connected: Option<Instant>,
+    pub muted: bool,
 }
 
 /// A call ringing: its id, who's calling (id, name, and sign-in address once looked
@@ -416,6 +431,8 @@ impl Workspace {
             ringing: None,
             address_load: Load::Idle,
             rang_at: None,
+            in_call: None,
+            answer_load: Load::Idle,
             list_width: crate::ui::style::metrics::LIST_WIDTH,
             suggestion: 0,
             typing: HashMap::new(),
@@ -1140,6 +1157,9 @@ impl Workspace {
                     if self.ringing.as_ref().is_some_and(|r| r.id == id) {
                         self.ringing = None;
                     }
+                    if self.in_call.as_ref().is_some_and(|c| c.id == id) {
+                        self.in_call = None;
+                    }
                 }
                 Push::Typing { conversation, id, name, typing } => {
                     let who = self.typing.entry(conversation).or_default();
@@ -1276,6 +1296,7 @@ impl Workspace {
         }
         self.remind_meetings(ctx);
         self.ring(ctx);
+        self.keep_call(ctx);
         if let Some(result) = self.activity_load.take() {
             match result {
                 Ok(feeds) => self.took_activity(feeds),
@@ -1501,6 +1522,89 @@ impl Workspace {
         if let Some(call) = self.ringing.take() {
             ctx.open_url(egui::OpenUrl::new_tab(call_back_link(call.address.as_deref())));
         }
+    }
+
+    /// Whether calls can be answered here (drift was built with the media for them).
+    pub fn can_answer(&self) -> bool {
+        cfg!(feature = "calls")
+    }
+
+    /// Answer the ringing call here: its offer, the relays, the media answering it,
+    /// then the acceptance. The bar shows the call while it connects.
+    pub fn answer_call(&mut self, ctx: &egui::Context) {
+        let Some(call) = self.ringing.take() else { return };
+        let backend = self.backend.clone();
+        let id = call.id.clone();
+        self.answer_load = Load::start(ctx, move || {
+            let offer = backend.call_offer(&id).map_err(|e| e.to_string())?;
+            let relays = backend.relays().unwrap_or_else(|e| {
+                log_warn!("call relays: {e}");
+                Vec::new()
+            });
+            let ice: Vec<_> = relays
+                .into_iter()
+                .map(|r| crate::call::IceServer { urls: r.urls, username: r.username, credential: r.credential })
+                .collect();
+            let (media, answer) = crate::call::Media::answer(&offer, &ice)?;
+            backend.accept_call(&id, &answer).map_err(|e| e.to_string())?;
+            Ok(media)
+        });
+        self.in_call = Some(InCall { id: call.id, from: call.from, name: call.name, media: None, connected: None, muted: false });
+    }
+
+    /// Mute or unmute the microphone in the call.
+    pub fn toggle_mute(&mut self) {
+        if let Some(call) = self.in_call.as_mut() {
+            call.muted = !call.muted;
+            if let Some(media) = &call.media {
+                media.set_muted(call.muted);
+            }
+        }
+    }
+
+    /// Leave the call answered here.
+    pub fn hang_up(&mut self) {
+        let Some(call) = self.in_call.take() else { return };
+        if let Some(media) = call.media {
+            media.close();
+        }
+        let backend = self.backend.clone();
+        std::thread::spawn(move || {
+            if let Err(e) = backend.hang_up(&call.id) {
+                log_warn!("hanging up: {e}");
+            }
+        });
+    }
+
+    /// While a call is answered here: its media once accepted, when it connects, and
+    /// its end when the media fails.
+    fn keep_call(&mut self, ctx: &egui::Context) {
+        if let Some(result) = self.answer_load.take() {
+            match (result, self.in_call.as_mut()) {
+                (Ok(media), Some(call)) => {
+                    media.set_muted(call.muted);
+                    call.media = Some(media);
+                }
+                (Ok(_), None) => {}
+                (Err(e), _) => {
+                    log_warn!("answering the call: {e}");
+                    self.error = Some(format!("Couldn't answer the call: {e}"));
+                    self.hang_up();
+                }
+            }
+        }
+        let Some(call) = self.in_call.as_mut() else { return };
+        if let Some(media) = &call.media {
+            if call.connected.is_none() && media.connected() {
+                call.connected = Some(Instant::now());
+            }
+            if media.ended() {
+                log_info!("the call's media ended");
+                self.hang_up();
+                return;
+            }
+        }
+        ctx.request_repaint_after(Duration::from_millis(500));
     }
 
     /// Decline the call: it stops ringing here and on the user's other devices.
