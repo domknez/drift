@@ -7,6 +7,7 @@
 //! - [`parse`]: their JSON as `model` types
 
 pub mod auth;
+mod call_shape;
 mod http;
 mod parse;
 pub mod shape;

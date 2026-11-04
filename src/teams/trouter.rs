@@ -279,10 +279,7 @@ fn call_of(body: &Value) -> Option<Push> {
     if body["evt"].as_i64() != Some(107) {
         return None;
     }
-    let packed = super::auth::base64url(body["cp"].as_str()?)?;
-    let mut text = String::new();
-    flate2::read::GzDecoder::new(packed.as_slice()).take(1 << 20).read_to_string(&mut text).ok()?;
-    let details: Value = serde_json::from_str(&text).ok()?;
+    let details = call_details(body)?;
     let from = &details["callNotification"]["from"];
     Some(Push::Call {
         id: body["callId"].as_str().unwrap_or("").to_string(),
@@ -292,10 +289,34 @@ fn call_of(body: &Value) -> Option<Push> {
     })
 }
 
+/// A call event's details (`cp`, gzipped JSON in Base64).
+fn call_details(body: &Value) -> Option<Value> {
+    let packed = super::auth::base64url(body["cp"].as_str()?)?;
+    let mut text = String::new();
+    flate2::read::GzDecoder::new(packed.as_slice()).take(1 << 20).read_to_string(&mut text).ok()?;
+    serde_json::from_str(&text).ok()
+}
+
+/// What a call event looks like, for the log: its keys and where its links go (to
+/// learn how a call is answered), never who or which call.
+fn log_call_shape(body: &Value) {
+    let mut outer = body.clone();
+    if let Some(map) = outer.as_object_mut() {
+        map.remove("cp");
+    }
+    for line in super::call_shape::shape(&outer) {
+        log_debug!("trouter: call shape {line}");
+    }
+    for line in call_details(body).map(|d| super::call_shape::shape(&d)).unwrap_or_default() {
+        log_debug!("trouter: call shape cp{line}");
+    }
+}
+
 /// What a forwarded request says changed.
 fn pushes(url: &str, body: &Value) -> Vec<Push> {
     if url.ends_with(CALLS) || url.contains(&format!("/{SPACES_CALLS}")) {
         log_debug!("trouter: call event {}", body["evt"]);
+        log_call_shape(body);
         return call_of(body).into_iter().collect();
     }
     if !url.ends_with("/messaging") || body["type"] != "EventMessage" {
