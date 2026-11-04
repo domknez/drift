@@ -56,7 +56,7 @@ pub fn show(ctx: &egui::Context, ws: &mut Workspace) {
                         if pill(ui, "Call back", Icon::Phone, GREEN, &tip).clicked() {
                             answer = Some(true);
                         }
-                        let tip = "Stop ringing here (it still rings on your other devices)";
+                        let tip = "Decline the call (it stops ringing everywhere)";
                         if pill(ui, "Decline", Icon::Close, RED, tip).clicked() {
                             answer = Some(false);
                         }

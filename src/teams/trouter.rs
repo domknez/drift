@@ -125,6 +125,7 @@ fn session(teams: &Teams, endpoint: &str, connections: &mut u64, to: &dyn Fn(Pus
                 send(&mut socket, format!("5:{sequence}+::{activity}"))?;
                 register(teams, &info.surl, endpoint)?;
                 registered = Some(Instant::now());
+                teams.calls.connected(&info.surl);
                 to(Push::Live(true));
             }
             Some(b'2') => send(&mut socket, "2::".into())?,
@@ -136,6 +137,16 @@ fn session(teams: &Teams, endpoint: &str, connections: &mut u64, to: &dyn Fn(Pus
                 let url = request["url"].as_str().unwrap_or("");
                 log_debug!("trouter: request for {}", url.rsplit('/').next().unwrap_or(""));
                 let body = request_body(&request);
+                if url.contains("/callAgent/") {
+                    to_all(teams.calls.callback(url, &body), to);
+                    continue;
+                }
+                if is_call_notice(url)
+                    && body["evt"].as_i64() == Some(107)
+                    && let (Some(call), Some(details)) = (body["callId"].as_str(), call_details(&body))
+                {
+                    teams.calls.heard(call, details);
+                }
                 for push in pushes(url, &body) {
                     to(push);
                 }
@@ -312,9 +323,20 @@ fn log_call_shape(body: &Value) {
     }
 }
 
+fn to_all(pushes: impl IntoIterator<Item = Push>, to: &dyn Fn(Push)) {
+    for push in pushes {
+        to(push);
+    }
+}
+
+/// Whether a forwarded request is a call notice.
+fn is_call_notice(url: &str) -> bool {
+    url.ends_with(CALLS) || url.contains(&format!("/{SPACES_CALLS}"))
+}
+
 /// What a forwarded request says changed.
 fn pushes(url: &str, body: &Value) -> Vec<Push> {
-    if url.ends_with(CALLS) || url.contains(&format!("/{SPACES_CALLS}")) {
+    if is_call_notice(url) {
         log_debug!("trouter: call event {}", body["evt"]);
         log_call_shape(body);
         return call_of(body).into_iter().collect();
@@ -410,7 +432,7 @@ pub(super) fn endpoint_id() -> String {
     id
 }
 
-fn uuid() -> String {
+pub(super) fn uuid() -> String {
     format!(
         "{:08x}-{:04x}-4{:03x}-{:04x}-{:012x}",
         fastrand::u32(..),

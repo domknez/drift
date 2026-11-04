@@ -1136,6 +1136,11 @@ impl Workspace {
                 Push::Live(live) => self.live = live,
                 Push::Message { conversation, message } => self.pushed(&conversation, *message),
                 Push::Call { id, from, name, group } => self.called(ctx, id, &from, name, group),
+                Push::CallEnded { id } => {
+                    if self.ringing.as_ref().is_some_and(|r| r.id == id) {
+                        self.ringing = None;
+                    }
+                }
                 Push::Typing { conversation, id, name, typing } => {
                     let who = self.typing.entry(conversation).or_default();
                     who.retain(|(i, ..)| *i != id);
@@ -1498,10 +1503,15 @@ impl Workspace {
         }
     }
 
-    /// Stop the ringing here (the call still rings on the user's other devices: Teams
-    /// takes a decline only from a client that has joined the call).
+    /// Decline the call: it stops ringing here and on the user's other devices.
     pub fn decline_call(&mut self) {
-        self.ringing = None;
+        let Some(call) = self.ringing.take() else { return };
+        let backend = self.backend.clone();
+        std::thread::spawn(move || {
+            if let Err(e) = backend.decline_call(&call.id) {
+                log_warn!("declining the call: {e}");
+            }
+        });
     }
 
     /// While a call rings: the sound every few seconds (the notice shows it), until

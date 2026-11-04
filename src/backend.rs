@@ -37,6 +37,14 @@ pub enum FilePlace {
     Channel { group: String, channel: String },
 }
 
+/// A TURN relay a call's media can go through.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Relay {
+    pub urls: Vec<String>,
+    pub username: String,
+    pub credential: String,
+}
+
 /// A change the service pushes as it happens.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Push {
@@ -50,6 +58,8 @@ pub enum Push {
     Message { conversation: ConversationId, message: Box<crate::model::Message> },
     /// Someone is calling the user: the call's id, who (id, name), and whether it's a group call.
     Call { id: String, from: String, name: String, group: bool },
+    /// A call drift heard of ended: hung up, answered elsewhere, or no longer ringing.
+    CallEnded { id: String },
     /// Someone started (or stopped) typing in a conversation: who (id, name).
     Typing { conversation: ConversationId, id: String, name: String, typing: bool },
 }
@@ -85,6 +95,35 @@ pub trait Backend: Send + Sync {
     fn address(&self, person: &str) -> Result<Option<String>> {
         let _ = person;
         Ok(None)
+    }
+
+    /// Decline a call that's ringing (it stops ringing on the user's other devices too).
+    fn decline_call(&self, call: &str) -> Result<()> {
+        let _ = call;
+        Err(Error::Service("calls can't be declined from here".into()))
+    }
+
+    /// Join a ringing call's signalling: the caller's offer (SDP), to answer.
+    fn call_offer(&self, call: &str) -> Result<String> {
+        let _ = call;
+        Err(Error::Service("calls can't be answered from here".into()))
+    }
+
+    /// The relays a call's media can go through.
+    fn relays(&self) -> Result<Vec<Relay>> {
+        Ok(Vec::new())
+    }
+
+    /// Answer a call with `answer` (SDP), after [`Backend::call_offer`].
+    fn accept_call(&self, call: &str, answer: &str) -> Result<()> {
+        let _ = (call, answer);
+        Err(Error::Service("calls can't be answered from here".into()))
+    }
+
+    /// Leave a call that was answered here.
+    fn hang_up(&self, call: &str) -> Result<()> {
+        let _ = call;
+        Ok(())
     }
 
     /// Upload a picture for a message in `conversation`: the address to put in it.

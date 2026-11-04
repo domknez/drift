@@ -8,6 +8,7 @@
 
 pub mod auth;
 mod call_shape;
+mod calling;
 mod http;
 mod parse;
 pub mod shape;
@@ -39,11 +40,18 @@ pub struct Teams {
     names: Mutex<HashMap<String, String>>,
     /// The user's OneDrive (its site), once looked up.
     my_site: Mutex<Option<String>>,
+    /// Calls heard of, to answer or decline.
+    calls: calling::Calls,
 }
 
 impl Teams {
     pub fn new(session: Session) -> Teams {
-        Teams { session: Mutex::new(session), names: Mutex::new(HashMap::new()), my_site: Mutex::new(None) }
+        Teams {
+            session: Mutex::new(session),
+            names: Mutex::new(HashMap::new()),
+            my_site: Mutex::new(None),
+            calls: calling::Calls::default(),
+        }
     }
 
     fn session(&self) -> std::sync::MutexGuard<'_, Session> {
@@ -803,6 +811,26 @@ impl Backend for Teams {
         self.presence_request(Method::Put, "/v1/me/endpoints/", Body::Json(&endpoint))?;
         let activity = serde_json::json!({ "endpointId": id, "isActive": active });
         self.presence_request(Method::Post, "/v1/me/reportmyactivity/", Body::Json(&activity)).map(|_| ())
+    }
+
+    fn decline_call(&self, call: &str) -> Result<()> {
+        self.decline(call)
+    }
+
+    fn call_offer(&self, call: &str) -> Result<String> {
+        self.offer(call)
+    }
+
+    fn relays(&self) -> Result<Vec<crate::backend::Relay>> {
+        Teams::relays(self)
+    }
+
+    fn accept_call(&self, call: &str, answer: &str) -> Result<()> {
+        self.accept(call, answer)
+    }
+
+    fn hang_up(&self, call: &str) -> Result<()> {
+        Teams::hang_up(self, call)
     }
 
     fn listen(self: Arc<Self>, to: Box<dyn Fn(Push) + Send>) {

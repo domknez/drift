@@ -82,6 +82,7 @@ fn listen() {
         Push::Conversation(id) => println!("change in a conversation ({})", id.split(':').next().unwrap_or("?")),
         Push::Message { .. } => println!("a message"),
         Push::Call { .. } => println!("a call"),
+        Push::CallEnded { .. } => println!("a call ended"),
         Push::Typing { typing, .. } => println!("{}", if typing { "someone is typing" } else { "someone stopped typing" }),
     }));
     loop {
