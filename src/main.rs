@@ -6,6 +6,7 @@
 #[macro_use]
 mod log;
 mod backend;
+mod call;
 mod credentials;
 mod demo;
 mod icon;
