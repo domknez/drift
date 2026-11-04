@@ -190,3 +190,75 @@ big work starts.
    - (a) a read-only GET of `https://teams.microsoft.com/trap/tokens`, to see the
      relay credentials' format. It changes nothing.
    - (b) stage 1 tests: attach and decline on calls a colleague makes on purpose.
+
+## Media engine
+
+`src/call/` holds the media side of a call, behind the `calls` Cargo feature (off
+by default; without it `Media::answer` returns an error). It has no Teams HTTP in
+it: it takes the offer's SDP text and the TURN servers, and gives back the answer's
+SDP text and a running `Media` (`set_muted`, `connected`, `ended`, `close`).
+
+### Crates
+
+| Part | Crate | Why |
+|---|---|---|
+| ICE, DTLS-SRTP, SDP, TURN client | `rtc` 0.21 | webrtc-rs's sans-I/O core (the async `webrtc` 0.21 is a wrapper over it). drift has no async runtime; `rtc` needs none: one thread owns the socket and drives it. `str0m`, the other sans-I/O stack, has no TURN client and its SDP parser takes only `UDP/TLS/RTP/SAVPF` and SCTP, not Teams' `RTP/SAVP`. Crypto is `ring` (built with `cc`, no cmake). |
+| Opus | `unsafe-libopus` 0.2 | libopus 1.3.1 translated to Rust by c2rust: no C toolchain, cmake or system library, so it builds the same on macOS, Linux and Windows. The `opus` crate builds libopus with cmake. |
+| Microphone and speakers | `cpal` 0.18 | On Linux it needs ALSA's headers (`libasound2-dev`) when built with `calls`. |
+| Resampling | none | Linear interpolation to and from the device rate (usually 48 kHz already). Enough for speech; `rubato` is the step up. |
+
+### What the stack makes of Teams' offer
+
+`src/call/testdata/teams-offer.sdp` is the offer from the Microsoft Q&A sample above
+(9 m-lines: audio, a send/receive video, 6 receive-only videos, `m=x-data`), with
+its ids, addresses, ICE credentials and fingerprint made up. Tests feed it through
+the stack:
+
+- **Rejected as is**: `m=x-data`. The parser takes only the IANA media kinds
+  (`audio`, `video`, `text`, `application`, `message`, `image`) and fails the whole
+  offer. `sdp::prepare` renames that m-line to `application`; nothing else changes.
+- **Parsed and taken as is**: `RTP/SAVP` (not `UDP/TLS/RTP/SAVPF`) with a DTLS fingerprint,
+  `a=x-ssrc-range`, `a=x-signaling-fb`, `a=label`, `a=x-data-protocol`,
+  `a=sctp-port` on an RTP m-line, Microsoft's header extensions, the BUNDLE group
+  over all 9, `a=setup:actpass`, the `ice-ufrag` and `ice-pwd` in every m-line.
+- **Answered wrong, so fixed** (`sdp::finish`): the stack answers every m-line with
+  `UDP/TLS/RTP/SAVPF` and a rejected one with format `0` and no `rtpmap`. The fix
+  gives each m-line the offer's kind and protocol back (`m=x-data`, `RTP/SAVP`),
+  a rejected one the offer's first format and its `rtpmap`, and the audio
+  `a=x-ssrc-range:<ssrc>-<ssrc>`, as Teams' own SDP has.
+
+The answer then has the offer's 9 m-lines with the same mids in the same order:
+audio `m=audio 9 RTP/SAVP 111` with `opus/48000/2`, `minptime=10;useinbandfec=1`,
+`a=sendrecv`, `a=setup:active`, `a=rtcp-mux`, one SSRC; the other 8 on port 0.
+`a=group:BUNDLE 0` lists only the audio, since rejected m-lines leave the group
+(RFC 8843). Whether Microsoft's media controller takes exactly this is the next
+thing a real call shows.
+
+### How it runs
+
+- `Media::answer` is blocking. It binds one UDP socket, allocates a relay on each
+  UDP TURN server (`turn:host:port`, `?transport=udp` or none) for up to 4 s, lets
+  the offer's candidate addresses through each relay, and answers with every
+  candidate (host and relay) and `a=end-of-candidates`. There is no trickle: the
+  acceptance carries the whole answer.
+- The offer's own candidates are read from its SDP; there is no call for adding
+  more later.
+- drift's DTLS role is `active` (client), as the answer to `actpass`.
+- A thread then owns the socket, the stack and the TURN clients, and every 20 ms
+  encodes a frame from the microphone (silence when muted) and sends it once ICE
+  and DTLS are up. Received Opus is decoded (a short gap is filled by the decoder's
+  loss concealment) and played after 60 ms of buffering.
+- Audio sits behind `Source`, `Sink` and `Processor` traits. Tests use a tone and a
+  recorder. `Processor` sees what is played and what is recorded: echo
+  cancellation (for example `webrtc-audio-processing`) goes there; today it does
+  nothing, so headphones first.
+- A loopback test runs a second stack as "Teams" on 127.0.0.1, its offer made
+  Teams-like (`RTP/SAVP`, Microsoft attributes, an `m=x-data` m-line): both connect
+  over host candidates, each hears the other's tone through Opus at the right
+  pitch, and muting silences drift's side.
+
+### Not done yet
+
+- TURN over TCP or TLS on 443 (only UDP 3478), and server-reflexive candidates.
+- Renegotiation (hold, video): a new offer means a new `Media` for now.
+- Echo cancellation, noise suppression, gain control, device changes mid-call.

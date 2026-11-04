@@ -31,6 +31,16 @@ rfd = "0.15"
 # The Microsoft sign-in page, shown in a helper process (see login.rs).
 tao = "0.37"
 wry = "0.57"
+# Calls (the `calls` feature): WebRTC without its own I/O or async runtime, Opus
+# translated to Rust (no C toolchain), and the microphone and speakers.
+rtc = { version = "0.21.1", optional = true }
+bytes = { version = "1", optional = true }
+unsafe-libopus = { version = "0.2", optional = true }
+cpal = { version = "0.18", optional = true }
+
+[features]
+# Answering calls with audio. Off by default while it's being built.
+calls = ["dep:rtc", "dep:bytes", "dep:unsafe-libopus", "dep:cpal"]
 
 [target.'cfg(target_os = "macos")'.dependencies]
 apple-native-keyring-store = { version = "1", features = ["keychain"] }
