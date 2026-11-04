@@ -218,6 +218,7 @@ pub fn message(m: &Value, me: &str) -> Option<Message> {
         message: source_message.clone(),
         title: str_of(activity, &["sourceThreadTopic"]).unwrap_or("").to_string(),
         what: str_of(activity, &["activityType"]).unwrap_or("").to_string(),
+        detail: str_of(activity, &["activitySubtype"]).unwrap_or("").to_string(),
     });
     Some(Message {
         id,
@@ -612,7 +613,14 @@ mod tests {
         assert_eq!(m.author, Author { id: "8:orgid:boris".into(), name: "Boris".into() });
         assert_eq!(
             m.source,
-            Some(Source { conversation: "19:x".into(), message: None, root: None, title: "[DEV] General".into(), what: "mention".into() })
+            Some(Source {
+                conversation: "19:x".into(),
+                message: None,
+                root: None,
+                title: "[DEV] General".into(),
+                what: "mention".into(),
+                detail: String::new()
+            })
         );
     }
 

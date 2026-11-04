@@ -541,7 +541,7 @@ fn activity(ui: &mut Ui, ws: &mut Workspace, d: &Directory) {
     let shown: Vec<&Message> =
         items.iter().rev().filter(|m| matches(ws, &m.author.name) || m.source.as_ref().is_some_and(|s| matches(ws, &s.title))).collect();
     if shown.is_empty() {
-        empty(ui, "No mentions or replies yet.");
+        empty(ui, "No mentions, replies or reactions yet.");
     }
     ui.add_space(4.0);
     for m in shown {
@@ -816,6 +816,14 @@ fn activity_row(ui: &mut Ui, ws: &mut Workspace, d: &Directory, m: &Message) {
         job.append(what, 5.0, egui::TextFormat::simple(ty::small(), p.dim));
     }
     a.add(egui::Label::new(job).truncate().selectable(false));
+    // The reaction's emoji, as Teams draws it.
+    if what == "reacted"
+        && !source.detail.is_empty()
+        && let Some(texture) = ws.pictures.get(&Picture::Emoji(source.detail.clone()))
+    {
+        a.add_space(3.0);
+        a.add(egui::Image::new((texture, vec2(16.0, 16.0))));
+    }
     let line2 = Rect::from_min_max(pos2(left, rect.top() + 27.0), pos2(rect.right() - 12.0, rect.top() + 44.0));
     let mut b = ui.new_child(egui::UiBuilder::new().max_rect(line2).layout(Layout::left_to_right(Align::Center)));
     b.add(

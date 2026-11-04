@@ -71,9 +71,12 @@ pub struct Workspace {
     reported_at: Option<Instant>,
     active: bool,
     activity_report: Load<(), Error>,
-    /// The activity feed's items (mentions, replies), newest last; None until loaded.
+    /// Activity's items (mentions, replies, reactions) from all its feeds, newest last;
+    /// None until loaded. Which feed each came from (by id), and each feed's newest item.
     pub activity: Option<Vec<Message>>,
-    activity_load: Load<Vec<Message>, Error>,
+    activity_feed: HashMap<String, String>,
+    activity_newest: HashMap<String, i64>,
+    activity_load: Load<Vec<(String, Vec<Message>)>, Error>,
     activity_at: Option<Instant>,
     /// The post whose thread is open beside the conversation.
     pub thread: Option<String>,
@@ -195,9 +198,9 @@ pub struct Workspace {
     pub seen_down_to: Option<(String, String)>,
     /// The composer's emoji picker (its search).
     pub emoji_picker: crate::ui::views::emoji_picker::Picker,
-    /// While Activity is shown: up to which item it had been read when it was opened
-    /// (newer ones stay marked new while it's looked at, though they're read by then).
-    pub activity_new_after: Option<i64>,
+    /// While Activity is shown: up to which item each feed had been read when it was
+    /// opened (newer ones stay marked new while it's looked at, though they're read by then).
+    pub activity_new_after: Option<HashMap<String, i64>>,
     /// The quick switcher (⌘T), while it's open.
     pub switcher: Option<super::views::switcher::Switcher>,
     /// Conversations opened, the latest first.
@@ -360,6 +363,8 @@ impl Workspace {
             active: false,
             activity_report: Load::Idle,
             activity: None,
+            activity_feed: HashMap::new(),
+            activity_newest: HashMap::new(),
             activity_load: Load::Idle,
             activity_at: None,
             thread: None,
@@ -1151,7 +1156,7 @@ impl Workspace {
                         self.messages_at = None;
                         self.read_at = None;
                     }
-                    if self.directory.as_ref().and_then(|d| d.activity()).is_some_and(|c| c.id == id) {
+                    if self.directory.as_ref().is_some_and(|d| d.is_activity_feed(&id)) {
                         self.activity_at = None;
                     }
                 }
@@ -1268,7 +1273,7 @@ impl Workspace {
         self.ring(ctx);
         if let Some(result) = self.activity_load.take() {
             match result {
-                Ok(items) => self.activity = Some(items),
+                Ok(feeds) => self.took_activity(feeds),
                 Err(Error::SignedOut) => return Some(Outcome::SignedOut),
                 Err(e) => self.failed(e),
             }
@@ -1444,11 +1449,13 @@ impl Workspace {
         // The feed is fetched whatever's shown: its unread count is on the Activity tab.
         if !self.activity_load.is_running()
             && due(self.activity_at, if self.live { PUSHED_EVERY } else { MESSAGES_EVERY })
-            && let Some(feed) = self.directory.as_ref().and_then(|d| d.activity()).map(|c| c.id.clone())
+            && let Some(feeds) = self.directory.as_ref().map(|d| d.activity_feeds().iter().map(|c| c.id.clone()).collect::<Vec<_>>())
+            && !feeds.is_empty()
         {
             self.activity_at = Some(Instant::now());
             let backend = self.backend.clone();
-            self.activity_load = Load::start(ctx, move || backend.messages(&feed));
+            self.activity_load =
+                Load::start(ctx, move || feeds.into_iter().map(|feed| backend.messages(&feed).map(|items| (feed, items))).collect());
         }
         // Wake up for the next refresh even when nothing moves.
         ctx.request_repaint_after(MESSAGES_FRONT_EVERY);
@@ -1734,23 +1741,57 @@ impl Workspace {
         }
     }
 
-    /// How many activity items came after what was last read (before the feed is
-    /// loaded, 1 if anything did).
+    /// Activity from its feeds, as one list by time. Posts in channels followed in Teams
+    /// (the notifications feed has every one) are left out: they're in their channels.
+    fn took_activity(&mut self, feeds: Vec<(String, Vec<Message>)>) {
+        self.activity_feed.clear();
+        self.activity_newest.clear();
+        let mut items = Vec::new();
+        for (feed, messages) in feeds {
+            if let Some(newest) = messages.iter().filter_map(|m| m.id.parse::<i64>().ok()).max() {
+                self.activity_newest.insert(feed.clone(), newest);
+            }
+            for m in messages {
+                if m.source.as_ref().is_some_and(|s| s.what == "follow") {
+                    continue;
+                }
+                self.activity_feed.insert(m.id.clone(), feed.clone());
+                items.push(m);
+            }
+        }
+        items.sort_by_key(|m| m.at);
+        self.activity = Some(items);
+    }
+
+    /// Up to which item a feed has been read.
+    fn feed_read_up_to(&self, feed: &str) -> Option<i64> {
+        self.directory.as_ref().and_then(|d| d.conversation(feed)).and_then(|c| c.read_up_to)
+    }
+
+    /// Whether an item is after what its feed had been read up to (`then`: when Activity
+    /// was opened, else now).
+    fn after_read(&self, item: &Message, then: Option<&HashMap<String, i64>>) -> bool {
+        let Some(feed) = self.activity_feed.get(&item.id) else { return false };
+        let read = then.map_or_else(|| self.feed_read_up_to(feed), |t| t.get(feed).copied().or_else(|| self.feed_read_up_to(feed)));
+        read.is_some_and(|read| item.id.parse::<i64>().is_ok_and(|id| id > read))
+    }
+
+    /// How many activity items came after what was last read (before the feeds are
+    /// loaded, 1 for each that has anything new).
     pub fn activity_unread(&self) -> usize {
-        let Some(feed) = self.directory.as_ref().and_then(|d| d.activity()) else { return 0 };
-        match (&self.activity, feed.read_up_to) {
-            (Some(items), Some(read)) => items.iter().filter(|m| m.id.parse::<i64>().is_ok_and(|id| id > read)).count(),
-            _ => usize::from(feed.unread),
+        let Some(directory) = self.directory.as_ref() else { return 0 };
+        match &self.activity {
+            Some(items) => items.iter().filter(|m| self.after_read(m, None)).count(),
+            None => directory.activity_feeds().iter().filter(|c| c.unread).count(),
         }
     }
 
     /// Whether an activity item is new: after what was read when Activity was opened.
     pub fn activity_is_new(&self, item: &Message) -> bool {
-        let read = self.activity_new_after.or_else(|| self.directory.as_ref().and_then(|d| d.activity()).and_then(|f| f.read_up_to));
-        read.is_some_and(|read| item.id.parse::<i64>().is_ok_and(|id| id > read))
+        self.after_read(item, self.activity_new_after.as_ref())
     }
 
-    /// With Activity shown, mark the feed read up to its newest item (as Teams does
+    /// With Activity shown, mark its feeds read up to their newest items (as Teams does
     /// when its bell is opened); the items that were new stay marked while it's shown.
     fn read_activity(&mut self, ctx: &egui::Context) {
         if self.section != Section::Activity {
@@ -1760,20 +1801,22 @@ impl Workspace {
         if self.activity_unread() == 0 {
             return;
         }
-        let newest = self.activity.as_ref().and_then(|items| items.iter().filter_map(|m| m.id.parse::<i64>().ok()).max());
-        let Some(newest) = newest else { return };
-        let Some(directory) = self.directory.as_mut() else { return };
-        let Some(id) = directory.activity().map(|f| f.id.clone()) else { return };
-        let Some(feed) = directory.conversations.iter_mut().find(|c| c.id == id) else { return };
         if self.activity_new_after.is_none() {
-            self.activity_new_after = Some(feed.read_up_to.unwrap_or(newest));
+            let then = self.activity_newest.keys().filter_map(|f| Some((f.clone(), self.feed_read_up_to(f)?))).collect();
+            self.activity_new_after = Some(then);
         }
-        // Read here at once; the service hears of it in the background.
-        feed.read_up_to = Some(newest);
-        feed.unread = false;
-        let backend = self.backend.clone();
-        let message = newest.to_string();
-        self.chores.push((Chore::MarkRead, Load::start(ctx, move || backend.mark_read(&id, &message).map(|()| false))));
+        let Some(directory) = self.directory.as_mut() else { return };
+        for (id, newest) in &self.activity_newest {
+            let Some(feed) = directory.conversations.iter_mut().find(|c| &c.id == id) else { continue };
+            if feed.read_up_to.is_some_and(|read| read >= *newest) {
+                continue;
+            }
+            // Read here at once; the service hears of it in the background.
+            feed.read_up_to = Some(*newest);
+            feed.unread = false;
+            let (backend, id, message) = (self.backend.clone(), id.clone(), newest.to_string());
+            self.chores.push((Chore::MarkRead, Load::start(ctx, move || backend.mark_read(&id, &message).map(|()| false))));
+        }
     }
 
     /// Fetch everything again now.
@@ -1997,6 +2040,27 @@ mod tests {
         ws.with_sent_here("19:maya", &mut after);
         assert!(!after.iter().any(|m| m.sending));
         assert!(ws.sent_here.is_empty());
+    }
+
+    #[test]
+    fn activity_takes_reactions_from_the_notifications_feed() {
+        let mut ws = workspace("19:maya");
+        ws.directory = Some(crate::demo::Demo.directory().unwrap());
+        let feeds = ws.directory.as_ref().unwrap().activity_feeds().iter().map(|c| c.id.clone()).collect::<Vec<_>>();
+        assert_eq!(feeds, ["48:mentions", "48:notifications"]);
+        ws.took_activity(feeds.iter().map(|f| (f.clone(), crate::demo::Demo.messages(f).unwrap())).collect());
+        let items = ws.activity.clone().unwrap();
+        // The followed channel's post is left out; the rest by time.
+        let what: Vec<&str> = items.iter().map(|m| m.source.as_ref().unwrap().what.as_str()).collect();
+        assert_eq!(what, ["mention", "reactionInChat", "reply", "mention"]);
+        // Each against its own feed: two new mentions, and the reaction.
+        assert_eq!(ws.activity_unread(), 3);
+        ws.section = Section::Activity;
+        ws.read_activity(&egui::Context::default());
+        assert_eq!(ws.activity_unread(), 0);
+        assert!(ws.activity_is_new(&items[1]), "still marked while Activity is shown");
+        let d = ws.directory.as_ref().unwrap();
+        assert_eq!(d.conversation("48:notifications").unwrap().read_up_to, Some(4102));
     }
 
     #[test]

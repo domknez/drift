@@ -144,6 +144,8 @@ pub struct Source {
     pub title: String,
     /// `mention`, `reply`, `reaction`, … as the service names it.
     pub what: String,
+    /// More about it: for a reaction, its emoji's key (`laugh`, `heart`, …).
+    pub detail: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -403,10 +405,17 @@ impl Directory {
         self.conversations.iter().find(|c| c.id == id)
     }
 
-    /// The mentions/activity feed, if the service lists one.
-    pub fn activity(&self) -> Option<&Conversation> {
+    /// The feeds Activity is made of: mentions, and the notifications feed (reactions,
+    /// replies and the rest); any feed the service lists if it names neither.
+    pub fn activity_feeds(&self) -> Vec<&Conversation> {
         let feeds = || self.conversations.iter().filter(|c| c.kind == Kind::Feed);
-        feeds().find(|c| c.id.contains("mention")).or_else(|| feeds().next())
+        let named: Vec<&Conversation> = feeds().filter(|c| c.id.contains("mention") || c.id.contains("notification")).collect();
+        if named.is_empty() { feeds().take(1).collect() } else { named }
+    }
+
+    /// Whether a conversation is one of Activity's feeds.
+    pub fn is_activity_feed(&self, id: &str) -> bool {
+        self.activity_feeds().iter().any(|c| c.id == id)
     }
 
     /// The team and channel a conversation belongs to, if it's a channel.

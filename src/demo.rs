@@ -169,6 +169,10 @@ impl Backend for Demo {
                 read_up_to: Some(4001),
                 ..chat("48:mentions", Kind::Feed, "Activity", ("Maya", "mentioned you in PR Reviews", today(10, 44)), true, false, None)
             },
+            Conversation {
+                read_up_to: Some(4100),
+                ..chat("48:notifications", Kind::Feed, "Notifications", ("Tomás", "reacted", today(10, 13)), true, false, None)
+            },
         ];
         for team in &teams {
             for c in &team.channels {
@@ -197,6 +201,9 @@ impl Backend for Demo {
     fn messages(&self, conversation: &str) -> Result<Vec<Message>> {
         if conversation == "48:mentions" {
             return Ok(activity());
+        }
+        if conversation == "48:notifications" {
+            return Ok(notifications());
         }
         if conversation == "19:maya" {
             let like = |mine: bool| {
@@ -523,6 +530,7 @@ fn activity() -> Vec<Message> {
             root: place.3.map(str::to_string),
             title: place.1.into(),
             what: what.into(),
+            detail: if what == "reaction" { "heart".into() } else { String::new() },
         }),
         ..message(id, None, who, at, &format!("<p>{text}</p>"), None, vec![])
     };
@@ -545,6 +553,28 @@ fn activity() -> Vec<Message> {
         ),
         item("4003", "maya", today(10, 44), "@Alex happy to pair on it after stand-up", (OPEN, "PR Reviews", "1006", None), "mention"),
     ]
+}
+
+/// The notifications feed: reactions to the user's messages (and posts in followed
+/// channels, which Activity leaves out).
+fn notifications() -> Vec<Message> {
+    let mut reaction = activity().remove(0);
+    reaction.id = "4101".into();
+    reaction.author = Author { id: "8:orgid:tomas".into(), name: "Tomás Rivera".into() };
+    reaction.at = today(10, 13);
+    reaction.body = text::from_html("<p>rebased, should be green now</p>");
+    reaction.source = Some(Source {
+        conversation: "19:tomas".into(),
+        message: Some("3003".into()),
+        root: None,
+        title: String::new(),
+        what: "reactionInChat".into(),
+        detail: "heart".into(),
+    });
+    let mut followed = reaction.clone();
+    followed.id = "4102".into();
+    followed.source = followed.source.map(|s| Source { what: "follow".into(), ..s });
+    vec![reaction, followed]
 }
 
 fn pr(n: u32, title: &str, from: &str, to: &str) -> Card {
