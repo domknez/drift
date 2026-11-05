@@ -5,8 +5,8 @@ use crate::backend::{Backend, Error, Result};
 use crate::model::markdown::Outgoing;
 use crate::model::text::{self, Block};
 use crate::model::{
-    Author, Availability, Card, Channel, Conversation, Directory, Kind, Meeting, Message, Picture, Presence, Preview, Reaction, SearchHit,
-    Source, Status, Team, time,
+    Author, Availability, Card, Channel, Conversation, Directory, Follow, Kind, Meeting, Message, Picture, Presence, Preview, Reaction,
+    SearchHit, Source, Status, Team, time,
 };
 
 pub struct Demo;
@@ -50,6 +50,7 @@ fn chat(id: &str, kind: Kind, title: &str, last: (&str, &str, i64), unread: bool
             author_id: if last.0 == "You" { ME.into() } else { String::new() },
             text: last.1.into(),
             at: last.2,
+            reply: false,
         }),
         unread,
         read_up_to: None,
@@ -73,11 +74,11 @@ fn channel_preview(id: &str) -> Preview {
         "19:side@thread.tacv2" => ("Priya Nair", "Build 0.4 is up for testing", today(11, 0) - 30 * 86_400_000),
         _ => ("Lea Novak", "Welcome to Halcyon!", today(11, 0) - 20 * 86_400_000),
     };
-    Preview { author: author.into(), author_id: String::new(), text: text.into(), at }
+    Preview { author: author.into(), author_id: String::new(), text: text.into(), at, reply: false }
 }
 
 fn channel(id: &str, name: &str, general: bool, unread: bool, pinned: bool) -> Channel {
-    Channel { id: id.into(), name: name.into(), general, unread, pinned, muted: false, last: None }
+    Channel { id: id.into(), name: name.into(), general, unread, pinned, muted: false, last: None, follow: Follow::Nothing }
 }
 
 impl Backend for Demo {

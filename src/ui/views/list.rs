@@ -800,13 +800,7 @@ fn activity_row(ui: &mut Ui, ws: &mut Workspace, d: &Directory, m: &Message) {
         ui.painter().circle_filled(pos2(rect.right() - 17.0, rect.bottom() - 15.0), 4.5, p.accent_fill);
     }
 
-    let what = match source.what.as_str() {
-        "mention" | "mentionInChat" => "mentioned you",
-        "reply" | "replyToReply" => "replied",
-        "reaction" | "reactionInChat" => "reacted",
-        "teamMembershipChange" => "added you",
-        _ => "",
-    };
+    let what = source.verb();
     let left = pic.right() + 11.0;
     let line1 = Rect::from_min_max(pos2(left, rect.top() + 7.0), pos2(rect.right() - 18.0 - time_w, rect.top() + 25.0));
     let mut a = ui.new_child(egui::UiBuilder::new().max_rect(line1).layout(Layout::left_to_right(Align::Center)));

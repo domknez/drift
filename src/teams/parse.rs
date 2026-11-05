@@ -2,8 +2,8 @@
 //! API isn't documented, and what's missing gets a default rather than an error.
 
 use crate::model::{
-    Author, Availability, Card, Channel, Conversation, CustomEmoji, File, Kind, Meeting, Message, Picture, Presence, Preview, Reaction,
-    SearchHit, Source, Status, Team, text, time,
+    Author, Availability, Card, Channel, Conversation, CustomEmoji, File, Follow, Kind, Meeting, Message, Picture, Presence, Preview,
+    Reaction, SearchHit, Source, Status, Team, text, time,
 };
 use serde_json::Value;
 
@@ -38,6 +38,7 @@ pub fn teams(roster: &Value) -> Vec<Team> {
                         pinned: c["isPinned"].as_bool().unwrap_or(false),
                         muted: c["isMuted"].as_bool().unwrap_or(false),
                         last: preview(&c["lastMessage"]),
+                        follow: follow(c),
                     })
                 })
                 .collect();
@@ -153,7 +154,26 @@ fn preview(m: &Value) -> Option<Preview> {
     // `from` is a link ending in the author's id.
     let from = str_of(m, &["from"]).unwrap_or("");
     let author_id = from.rsplit('/').next().unwrap_or(from).to_string();
-    Some(Preview { author, author_id, text: text::flatten(&body), at })
+    // A reply's thread is another message's: its root, or the post its link names.
+    let id = str_of(m, &["id"]).unwrap_or("");
+    let link_root = str_of(m, &["conversationLink"]).and_then(|l| l.split_once(";messageid=")).map(|(_, r)| r);
+    let root = str_of(m, &["rootMessageId"]).or(link_root);
+    let reply = !id.is_empty() && root.is_some_and(|r| r != id);
+    Some(Preview { author, author_id, text: text::flatten(&body), at, reply })
+}
+
+/// What in a channel notifies: its notification settings (JSON in a string), or
+/// just that it's followed.
+fn follow(channel: &Value) -> Follow {
+    let settings =
+        str_of(channel, &["channelNotificationSettings"]).and_then(|s| serde_json::from_str::<Value>(s).ok()).unwrap_or_default();
+    match settings["allNewPosts"].as_str() {
+        Some("On") if settings["includeReplies"].as_bool().unwrap_or(false) => Follow::Everything,
+        Some("On") => Follow::Posts,
+        Some(_) => Follow::Nothing,
+        None if channel["isFollowed"].as_bool().unwrap_or(false) => Follow::Posts,
+        None => Follow::Nothing,
+    }
 }
 
 /// A message list from the chat service, oldest first. Control messages, call and
@@ -557,6 +577,23 @@ mod tests {
         assert_eq!(teams.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(), ["Halcyon", "Side project"]);
         assert_eq!(teams[0].channels.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["General", "PR Reviews"]);
         assert!(teams[0].channels[0].general);
+    }
+
+    #[test]
+    fn reads_what_a_channel_notifies() {
+        let settings = |s: &str| json!({"channelNotificationSettings": s});
+        assert_eq!(follow(&settings(r#"{"allNewPosts":"On","includeReplies":true}"#)), Follow::Everything);
+        assert_eq!(follow(&settings(r#"{"allNewPosts":"On","includeReplies":false}"#)), Follow::Posts);
+        assert_eq!(follow(&settings(r#"{"allNewPosts":"Off"}"#)), Follow::Nothing);
+        assert_eq!(follow(&json!({"isFollowed": true})), Follow::Posts);
+        assert_eq!(follow(&json!({"channelNotificationSettings": "not json"})), Follow::Nothing);
+        // A reply names its thread's post; a post names itself.
+        let at = "2026-11-05T09:30:00.000Z";
+        let post = json!({"id": "17", "composetime": at, "conversationLink": "https://x/conversations/19:c@thread.tacv2;messageid=17"});
+        let reply = json!({"id": "18", "composetime": at, "conversationLink": "https://x/conversations/19:c@thread.tacv2;messageid=17"});
+        assert!(!preview(&post).unwrap().reply);
+        assert!(preview(&reply).unwrap().reply);
+        assert!(preview(&json!({"id": "19", "composetime": at, "rootMessageId": "17"})).unwrap().reply);
     }
 
     #[test]

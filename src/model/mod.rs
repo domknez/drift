@@ -90,6 +90,8 @@ pub struct Preview {
     pub text: String,
     /// Unix milliseconds.
     pub at: i64,
+    /// A reply in a channel's thread, not a post.
+    pub reply: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -111,6 +113,31 @@ pub struct Channel {
     pub pinned: bool,
     pub muted: bool,
     pub last: Option<Preview>,
+    /// Followed in Teams: what in it notifies.
+    pub follow: Follow,
+}
+
+/// What in a channel notifies, as the user set it in Teams (Channel notifications →
+/// All activity).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Follow {
+    #[default]
+    Nothing,
+    /// Every new post.
+    Posts,
+    /// Every new post, and every reply.
+    Everything,
+}
+
+impl Follow {
+    /// Whether the newest message in the channel is one that notifies.
+    pub fn covers(self, last: &Preview) -> bool {
+        match self {
+            Follow::Nothing => false,
+            Follow::Posts => !last.reply,
+            Follow::Everything => true,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -146,6 +173,20 @@ pub struct Source {
     pub what: String,
     /// More about it: for a reaction, its emoji's key (`laugh`, `heart`, …).
     pub detail: String,
+}
+
+impl Source {
+    /// What the person did, after their name ("mentioned you"); empty when it's
+    /// not one of those.
+    pub fn verb(&self) -> &'static str {
+        match self.what.as_str() {
+            "mention" | "mentionInChat" => "mentioned you",
+            "reply" | "replyToReply" => "replied",
+            "reaction" | "reactionInChat" => "reacted",
+            "teamMembershipChange" => "added you",
+            _ => "",
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -416,6 +457,11 @@ impl Directory {
     /// Whether a conversation is one of Activity's feeds.
     pub fn is_activity_feed(&self, id: &str) -> bool {
         self.activity_feeds().iter().any(|c| c.id == id)
+    }
+
+    /// What in a channel notifies (nothing for anything else).
+    pub fn follow(&self, id: &str) -> Follow {
+        self.channel(id).map_or(Follow::Nothing, |(_, c)| c.follow)
     }
 
     /// The team and channel a conversation belongs to, if it's a channel.

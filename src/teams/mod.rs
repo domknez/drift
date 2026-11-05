@@ -1066,7 +1066,7 @@ mod tests {
             id: "19:x".into(),
             kind: Kind::Chat,
             title: String::new(),
-            last: Some(Preview { author: "Lea".into(), author_id: String::new(), text: "hi".into(), at: 1 }),
+            last: Some(Preview { author: "Lea".into(), author_id: String::new(), text: "hi".into(), at: 1, reply: false }),
             unread: false,
             read_up_to: None,
             pinned: false,

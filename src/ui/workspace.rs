@@ -6,7 +6,8 @@ use super::pictures::Pictures;
 use crate::backend::{Backend, Error, Push};
 use crate::model::markdown::{self, Mention};
 use crate::model::{
-    Availability, Conversation, ConversationId, Directory, Kind, Meeting, Message, Picture, Presence, Preview, SearchHit, Status, text,
+    Availability, Conversation, ConversationId, Directory, Follow, Kind, Meeting, Message, Picture, Presence, Preview, SearchHit, Status,
+    text,
 };
 use eframe::egui;
 use std::collections::{HashMap, HashSet};
@@ -782,18 +783,12 @@ impl Workspace {
             let newer = before.is_none_or(|at| last.at > at);
             let on_screen = focused && self.open.as_deref() == Some(c.id.as_str());
             let fresh = self.seen_once && newer && !c.muted && !on_screen;
-            let followed = c.kind == Kind::Channel && self.is_following(&c.id);
+            // Followed in drift: everything; in Teams: as set there. Teams' own Activity
+            // items for these come late or not at all, so the channel itself is watched.
+            let follow = if self.is_following(&c.id) { Follow::Everything } else { directory.follow(&c.id) };
             match c.kind {
                 Kind::Chat | Kind::Meeting if fresh && !self.is_mine(last) => new.push(c),
-                Kind::Channel if followed && fresh && !self.is_mine(last) => new.push(c),
-                Kind::Feed if fresh && self.notifications => {
-                    let (tx, id, ctx) = (self.clicked.0.clone(), c.id.clone(), ctx.clone());
-                    let body: String = last.text.chars().take(160).collect();
-                    crate::notify::show("New in Activity", None, &body, move || {
-                        let _ = tx.send(id);
-                        ctx.request_repaint();
-                    });
-                }
+                Kind::Channel if follow.covers(last) && fresh && !self.is_mine(last) => new.push(c),
                 _ => {}
             }
         }
@@ -1273,7 +1268,10 @@ impl Workspace {
         self.ring(ctx);
         if let Some(result) = self.activity_load.take() {
             match result {
-                Ok(feeds) => self.took_activity(feeds),
+                Ok(feeds) => {
+                    let new = self.took_activity(feeds);
+                    self.notify_activity(ctx, &new);
+                }
                 Err(Error::SignedOut) => return Some(Outcome::SignedOut),
                 Err(e) => self.failed(e),
             }
@@ -1743,11 +1741,15 @@ impl Workspace {
 
     /// Activity from its feeds, as one list by time. Posts in channels followed in Teams
     /// (the notifications feed has every one) are left out: they're in their channels.
-    fn took_activity(&mut self, feeds: Vec<(String, Vec<Message>)>) {
+    /// The feeds' items as Activity shows them; those new since the last time.
+    fn took_activity(&mut self, feeds: Vec<(String, Vec<Message>)>) -> Vec<Message> {
+        let before = (self.activity.is_some()).then(|| std::mem::take(&mut self.activity_newest));
         self.activity_feed.clear();
         self.activity_newest.clear();
         let mut items = Vec::new();
+        let mut new = Vec::new();
         for (feed, messages) in feeds {
+            let seen = before.as_ref().map(|b| b.get(&feed).copied().unwrap_or(0));
             if let Some(newest) = messages.iter().filter_map(|m| m.id.parse::<i64>().ok()).max() {
                 self.activity_newest.insert(feed.clone(), newest);
             }
@@ -1755,12 +1757,53 @@ impl Workspace {
                 if m.source.as_ref().is_some_and(|s| s.what == "follow") {
                     continue;
                 }
+                if seen.is_some_and(|seen| m.id.parse::<i64>().is_ok_and(|id| id > seen)) {
+                    new.push(m.clone());
+                }
                 self.activity_feed.insert(m.id.clone(), feed.clone());
                 items.push(m);
             }
         }
         items.sort_by_key(|m| m.at);
         self.activity = Some(items);
+        new.sort_by_key(|m| m.at);
+        new
+    }
+
+    /// New Activity items: a notification each (a click opens Activity). Mentions in
+    /// chats aren't, as the chat's own message already was; followed channels' posts
+    /// aren't in Activity's items at all (the channels notify themselves).
+    fn notify_activity(&self, ctx: &egui::Context, new: &[Message]) {
+        if !self.notifications {
+            return;
+        }
+        let directory = self.directory.as_ref();
+        let told_by_chat = |m: &Message| {
+            let Some(source) = &m.source else { return false };
+            let chat = directory.and_then(|d| d.conversation(&source.conversation));
+            source.what.starts_with("mention") && chat.is_some_and(|c| matches!(c.kind, Kind::Chat | Kind::Meeting) && !c.muted)
+        };
+        let new: Vec<&Message> = new.iter().filter(|m| m.author.id != self.me_id && !told_by_chat(m)).collect();
+        let Some(feed) = new.first().and_then(|m| self.activity_feed.get(&m.id)).cloned() else { return };
+        let click = || {
+            let (tx, feed, ctx) = (self.clicked.0.clone(), feed.clone(), ctx.clone());
+            move || {
+                let _ = tx.send(feed);
+                ctx.request_repaint();
+            }
+        };
+        if new.len() > 3 {
+            crate::notify::show(&format!("{} new in Activity", new.len()), None, "", click());
+            return;
+        }
+        for m in new {
+            let source = m.source.as_ref();
+            let verb = source.map_or("", |s| s.verb());
+            let title = if verb.is_empty() { m.author.name.clone() } else { format!("{} {verb}", m.author.name) };
+            let place = source.map(|s| s.title.as_str()).filter(|t| !t.is_empty());
+            let body: String = crate::model::text::flatten(&m.body).chars().take(160).collect();
+            crate::notify::show(&title, place, &body, click());
+        }
     }
 
     /// Up to which item a feed has been read.
@@ -2013,6 +2056,30 @@ mod tests {
     }
 
     #[test]
+    fn followed_channels_notify_as_set_in_teams() {
+        let mut ws = workspace("19:maya");
+        ws.notifications = true;
+        ws.me_id = crate::demo::ME.into();
+        let ctx = egui::Context::default();
+        let mut directory = crate::demo::Demo.directory().unwrap();
+        let set = |d: &mut Directory, id: &str, follow: Follow| {
+            d.teams.iter_mut().flat_map(|t| t.channels.iter_mut()).find(|c| c.id == id).unwrap().follow = follow;
+        };
+        set(&mut directory, "19:alerts@thread.tacv2", Follow::Posts);
+        set(&mut directory, "19:nightly@thread.tacv2", Follow::Posts);
+        ws.notify_new(&ctx, &directory);
+        let newer = |d: &mut Directory, id: &str, reply: bool| {
+            let last = d.conversations.iter_mut().find(|c| c.id == id).unwrap().last.as_mut().unwrap();
+            (last.at, last.author_id, last.reply) = (last.at + 60_000, "28:bot".into(), reply);
+        };
+        newer(&mut directory, "19:alerts@thread.tacv2", false); // a post, posts followed: yes
+        newer(&mut directory, "19:nightly@thread.tacv2", true); // a reply, only posts followed: no
+        newer(&mut directory, "19:design@thread.tacv2", false); // not followed: no
+        ws.notify_new(&ctx, &directory);
+        assert_eq!(ws.toasts.conversations(), ["19:alerts@thread.tacv2"]);
+    }
+
+    #[test]
     fn forwards_say_who_wrote_it_where() {
         let ws = workspace("19:maya");
         let m = ws.messages.iter().flatten().find(|m| m.id == "3006").unwrap();
@@ -2061,6 +2128,24 @@ mod tests {
         assert!(ws.activity_is_new(&items[1]), "still marked while Activity is shown");
         let d = ws.directory.as_ref().unwrap();
         assert_eq!(d.conversation("48:notifications").unwrap().read_up_to, Some(4102));
+    }
+
+    #[test]
+    fn new_activity_items_are_told_once() {
+        let mut ws = workspace("19:maya");
+        ws.directory = Some(crate::demo::Demo.directory().unwrap());
+        let load = || ["48:mentions", "48:notifications"].map(|f| (f.to_string(), crate::demo::Demo.messages(f).unwrap())).to_vec();
+        // The first load only says what's there.
+        assert!(ws.took_activity(load()).is_empty());
+        assert!(ws.took_activity(load()).is_empty());
+        let mut feeds = load();
+        let mut reaction = feeds[1].1.iter().find(|m| m.source.as_ref().unwrap().what == "reactionInChat").unwrap().clone();
+        reaction.id = "4200".into();
+        let mut follow = feeds[1].1.iter().find(|m| m.source.as_ref().unwrap().what == "follow").unwrap().clone();
+        follow.id = "4201".into();
+        feeds[1].1.extend([reaction, follow]);
+        let new = ws.took_activity(feeds);
+        assert_eq!(new.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), ["4200"]);
     }
 
     #[test]
