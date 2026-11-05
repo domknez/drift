@@ -139,7 +139,8 @@ fn flatten_with(body: &[Block], run: impl Fn(&Inline) -> String) -> String {
     let mut words = Vec::new();
     for block in body {
         match block {
-            Block::Text(runs) | Block::Quote(runs, _) => words.extend(runs.iter().map(&run)),
+            // A paragraph's runs run on (a bold word then its comma); blocks are spaced.
+            Block::Text(runs) | Block::Quote(runs, _) => words.push(runs.iter().map(&run).collect::<String>()),
             Block::Table { rows, .. } => words.extend(rows.iter().flatten().flatten().map(&run)),
             Block::Code(text) => words.push(text.clone()),
             Block::Image { .. } => words.push("[image]".into()),
@@ -656,6 +657,12 @@ mod tests {
                 Block::Image { .. } => vec!["<image>"],
             })
             .collect()
+    }
+
+    #[test]
+    fn flattens_runs_as_written() {
+        let body = from_html("<p>Also: <b>cut at 15:00</b>, then<br>next week.</p><p>Thanks</p>");
+        assert_eq!(flatten(&body), "Also: cut at 15:00, then next week. Thanks");
     }
 
     fn runs(blocks: &[Block]) -> &[Inline] {

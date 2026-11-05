@@ -106,6 +106,8 @@ impl App {
                 let (message, root) = (parts.next(), parts.next());
                 workspace.open_message(&open, message, root);
             }
+            // DRIFT_DEMO_PINS=1: the list of pinned messages open.
+            workspace.pins_open = std::env::var_os("DRIFT_DEMO_PINS").is_some();
             // DRIFT_DEMO_SWITCHER=<query>: the quick switcher open, with that typed.
             if let Ok(query) = std::env::var("DRIFT_DEMO_SWITCHER") {
                 workspace.switcher = Some(super::views::switcher::Switcher::with(&query));

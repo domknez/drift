@@ -49,6 +49,8 @@ pub enum Icon {
     File,
     /// A handset: a call.
     Phone,
+    /// A push pin: a pinned message.
+    Pin,
 }
 
 /// Paint `icon` into the square `rect`.
@@ -183,6 +185,12 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
                 (3.5, 5.5),
                 (5.0, 3.5),
             ]);
+        }
+        Icon::Pin => {
+            // A push pin leaning right: head, collar, needle.
+            line(&[(14.0, 3.0), (21.0, 10.0)]);
+            line(&[(15.5, 4.5), (11.5, 8.5), (7.5, 9.0), (15.0, 16.5), (15.5, 12.5), (19.5, 8.5)]);
+            line(&[(11.2, 12.8), (4.0, 20.0)]);
         }
         Icon::File => {
             line(&[(14.0, 3.0), (6.0, 3.0), (6.0, 21.0), (19.0, 21.0), (19.0, 8.0), (14.0, 3.0), (14.0, 8.0), (19.0, 8.0)]);

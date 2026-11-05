@@ -120,9 +120,16 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace) {
 
     head(ui, ws, header, &directory, &id);
     ui.painter().hline(full.x_range(), header.bottom() - 0.5, Stroke::new(1.0, p.line));
+    // The latest pinned message in a strip under the header.
+    let mut top = header.bottom();
+    if !ws.pinned.is_empty() {
+        let strip = Rect::from_min_size(pos2(full.left(), top), vec2(full.width(), PIN_STRIP));
+        pin_strip(ui, ws, strip);
+        top = strip.bottom();
+    }
 
     let bottom = if can_write { full.bottom() - composer_height(ws, false) } else { full.bottom() };
-    let body = Rect::from_min_max(pos2(full.left(), header.bottom()), pos2(full.right(), bottom));
+    let body = Rect::from_min_max(pos2(full.left(), top), pos2(full.right(), bottom));
     let mut page = ui.new_child(egui::UiBuilder::new().max_rect(body).layout(Layout::top_down(Align::Min)));
     let mut action = None;
     match ws.messages.clone() {
@@ -228,6 +235,9 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace) {
         apply(ui, ws, action, false);
     }
     notice(ui, ws, body);
+    if ws.pins_open && !ws.pinned.is_empty() {
+        pins(ui, ws, body);
+    }
     if can_write {
         let rect = Rect::from_min_max(pos2(full.left(), bottom), full.max);
         let name = conversation.as_ref().map_or(String::new(), |c| c.title.clone());
@@ -373,6 +383,148 @@ fn head(ui: &mut Ui, ws: &mut Workspace, rect: Rect, directory: &Directory, id: 
         if response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
             ws.stop_find();
         }
+    }
+}
+
+/// The pinned strip's height.
+const PIN_STRIP: f32 = 46.0;
+
+/// The latest pinned message, one line of it: clicked, it's shown where it is in the
+/// conversation (or, further back than what's loaded, in the list of pins). With more
+/// than one, a button for the list of them all.
+fn pin_strip(ui: &mut Ui, ws: &mut Workspace, rect: Rect) {
+    let p = colors();
+    let Some(m) = ws.pinned.first().cloned() else { return };
+    let count = ws.pinned.len();
+    let inner = rect.shrink2(vec2(metrics::PAGE_PAD, 0.0));
+    // The list's button on the right, the message filling the rest.
+    let all = (count > 1).then(|| {
+        let label = format!("{count} pinned");
+        let galley = ui.painter().layout_no_wrap(label, ty::small_strong(), p.dim);
+        let size = vec2(galley.size().x + 34.0, 28.0);
+        (Rect::from_min_size(pos2(inner.right() - size.x, rect.center().y - size.y / 2.0), size), galley)
+    });
+    let right = all.as_ref().map_or(inner.right(), |(r, _)| r.left() - 10.0);
+    let area = Rect::from_min_max(pos2(inner.left(), rect.top() + 4.0), pos2(right, rect.bottom() - 4.0));
+    let said = text::flatten(&m.body).split_whitespace().collect::<Vec<_>>().join(" ");
+    let response = ui.interact(area, ui.scope_id().with("pin-strip"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
+    widgets::control(ui, &response, egui::Role::Button, &format!("Pinned message from {}: {said}", m.author.name));
+    let response = response.on_hover_ui(|ui| {
+        ui.set_max_width(420.0);
+        ui.label(RichText::new(&m.author.name).font(ty::small_strong()).color(p.text));
+        ui.label(RichText::new(text::flatten(&m.body)).font(ty::small()).color(p.text));
+        ui.label(RichText::new(format!("{} · click to show it", ago(m.at))).font(ty::meta()).color(p.faint));
+    });
+    ui.painter().rect_filled(rect, CornerRadius::ZERO, p.panel);
+    if response.hovered() {
+        ui.painter().rect_filled(area.expand2(vec2(6.0, 0.0)), CornerRadius::same(8), p.hover);
+    }
+    // An accent bar, the pin, then who and what.
+    let bar = Rect::from_min_size(pos2(area.left(), area.top() + 5.0), vec2(3.0, area.height() - 10.0));
+    ui.painter().rect_filled(bar, CornerRadius::same(2), p.accent);
+    icons::paint(ui.painter(), Rect::from_center_size(pos2(bar.right() + 16.0, area.center().y), vec2(16.0, 16.0)), Icon::Pin, p.accent);
+    let text_rect = Rect::from_min_max(pos2(bar.right() + 32.0, area.top()), pos2(area.right() - 4.0, area.bottom()));
+    let mut t = ui.new_child(egui::UiBuilder::new().max_rect(text_rect).layout(Layout::top_down(Align::Min)));
+    t.add_space(3.0);
+    t.spacing_mut().item_spacing.y = 0.0;
+    let who = if count > 1 { format!("Pinned · {}", m.author.name) } else { format!("Pinned message · {}", m.author.name) };
+    t.add(egui::Label::new(RichText::new(who).font(ty::meta()).color(p.accent)).truncate().selectable(false));
+    t.add(egui::Label::new(RichText::new(said).font(ty::small()).color(p.text)).truncate().selectable(false));
+    if response.clicked() && !ws.show_pinned(&m.id) {
+        ws.pins_open = true;
+    }
+    if let Some((r, galley)) = all {
+        let b = ui.interact(r, ui.scope_id().with("pins-all"), Sense::click()).on_hover_text("All pinned messages");
+        widgets::control(ui, &b, egui::Role::Button, "All pinned messages");
+        let fill = if b.hovered() || ws.pins_open { p.hover } else { p.surface };
+        ui.painter().rect_filled(r, CornerRadius::same(8), fill);
+        let chevron = if ws.pins_open { Icon::ChevronUp } else { Icon::ChevronDown };
+        ui.painter().galley(pos2(r.left() + 10.0, r.center().y - galley.size().y / 2.0), galley, p.dim);
+        icons::paint(ui.painter(), Rect::from_center_size(pos2(r.right() - 13.0, r.center().y), vec2(13.0, 13.0)), chevron, p.dim);
+        if b.clicked() {
+            ws.pins_open = !ws.pins_open;
+        }
+    }
+    ui.painter().hline(rect.x_range(), rect.bottom() - 0.5, Stroke::new(1.0, p.line));
+}
+
+/// Every pinned message, the latest pinned first, over the top of the conversation:
+/// who, when, and all of what they said. One that's loaded is shown where it is when
+/// clicked. Esc or a click outside closes it.
+fn pins(ui: &mut Ui, ws: &mut Workspace, body: Rect) {
+    let p = colors();
+    let width = (body.width() - 2.0 * metrics::PAGE_PAD).clamp(200.0, 520.0);
+    let at = pos2(body.right() - metrics::PAGE_PAD - width, body.top() + 6.0);
+    let pinned = ws.pinned.clone();
+    let loaded: Vec<bool> = pinned.iter().map(|m| ws.messages.iter().flatten().any(|l| l.id == m.id)).collect();
+    let mut show = None;
+    let mut close = false;
+    let area = egui::Area::new(egui::Id::unique("pins")).order(egui::Order::Foreground).fixed_pos(at).show(ui.ctx(), |ui| {
+        Frame::new()
+            .fill(p.panel)
+            .stroke(Stroke::new(1.0, p.border))
+            .corner_radius(CornerRadius::same(12))
+            .shadow(egui::Shadow { offset: [0, 6], blur: 18, spread: 0, color: egui::Color32::from_black_alpha(50) })
+            .inner_margin(Margin::same(8))
+            .show(ui, |ui| {
+                ui.set_width(width - 16.0);
+                ui.horizontal(|ui| {
+                    ui.add_space(6.0);
+                    ui.label(RichText::new(format!("Pinned messages ({})", pinned.len())).font(ty::small_strong()).color(p.text));
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if widgets::icon_button(ui, Icon::Close, "Close").clicked() {
+                            close = true;
+                        }
+                    });
+                });
+                egui::ScrollArea::vertical().max_height((body.height() - 80.0).clamp(120.0, 420.0)).show(ui, |ui| {
+                    for (i, m) in pinned.iter().enumerate() {
+                        // The hover fill goes behind the item, drawn once it's laid out.
+                        let behind = ui.painter().add(egui::Shape::Noop);
+                        let item = Frame::new().inner_margin(Margin::symmetric(8, 6)).corner_radius(CornerRadius::same(8)).show(ui, |ui| {
+                            ui.set_width(ui.available_width());
+                            ui.horizontal(|ui| {
+                                ui.label(RichText::new(&m.author.name).font(ty::small_strong()).color(p.text));
+                                ui.label(RichText::new(ago(m.at)).font(ty::meta()).color(p.faint));
+                            });
+                            ui.add(
+                                egui::Label::new(RichText::new(text::flatten(&m.body)).font(ty::small()).color(p.text)).selectable(false),
+                            );
+                            if !loaded[i] {
+                                ui.label(RichText::new("Further back than what's loaded here").font(ty::meta()).color(p.faint));
+                            }
+                        });
+                        let r = item.response.rect;
+                        if loaded[i] {
+                            let b = ui
+                                .interact(r, ui.scope_id().with(("pin", &m.id)), Sense::click())
+                                .on_hover_cursor(egui::CursorIcon::PointingHand);
+                            widgets::control(ui, &b, egui::Role::Button, &format!("Show the message from {}", m.author.name));
+                            if b.hovered() {
+                                ui.painter().set(behind, egui::Shape::rect_filled(r, CornerRadius::same(8), p.hover));
+                            }
+                            if b.clicked() {
+                                show = Some(m.id.clone());
+                            }
+                        }
+                        if i + 1 < pinned.len() {
+                            ui.painter().hline(
+                                r.x_range().shrink(8.0),
+                                r.bottom() + ui.spacing().item_spacing.y / 2.0,
+                                Stroke::new(1.0, p.line),
+                            );
+                        }
+                    }
+                });
+            });
+    });
+    // The strip's own button toggles it: a click there isn't one outside.
+    let on_strip = ui.ctx().pointer_interact_pos().is_some_and(|pos| pos.y < body.top() && pos.y > body.top() - PIN_STRIP);
+    if close || ui.input(|i| i.key_pressed(egui::Key::Escape)) || (area.response.clicked_elsewhere() && !on_strip) {
+        ws.pins_open = false;
+    }
+    if let Some(id) = show {
+        ws.show_pinned(&id);
     }
 }
 

@@ -68,6 +68,13 @@ pub trait Backend: Send + Sync {
     /// The newest messages of a conversation, oldest first.
     fn messages(&self, conversation: &str) -> Result<Vec<Message>>;
 
+    /// The messages pinned in a conversation, the latest pinned first. A service
+    /// without pins has none.
+    fn pinned(&self, conversation: &str) -> Result<Vec<Message>> {
+        let _ = conversation;
+        Ok(Vec::new())
+    }
+
     /// A picture's image file (JPEG or PNG).
     fn picture(&self, picture: &Picture) -> Result<Vec<u8>>;
 

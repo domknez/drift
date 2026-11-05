@@ -70,6 +70,8 @@ a fraction of the memory the official app keeps busy doing nothing.
   ⌥↑ ⌥↓ for the previous or next conversation (with ⇧, the next unread); the menu
   under your picture lists every shortcut
 - **Pin and unpin** chats and channels from their right-click menu
+- **Pinned messages** in a strip under the conversation's header: click it to go to
+  the message, or open the list of all of them
 - **Read here, read in Teams:** opening a conversation marks it read for Teams too
 - **Messages as written:** bold, italics, strikethrough, code, tables, quotes, links,
   mentions and emoji; reactions under them; cards from bots and connectors (pull

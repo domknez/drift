@@ -184,6 +184,18 @@ pub fn messages(v: &Value, me: &str) -> Vec<Message> {
     out
 }
 
+/// The ids of the messages pinned in a thread (its `pinnedItems` property, JSON
+/// as text, pinned last at the end), the latest pinned first.
+pub fn pinned(thread: &Value) -> Vec<String> {
+    let items: Vec<Value> = thread["properties"]["pinnedItems"].as_str().and_then(|s| serde_json::from_str(s).ok()).unwrap_or_default();
+    items
+        .iter()
+        .rev()
+        .filter(|i| i["itemType"].as_str() == Some("Message"))
+        .filter_map(|i| i["itemId"].as_str().map(str::to_string))
+        .collect()
+}
+
 pub fn message(m: &Value, me: &str) -> Option<Message> {
     let kind = str_of(m, &["messagetype"])?;
     if !matches!(kind, "Text" | "RichText" | "RichText/Html" | "RichText/Media_Card") || m["properties"]["deletetime"].is_string() {
@@ -577,6 +589,14 @@ mod tests {
         assert_eq!(teams.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(), ["Halcyon", "Side project"]);
         assert_eq!(teams[0].channels.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["General", "PR Reviews"]);
         assert!(teams[0].channels[0].general);
+    }
+
+    #[test]
+    fn reads_what_is_pinned_latest_first() {
+        let pins = r#"[{"itemId":"1700000000001","itemType":"Message"},{"itemId":"x","itemType":"Other"},{"itemId":"1700000000002","itemType":"Message"}]"#;
+        let thread = json!({"properties": {"pinnedItems": pins}});
+        assert_eq!(pinned(&thread), ["1700000000002", "1700000000001"]);
+        assert!(pinned(&json!({"properties": {}})).is_empty());
     }
 
     #[test]

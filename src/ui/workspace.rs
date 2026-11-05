@@ -27,6 +27,8 @@ const MESSAGES_FRONT_EVERY: Duration = Duration::from_secs(5);
 /// How many of a conversation's newest messages are shown at first, and how many
 /// more each "Show earlier" adds.
 pub const NEWEST: usize = 40;
+/// How often the open conversation's pinned messages are fetched again.
+const PINNED_EVERY: Duration = Duration::from_secs(60);
 /// How often the calendar is fetched again.
 const CALENDAR_EVERY: Duration = Duration::from_secs(5 * 60);
 /// How often the user's status is fetched again (it changes in other clients too).
@@ -117,6 +119,14 @@ pub struct Workspace {
     read_load: Load<(ConversationId, Vec<(String, i64)>), Error>,
     read_at: Option<Instant>,
     messages_load: Load<(ConversationId, Vec<Message>), Error>,
+    /// The open conversation's pinned messages, the latest pinned first (as last
+    /// fetched for each conversation, shown at once when it's opened again).
+    pub pinned: Vec<Message>,
+    pinned_cache: HashMap<String, Vec<Message>>,
+    pinned_load: Load<(ConversationId, Vec<Message>), Error>,
+    pinned_at: Option<Instant>,
+    /// Whether the list of the open conversation's pinned messages is showing.
+    pub pins_open: bool,
     /// Conversations' messages as last fetched, shown at once when one is opened
     /// (and fetched again behind); the newest few are fetched ahead.
     cache: HashMap<String, Vec<Message>>,
@@ -388,6 +398,11 @@ impl Workspace {
             read_load: Load::Idle,
             read_at: None,
             messages_load: Load::Idle,
+            pinned: Vec::new(),
+            pinned_cache: HashMap::new(),
+            pinned_load: Load::Idle,
+            pinned_at: None,
+            pins_open: false,
             cache: HashMap::new(),
             prefetch: Vec::new(),
             prefetch_load: Load::Idle,
@@ -909,6 +924,19 @@ impl Workspace {
         self.focus_scrolled = false;
     }
 
+    /// Show a pinned message where it is in the conversation, marked (and its thread,
+    /// if it's a reply); false if it's further back than what's loaded.
+    pub fn show_pinned(&mut self, id: &str) -> bool {
+        let Some(m) = self.messages.iter().flatten().find(|m| m.id == id) else { return false };
+        if m.root.is_some() {
+            self.thread = m.root.clone();
+        }
+        self.focus = Some(id.to_string());
+        self.focus_scrolled = false;
+        self.pins_open = false;
+        true
+    }
+
     /// The open conversation's messages that match what's being found, newest first.
     pub fn found(&self) -> Vec<Message> {
         let Some(query) = self.find.as_deref().map(str::trim).filter(|q| !q.is_empty()).map(str::to_lowercase) else { return Vec::new() };
@@ -1324,6 +1352,17 @@ impl Workspace {
                 Err(e) => log_debug!("status: {e}"),
             }
         }
+        if let Some(result) = self.pinned_load.take() {
+            match result {
+                Ok((id, pinned)) => {
+                    if Some(&id) == self.open.as_ref() {
+                        self.pinned = pinned.clone();
+                    }
+                    self.pinned_cache.insert(id, pinned);
+                }
+                Err(e) => log_debug!("pinned messages: {e}"),
+            }
+        }
         if let Some(result) = self.read_load.take() {
             match result {
                 Ok((id, positions)) if Some(&id) == self.open.as_ref() => {
@@ -1389,6 +1428,14 @@ impl Workspace {
             self.messages_at = Some(Instant::now());
             let backend = self.backend.clone();
             self.messages_load = Load::start(ctx, move || backend.messages(&id).map(|m| (id, m)));
+        }
+        if let Some(id) = self.open.clone()
+            && !self.pinned_load.is_running()
+            && due(self.pinned_at, PINNED_EVERY)
+        {
+            self.pinned_at = Some(Instant::now());
+            let backend = self.backend.clone();
+            self.pinned_load = Load::start(ctx, move || backend.pinned(&id).map(|m| (id, m)));
         }
         // The newest conversations fetched ahead, one at a time, behind everything else.
         if !self.prefetch_load.is_running()
@@ -1709,6 +1756,10 @@ impl Workspace {
         });
         self.read_by.clear();
         self.read_at = None;
+        self.pinned = self.pinned_cache.get(id).cloned().unwrap_or_default();
+        self.pinned_load = Load::Idle;
+        self.pinned_at = None;
+        self.pins_open = false;
         self.messages_load = Load::Idle;
         self.messages_at = None;
         self.thread = None;

@@ -388,6 +388,23 @@ impl Backend for Demo {
         ])
     }
 
+    fn pinned(&self, conversation: &str) -> Result<Vec<Message>> {
+        if conversation != "19:maya" {
+            return Ok(Vec::new());
+        }
+        let cut = self.messages(conversation)?.into_iter().find(|m| m.id == "3006");
+        let older = message(
+            "2001",
+            None,
+            "maya",
+            today(9, 15) - 9 * 86_400_000,
+            "<p>Staging lives at <b>staging.example.com</b> now. Ask in #infra for an account, and please don't share the admin login in chats.</p>",
+            None,
+            vec![],
+        );
+        Ok(cut.into_iter().chain([older]).collect())
+    }
+
     fn picture(&self, picture: &Picture) -> Result<Vec<u8>> {
         match picture {
             // Emoji are public; people in the demo have no photos.

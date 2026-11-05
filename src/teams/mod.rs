@@ -29,6 +29,8 @@ const AMS_AGENT: &str = "SkypeOfficialClient/0/0.0.0.0";
 const PRESENCE_CLIENT_VERSION: &str = "49/25113001312";
 /// Messages fetched when a conversation opens.
 const PAGE: usize = 200;
+/// At most this many pinned messages are fetched for a conversation.
+const PINS: usize = 10;
 /// The kinds of conversation the chat service lists.
 const TARGETS: &str = "targetType=Passport|Skype|Lync|Thread|PSTN|Agent";
 
@@ -818,6 +820,29 @@ impl Backend for Teams {
             http::encode(conversation)
         );
         Ok(parse::messages(&self.chat_service(&path)?, &self.my_id()))
+    }
+
+    fn pinned(&self, conversation: &str) -> Result<Vec<Message>> {
+        // Activity's feeds and your own notes have nothing pinned.
+        if conversation.starts_with("48:") {
+            return Ok(Vec::new());
+        }
+        let thread = self.chat_service(&format!("/v1/threads/{}?view=msnp24Equivalent", http::encode(conversation)))?;
+        let me = self.my_id();
+        let mut out = Vec::new();
+        for id in parse::pinned(&thread).into_iter().take(PINS) {
+            let path = format!(
+                "/v1/users/ME/conversations/{}/messages/{id}?view=msnp24Equivalent|supportsMessageProperties",
+                http::encode(conversation)
+            );
+            // One from before the user joined (history not shared) is refused: left out.
+            match self.chat_service(&path) {
+                Ok(m) => out.extend(parse::message(&m, &me)),
+                Err(Error::SignedOut) => return Err(Error::SignedOut),
+                Err(e) => log_debug!("a pinned message: {e}"),
+            }
+        }
+        Ok(out)
     }
 
     fn picture(&self, picture: &Picture) -> Result<Vec<u8>> {
