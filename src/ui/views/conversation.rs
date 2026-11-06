@@ -388,6 +388,8 @@ fn head(ui: &mut Ui, ws: &mut Workspace, rect: Rect, directory: &Directory, id: 
 
 /// The pinned strip's height.
 const PIN_STRIP: f32 = 46.0;
+/// How much of a pinned message its hover shows, in characters.
+const PIN_HOVER: usize = 400;
 
 /// The latest pinned message, one line of it: clicked, it's shown where it is in the
 /// conversation (or, further back than what's loaded, in the list of pins). With more
@@ -406,13 +408,18 @@ fn pin_strip(ui: &mut Ui, ws: &mut Workspace, rect: Rect) {
     });
     let right = all.as_ref().map_or(inner.right(), |(r, _)| r.left() - 10.0);
     let area = Rect::from_min_max(pos2(inner.left(), rect.top() + 4.0), pos2(right, rect.bottom() - 4.0));
-    let said = text::flatten(&m.body).split_whitespace().collect::<Vec<_>>().join(" ");
+    let said = text::flatten(&m.body);
     let response = ui.interact(area, ui.scope_id().with("pin-strip"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
     widgets::control(ui, &response, egui::Role::Button, &format!("Pinned message from {}: {said}", m.author.name));
     let response = response.on_hover_ui(|ui| {
         ui.set_max_width(420.0);
         ui.label(RichText::new(&m.author.name).font(ty::small_strong()).color(p.text));
-        ui.label(RichText::new(text::flatten(&m.body)).font(ty::small()).color(p.text));
+        // A long one (a whole table, say) is for the list of pins.
+        let mut short: String = said.chars().take(PIN_HOVER).collect();
+        if short.len() < said.len() {
+            short.push('…');
+        }
+        ui.label(RichText::new(short).font(ty::small()).color(p.text));
         ui.label(RichText::new(format!("{} · click to show it", ago(m.at))).font(ty::meta()).color(p.faint));
     });
     ui.painter().rect_filled(rect, CornerRadius::ZERO, p.panel);
@@ -453,7 +460,7 @@ fn pin_strip(ui: &mut Ui, ws: &mut Workspace, rect: Rect) {
 /// clicked. Esc or a click outside closes it.
 fn pins(ui: &mut Ui, ws: &mut Workspace, body: Rect) {
     let p = colors();
-    let width = (body.width() - 2.0 * metrics::PAGE_PAD).clamp(200.0, 520.0);
+    let width = (body.width() - 2.0 * metrics::PAGE_PAD).clamp(200.0, 640.0);
     let at = pos2(body.right() - metrics::PAGE_PAD - width, body.top() + 6.0);
     let pinned = ws.pinned.clone();
     let loaded: Vec<bool> = pinned.iter().map(|m| ws.messages.iter().flatten().any(|l| l.id == m.id)).collect();
@@ -487,9 +494,7 @@ fn pins(ui: &mut Ui, ws: &mut Workspace, body: Rect) {
                                 ui.label(RichText::new(&m.author.name).font(ty::small_strong()).color(p.text));
                                 ui.label(RichText::new(ago(m.at)).font(ty::meta()).color(p.faint));
                             });
-                            ui.add(
-                                egui::Label::new(RichText::new(text::flatten(&m.body)).font(ty::small()).color(p.text)).selectable(false),
-                            );
+                            widgets::blocks(ui, &mut ws.pictures, &m.body);
                             if !loaded[i] {
                                 ui.label(RichText::new("Further back than what's loaded here").font(ty::meta()).color(p.faint));
                             }

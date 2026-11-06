@@ -4,7 +4,9 @@ use super::style::icons::{self, Icon};
 use super::style::{colors, metrics, palette, typography as ty};
 use crate::model::{Availability, Block, Card, Inline, Picture, Presence, Reaction};
 use crate::ui::pictures::Pictures;
-use eframe::egui::{self, Align2, Color32, CornerRadius, Frame, Margin, Rect, Response, RichText, Sense, Stroke, TextureId, Ui, vec2};
+use eframe::egui::{
+    self, Align2, Color32, CornerRadius, Frame, Margin, Rect, Response, RichText, Sense, Stroke, TextureId, Ui, pos2, vec2,
+};
 
 /// A round avatar: the picture once it's loaded, the initials until then.
 pub fn avatar(ui: &mut Ui, id: &str, name: &str, size: f32, picture: Option<TextureId>) -> Response {
@@ -142,6 +144,8 @@ thread_local! {
     static HIGHLIGHT: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
     /// Emoji are drawn bigger still: the message is nothing but emoji.
     static JUMBO: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// A table's cells are being drawn.
+    static IN_TABLE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// Draw emoji in message text from now on at their biggest (a message of only emoji), or not.
@@ -201,7 +205,9 @@ pub fn rich_text(ui: &mut Ui, pictures: &mut Pictures, body: &[Inline], color: C
                 continue;
             }
             // A line of nothing but emoji shows them big, as chat apps do.
-            let line_is_emoji_only = line.iter().all(|(text, run)| run.span.emoji.is_some() || text.trim().is_empty());
+            // Not in a table's cell: there they keep the size of the text beside them.
+            let line_is_emoji_only =
+                !IN_TABLE.with(std::cell::Cell::get) && line.iter().all(|(text, run)| run.span.emoji.is_some() || text.trim().is_empty());
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
                 for (text, run) in line {
@@ -397,19 +403,29 @@ fn quote(ui: &mut Ui, pictures: &mut Pictures, runs: &[Inline], clickable: bool)
 fn table(ui: &mut Ui, pictures: &mut Pictures, rows: &[Vec<Vec<Inline>>], header: bool) {
     let p = colors();
     let columns = rows.iter().map(Vec::len).max().unwrap_or(0);
-    Frame::new().stroke(Stroke::new(1.0, p.line)).corner_radius(CornerRadius::same(metrics::RADIUS)).show(ui, |ui| {
+    Frame::new().stroke(Stroke::new(1.0, p.border)).corner_radius(CornerRadius::same(metrics::RADIUS)).show(ui, |ui| {
         // Too wide a table is cut at the bubble's edge (no sideways scroll area: inside
         // the scrolling list it flips its scroll bar every frame, and the list flickers).
-        let clip = ui.clip_rect().intersect(ui.max_rect());
-        ui.scope(|ui| {
+        // Sideways only: a bubble's height isn't known yet, its max rect has none.
+        let mut clip = ui.clip_rect();
+        clip.set_right(clip.right().min(ui.max_rect().right()));
+        let room = ui.available_width();
+        let inner = egui::UiBuilder::new().max_rect(ui.available_rect_before_wrap()).layout(egui::Layout::top_down(egui::Align::Min));
+        let mut cut = ui.new_child(inner);
+        {
+            let ui = &mut cut;
             ui.set_clip_rect(clip);
             let id = ui.next_auto_id();
-            egui::Grid::new(id).spacing(vec2(0.0, 0.0)).min_col_width(40.0).max_col_width(320.0).show(ui, |ui| {
-                for (r, row) in rows.iter().enumerate() {
-                    let is_header = header && r == 0;
-                    for c in 0..columns {
-                        let response = Frame::new()
-                            .fill(if is_header { p.hover } else { egui::Color32::TRANSPARENT })
+            let header_fill = ui.painter().add(egui::Shape::Noop);
+            // Where the lines go: a row's cells are as tall as they need, the lines as the row.
+            let mut bottoms = Vec::with_capacity(rows.len());
+            let mut lefts = vec![f32::INFINITY; columns];
+            IN_TABLE.with(|t| t.set(true));
+            let grid = egui::Grid::new(id).spacing(vec2(0.0, 0.0)).min_col_width(40.0).max_col_width(320.0).show(ui, |ui| {
+                for row in rows {
+                    let mut bottom = f32::NEG_INFINITY;
+                    for (c, left) in lefts.iter_mut().enumerate() {
+                        let cell = Frame::new()
                             .inner_margin(Margin::symmetric(10, 6))
                             .show(ui, |ui| match row.get(c) {
                                 Some(cell) if !cell.is_empty() => rich_text(ui, pictures, cell, p.text),
@@ -417,19 +433,34 @@ fn table(ui: &mut Ui, pictures: &mut Pictures, rows: &[Vec<Vec<Inline>>], header
                                     ui.label("");
                                 }
                             })
-                            .response;
-                        let r = response.rect;
-                        if c > 0 {
-                            ui.painter().vline(r.left(), r.y_range(), Stroke::new(1.0, p.line));
-                        }
-                        if !std::ptr::eq(row, rows.last().expect("a row")) {
-                            ui.painter().hline(r.x_range(), r.bottom(), Stroke::new(1.0, p.line));
-                        }
+                            .response
+                            .rect;
+                        *left = left.min(cell.left());
+                        bottom = bottom.max(cell.bottom());
                     }
+                    bottoms.push(bottom);
                     ui.end_row();
                 }
             });
-        });
+            IN_TABLE.with(|t| t.set(false));
+            let area = grid.response.rect;
+            if let Some(first) = bottoms.first().filter(|_| header) {
+                let radius = metrics::RADIUS;
+                let top = Rect::from_min_max(area.min, pos2(area.right(), *first));
+                ui.painter()
+                    .set(header_fill, egui::Shape::rect_filled(top, CornerRadius { nw: radius, ne: radius, sw: 0, se: 0 }, p.hover));
+            }
+            let line = Stroke::new(1.0, p.border);
+            for bottom in bottoms.iter().take(rows.len() - 1) {
+                ui.painter().hline(area.x_range(), *bottom, line);
+            }
+            for left in lefts.iter().skip(1).filter(|l| l.is_finite()) {
+                ui.painter().vline(*left, area.y_range(), line);
+            }
+        }
+        // It takes no more room than there is, whatever was cut.
+        let size = cut.min_rect().size();
+        ui.allocate_space(vec2(size.x.min(room), size.y));
     });
 }
 
