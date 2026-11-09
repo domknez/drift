@@ -16,6 +16,19 @@ pub fn init() {
     }
 }
 
+/// What the system lets drift do with notifications, for `drift notifications`.
+pub fn settings() -> String {
+    #[cfg(target_os = "macos")]
+    {
+        if !bundled() {
+            return "not run from drift.app: macOS notifications need the app bundle".into();
+        }
+        center::settings().unwrap_or_else(|| "macOS didn't say".into())
+    }
+    #[cfg(not(target_os = "macos"))]
+    "shown through the desktop's notification service".into()
+}
+
 /// Show a notification; `on_click` runs (on another thread) if the user clicks it.
 pub fn show(title: &str, subtitle: Option<&str>, body: &str, on_click: impl FnOnce() + Send + 'static) {
     // macOS shows nothing for a notification without a body (a bot's card, say).
@@ -130,6 +143,8 @@ mod center {
     /// What a click on each notification still up does, by its identifier.
     static CLICKS: Mutex<Option<HashMap<String, OnClick>>> = Mutex::new(None);
     static NEXT: AtomicU64 = AtomicU64::new(0);
+    /// When this run began (Unix milliseconds), for identifiers no earlier run used.
+    static STARTED: std::sync::OnceLock<u128> = std::sync::OnceLock::new();
 
     define_class!(
         #[unsafe(super(NSObject))]
@@ -175,15 +190,49 @@ mod center {
         center.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
         // The center holds its delegate weakly; this one lives as long as drift.
         std::mem::forget(delegate);
-        let done = RcBlock::new(|granted: Bool, _error: *mut NSError| {
-            if !granted.as_bool() {
+        let done = RcBlock::new(|granted: Bool, error: *mut NSError| {
+            if let Some(error) = unsafe { error.as_ref() } {
+                log_warn!("couldn't ask to notify: {}", error.localizedDescription());
+            } else if !granted.as_bool() {
                 log_warn!("notifications are not allowed for drift");
             }
+            log_info!("notifications: {}", settings().unwrap_or_else(|| "unknown".into()));
         });
         center.requestAuthorizationWithOptions_completionHandler(
             UNAuthorizationOptions::Alert | UNAuthorizationOptions::Sound | UNAuthorizationOptions::Badge,
             &done,
         );
+    }
+
+    /// What macOS lets drift do, as System Settings → Notifications has it.
+    pub fn settings() -> Option<String> {
+        use objc2_user_notifications::{UNAlertStyle, UNAuthorizationStatus, UNNotificationSetting, UNNotificationSettings};
+        let (tx, rx) = std::sync::mpsc::channel();
+        let done = RcBlock::new(move |settings: std::ptr::NonNull<UNNotificationSettings>| {
+            let s = unsafe { settings.as_ref() };
+            let status = match s.authorizationStatus() {
+                UNAuthorizationStatus::NotDetermined => "not asked yet",
+                UNAuthorizationStatus::Denied => "not allowed",
+                UNAuthorizationStatus::Authorized => "allowed",
+                UNAuthorizationStatus::Provisional => "allowed quietly (provisional)",
+                _ => "other",
+            };
+            let style = match s.alertStyle() {
+                UNAlertStyle::None => "none",
+                UNAlertStyle::Banner => "banners",
+                UNAlertStyle::Alert => "alerts",
+                _ => "other",
+            };
+            let on = |setting: UNNotificationSetting| if setting == UNNotificationSetting::Enabled { "on" } else { "off" };
+            let _ = tx.send(format!(
+                "{status}; style: {style}; alerts {}, sound {}, in Notification Center {}",
+                on(s.alertSetting()),
+                on(s.soundSetting()),
+                on(s.notificationCenterSetting())
+            ));
+        });
+        UNUserNotificationCenter::currentNotificationCenter().getNotificationSettingsWithCompletionHandler(&done);
+        rx.recv_timeout(std::time::Duration::from_secs(5)).ok()
     }
 
     pub fn show(title: &str, subtitle: Option<&str>, body: &str, on_click: OnClick) {
@@ -195,7 +244,11 @@ mod center {
         content.setBody(&NSString::from_str(body));
         // drift's own sound (in the app bundle), as Teams has its own.
         content.setSound(Some(&UNNotificationSound::soundNamed(&NSString::from_str("message.wav"))));
-        let id = format!("drift-{}", NEXT.fetch_add(1, Ordering::Relaxed));
+        // Unique across runs too: a notification with the identifier of one still in
+        // Notification Center (from an earlier run) replaces it quietly, with no banner.
+        let started =
+            *STARTED.get_or_init(|| std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis()));
+        let id = format!("drift-{started}-{}", NEXT.fetch_add(1, Ordering::Relaxed));
         if let Ok(mut clicks) = CLICKS.lock() {
             let clicks = clicks.get_or_insert_default();
             // Old notifications' clicks are dropped once there are many.

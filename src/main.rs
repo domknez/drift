@@ -28,6 +28,10 @@ fn main() -> eframe::Result {
         shape();
         return Ok(());
     }
+    if std::env::args().nth(1).as_deref() == Some("notifications") {
+        println!("{}", notify::settings());
+        return Ok(());
+    }
     if std::env::args().nth(1).as_deref() == Some("status") {
         status();
         return Ok(());
