@@ -148,8 +148,24 @@ pub fn conversations(v: &Value) -> Vec<Conversation> {
 fn preview(m: &Value) -> Option<Preview> {
     let at = str_of(m, &["composetime", "composeTime", "originalarrivaltime", "originalArrivalTime"]).and_then(time::parse_iso)?;
     let content = str_of(m, &["content"]).unwrap_or("");
-    let html = str_of(m, &["messagetype", "messageType"]).is_some_and(|t| t.starts_with("RichText"));
-    let body = if html { text::from_html(content) } else { text::plain(content) };
+    let kind = str_of(m, &["messagetype", "messageType"]).unwrap_or("");
+    let body = if kind.starts_with("RichText") { text::from_html(content) } else { text::plain(content) };
+    // A card's markup says little or nothing: what the card says, and its title.
+    let mut text = text::flatten(&body);
+    if kind == "RichText/Media_Card" || text.trim().is_empty() {
+        let swift = (kind == "RichText/Media_Card").then(|| swift(content)).flatten();
+        let summary = swift.as_ref().and_then(|s| s["summary"].as_str()).map(|s| text::flatten(&text::plain(s))).unwrap_or_default();
+        let card = swift.as_ref().and_then(|s| card(&s["attachments"])).or_else(|| card(&m["properties"]["cards"]));
+        let title = card.map(|c| c.title).unwrap_or_default();
+        let said = match (summary.trim(), title.trim()) {
+            ("", t) | (t, "") => t.to_string(),
+            (s, t) if s == t => s.to_string(),
+            (s, t) => format!("{s}: {t}"),
+        };
+        if !said.is_empty() {
+            text = said;
+        }
+    }
     let author = str_of(m, &["imdisplayname", "imDisplayName"]).unwrap_or("").to_string();
     // `from` is a link ending in the author's id.
     let from = str_of(m, &["from"]).unwrap_or("");
@@ -159,7 +175,7 @@ fn preview(m: &Value) -> Option<Preview> {
     let link_root = str_of(m, &["conversationLink"]).and_then(|l| l.split_once(";messageid=")).map(|(_, r)| r);
     let root = str_of(m, &["rootMessageId"]).or(link_root);
     let reply = !id.is_empty() && root.is_some_and(|r| r != id);
-    Some(Preview { author, author_id, text: text::flatten(&body), at, reply })
+    Some(Preview { author, author_id, text, at, reply })
 }
 
 /// What in a channel notifies: its notification settings (JSON in a string), or
@@ -758,6 +774,9 @@ mod tests {
         assert_eq!(card.link.as_deref(), Some("https://dev.example.com/pr/10499"));
         assert_eq!(card.detail, "Active | pm-ui");
         assert_eq!(card.facts.len(), 2);
+        // The list's preview of it says what the card does (macOS shows no notification without text).
+        let last = json!({"id": "1", "messagetype": "RichText/Media_Card", "content": content, "composetime": "2026-10-30T10:42:00Z"});
+        assert_eq!(preview(&last).unwrap().text, "Lea created a pull request: 10499: feat(timelines): pan by dragging");
     }
 
     #[test]

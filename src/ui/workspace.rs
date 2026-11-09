@@ -834,7 +834,11 @@ impl Workspace {
             let Some(last) = &c.last else { continue };
             let one_to_one = c.kind == Kind::Chat && c.members.len() <= 1;
             let place = (!one_to_one).then_some(c.title.as_str());
-            let body: String = last.text.chars().take(160).collect();
+            let mut body: String = last.text.chars().take(160).collect();
+            // A bot's card comes without text in the list.
+            if body.trim().is_empty() {
+                body = if c.kind == Kind::Channel { "New post" } else { "New message" }.into();
+            }
             // In front: a toast in the corner; otherwise the system's notification.
             if focused {
                 self.toasts.push(&last.author, place, &body, &c.id);
@@ -1844,7 +1848,9 @@ impl Workspace {
             }
         };
         if new.len() > 3 {
-            crate::notify::show(&format!("{} new in Activity", new.len()), None, "", click());
+            let who: Vec<&str> =
+                new.iter().map(|m| m.author.name.as_str()).collect::<std::collections::BTreeSet<_>>().into_iter().collect();
+            crate::notify::show(&format!("{} new in Activity", new.len()), None, &who.join(", "), click());
             return;
         }
         for m in new {

@@ -18,6 +18,8 @@ pub fn init() {
 
 /// Show a notification; `on_click` runs (on another thread) if the user clicks it.
 pub fn show(title: &str, subtitle: Option<&str>, body: &str, on_click: impl FnOnce() + Send + 'static) {
+    // macOS shows nothing for a notification without a body (a bot's card, say).
+    let body = if body.trim().is_empty() { "New message" } else { body };
     // Outside the app bundle drift has no identity of its own on macOS: a notification
     // would come from an app called "use_default", and a click on it would ask where
     // that app is. There, only the toasts in the window tell of new messages.
