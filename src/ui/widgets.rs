@@ -257,7 +257,7 @@ pub fn rich_text(ui: &mut Ui, pictures: &mut Pictures, body: &[Inline], color: C
                         // A link is text like the rest (selected and copied with it, wrapped
                         // when long) that opens its address when clicked.
                         (Some(url), _) => {
-                            let link = ui.add(egui::Label::new(rich.color(p.accent)).selectable(true).sense(Sense::click()));
+                            let link = selectable(ui, egui::Label::new(rich.color(p.accent)).sense(Sense::click()));
                             let link = link.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(url);
                             if link.clicked() {
                                 ui.ctx().open_url(egui::OpenUrl::new_tab(url));
@@ -270,18 +270,33 @@ pub fn rich_text(ui: &mut Ui, pictures: &mut Pictures, body: &[Inline], color: C
                                 if hit {
                                     piece = piece.background_color(MARK);
                                 }
-                                ui.add(egui::Label::new(piece).selectable(true));
+                                selectable(ui, egui::Label::new(piece));
                             }
                         }
                         // Message text can be selected and copied (across runs and lines too).
                         (None, _) => {
-                            ui.add(egui::Label::new(rich).selectable(true));
+                            selectable(ui, egui::Label::new(rich));
                         }
                     }
                 }
             });
         }
     });
+}
+
+/// Message text that can be selected and copied. egui follows a selection only
+/// through the text on screen, and drops it once either end has scrolled out of
+/// view; so while a selection is being made (or is there), the text out of view
+/// takes part too, and a selection can be dragged on while the list scrolls.
+fn selectable(ui: &mut Ui, label: egui::Label) -> Response {
+    use egui::text_selection::LabelSelectionState;
+    let (pos, galley, response) = label.selectable(true).layout_in_ui(ui);
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), galley.text()));
+    let selecting = || ui.input(|i| i.pointer.primary_down()) || ui.ctx().plugin::<LabelSelectionState>().lock().has_selection();
+    if ui.is_visible() && (ui.is_rect_visible(response.rect) || selecting()) {
+        LabelSelectionState::label_text_selection(ui, &response, pos, galley, ui.style().visuals.text_color(), Stroke::NONE);
+    }
+    response
 }
 
 /// What was clicked in a message's blocks.
