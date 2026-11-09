@@ -1626,13 +1626,16 @@ impl Workspace {
     fn with_sent_here(&mut self, id: &str, messages: &mut Vec<Message>) {
         let now = crate::model::time::now_ms();
         let me = self.me_id.clone();
+        // What a message says, without its pictures: those sent with it come back in
+        // Teams' copy, but aren't in the one shown here.
+        let said = |body: &[crate::model::Block]| {
+            text::flatten(&body.iter().filter(|b| !matches!(b, crate::model::Block::Image { .. })).cloned().collect::<Vec<_>>())
+        };
         self.sent_here.retain(|(c, shown)| {
             if c != id {
                 return now - shown.at < 120_000;
             }
-            let listed = messages
-                .iter()
-                .any(|m| m.author.id == me && m.at >= shown.at - 60_000 && text::flatten(&m.body) == text::flatten(&shown.body));
+            let listed = messages.iter().any(|m| m.author.id == me && m.at >= shown.at - 60_000 && said(&m.body) == said(&shown.body));
             !listed && now - shown.at < 120_000
         });
         for (_, shown) in self.sent_here.iter().filter(|(c, _)| c == id) {
@@ -2164,6 +2167,16 @@ mod tests {
         ws.with_sent_here("19:maya", &mut after);
         assert!(!after.iter().any(|m| m.sending));
         assert!(ws.sent_here.is_empty());
+        // Sent with a picture: Teams' copy has the picture too, and is the same message.
+        ws.draft = "a picture of it".into();
+        ws.send(&egui::Context::default(), false);
+        let last = ws.messages.as_ref().unwrap().last().unwrap().clone();
+        let mut listed = crate::demo::Demo.messages("19:maya").unwrap();
+        let mut body = vec![crate::model::Block::Image { url: "https://example.com/a.png".into(), size: None }];
+        body.extend(last.body.clone());
+        listed.push(Message { id: "10000".into(), sending: false, at: last.at + 500, body, ..last.clone() });
+        ws.with_sent_here("19:maya", &mut listed);
+        assert!(!listed.iter().any(|m| m.sending));
     }
 
     #[test]
