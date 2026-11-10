@@ -1466,7 +1466,9 @@ pub fn composer(ui: &mut Ui, ws: &mut Workspace, rect: Rect, hint: &str, reply: 
             pos2(rect.left() + metrics::PAGE_PAD, rect.top() + 6.0),
             pos2(rect.right() - metrics::PAGE_PAD, rect.top() + BANNER),
         );
-        let mut row = ui.new_child(egui::UiBuilder::new().max_rect(line).layout(Layout::left_to_right(Align::Center)));
+        // Each chip as tall as its × (30): centred in the line, a chip came out taller
+        // than it, and each one lower than the one before, onto the box below.
+        let mut row = ui.new_child(egui::UiBuilder::new().max_rect(line).layout(Layout::left_to_right(Align::Min)));
         row.spacing_mut().item_spacing.x = 6.0;
         let mut remove = None;
         for (i, (r, a)) in ws.attachments.iter().enumerate() {
@@ -1476,7 +1478,7 @@ pub fn composer(ui: &mut Ui, ws: &mut Workspace, rect: Rect, hint: &str, reply: 
             Frame::new()
                 .fill(p.surface)
                 .corner_radius(CornerRadius::same(10))
-                .inner_margin(Margin { left: 10, right: 4, top: 4, bottom: 4 })
+                .inner_margin(Margin { left: 10, right: 0, top: 0, bottom: 0 })
                 .show(&mut row, |ui| {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 6.0;
