@@ -225,9 +225,10 @@ mod center {
             };
             let on = |setting: UNNotificationSetting| if setting == UNNotificationSetting::Enabled { "on" } else { "off" };
             let _ = tx.send(format!(
-                "{status}; style: {style}; alerts {}, sound {}, in Notification Center {}",
+                "{status}; style: {style}; alerts {}, sound {}, badge {}, in Notification Center {}",
                 on(s.alertSetting()),
                 on(s.soundSetting()),
+                on(s.badgeSetting()),
                 on(s.notificationCenterSetting())
             ));
         });

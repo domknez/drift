@@ -785,6 +785,21 @@ impl Workspace {
         }
     }
 
+    /// The count on the Dock icon: conversations with something unread that notify,
+    /// chats and meeting chats, and channels followed (in Teams or in drift). Not
+    /// muted ones.
+    fn badge_count(&self, d: &Directory) -> usize {
+        d.conversations
+            .iter()
+            .filter(|c| c.unread && !c.muted)
+            .filter(|c| match c.kind {
+                Kind::Chat | Kind::Meeting => true,
+                Kind::Channel => self.is_following(&c.id) || d.follow(&c.id) != Follow::Nothing,
+                _ => false,
+            })
+            .count()
+    }
+
     /// Notifications for messages newer than the last ones seen: in chats and meeting
     /// chats (not the user's own, not muted ones, not the one on screen while drift is
     /// in front), in channels followed in drift every post, and in other channels only
@@ -1111,8 +1126,13 @@ impl Workspace {
         self.following.as_ref().is_some_and(|f| f.contains(id))
     }
 
-    /// Mark the open conversation read up to its newest message, once per message.
+    /// Mark the open conversation read up to its newest message, once per message;
+    /// only while drift is in front, so what comes in while the user is elsewhere
+    /// stays unread (on the Dock icon too) until they come back to it.
     fn mark_read(&mut self, ctx: &egui::Context) {
+        if !ctx.input(|i| i.viewport().focused.unwrap_or(true)) {
+            return;
+        }
         let (Some(open), Some(last)) = (self.open.clone(), self.messages.as_ref().and_then(|m| m.last()).map(|m| m.id.clone())) else {
             return;
         };
@@ -1200,10 +1220,7 @@ impl Workspace {
             ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
             ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
         }
-        let unread = self
-            .directory
-            .as_ref()
-            .map_or(0, |d| d.conversations.iter().filter(|c| c.unread && !c.muted && matches!(c.kind, Kind::Chat | Kind::Meeting)).count());
+        let unread = self.directory.as_ref().map_or(0, |d| self.badge_count(d));
         if self.badge != Some(unread) {
             self.badge = Some(unread);
             crate::notify::badge(unread);
@@ -1415,6 +1432,10 @@ impl Workspace {
 
         let due = |at: Option<Instant>, every| at.is_none_or(|at: Instant| at.elapsed() >= every);
         let focused = ctx.input(|i| i.viewport().focused.unwrap_or(true));
+        // Back in front: what came in meanwhile in the open conversation is read now.
+        if focused {
+            self.mark_read(ctx);
+        }
         let (directory_every, messages_every) = match (self.live, focused) {
             (true, _) => (PUSHED_EVERY, PUSHED_EVERY),
             (false, true) => (DIRECTORY_EVERY, MESSAGES_FRONT_EVERY),
@@ -2137,6 +2158,41 @@ mod tests {
         newer(&mut directory, "19:design@thread.tacv2", false); // not followed: no
         ws.notify_new(&ctx, &directory);
         assert_eq!(ws.toasts.conversations(), ["19:alerts@thread.tacv2"]);
+    }
+
+    #[test]
+    fn what_comes_in_while_elsewhere_stays_unread() {
+        let mut ws = workspace("19:maya");
+        let in_front = |focused: bool| {
+            let ctx = egui::Context::default();
+            let mut raw = egui::RawInput::default();
+            raw.viewports.entry(egui::ViewportId::ROOT).or_default().focused = Some(focused);
+            ctx.begin_pass(raw);
+            ctx
+        };
+        ws.mark_read(&in_front(false));
+        assert!(ws.marked.is_none());
+        ws.mark_read(&in_front(true));
+        assert!(ws.marked.as_ref().is_some_and(|(c, _)| c == "19:maya"));
+    }
+
+    #[test]
+    fn the_dock_counts_unread_chats_and_followed_channels() {
+        let ws = workspace("19:maya");
+        let mut d = crate::demo::Demo.directory().unwrap();
+        for c in &mut d.conversations {
+            c.unread = false;
+        }
+        let set = |d: &mut Directory, id: &str, unread: bool, follow: Follow| {
+            d.conversations.iter_mut().find(|c| c.id == id).unwrap().unread = unread;
+            if let Some(c) = d.teams.iter_mut().flat_map(|t| t.channels.iter_mut()).find(|c| c.id == id) {
+                c.follow = follow;
+            }
+        };
+        set(&mut d, "19:maya", true, Follow::Nothing);
+        set(&mut d, "19:alerts@thread.tacv2", true, Follow::Posts); // followed: counts
+        set(&mut d, "19:design@thread.tacv2", true, Follow::Nothing); // not followed: doesn't
+        assert_eq!(ws.badge_count(&d), 2);
     }
 
     #[test]
