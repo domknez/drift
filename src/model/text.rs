@@ -14,6 +14,9 @@ pub struct Span {
     pub link: Option<String>,
     /// The text is an emoji the service has a picture of, by its key.
     pub emoji: Option<String>,
+    /// The text is the name of whoever wrote a quoted message, by their id (Teams
+    /// sometimes sends a placeholder for the name, so the id is what counts).
+    pub author: Option<String>,
 }
 
 /// A run of text in one style. Line breaks are `\n` inside the text.
@@ -223,6 +226,7 @@ pub fn from_html(html: &str) -> Vec<Block> {
 struct Open {
     name: String,
     link: Option<String>,
+    author: Option<String>,
 }
 
 #[derive(Default)]
@@ -260,6 +264,7 @@ impl Builder {
             mention: has(&["mention"]),
             link: self.stack.iter().rev().find_map(|o| o.link.clone()),
             emoji: None,
+            author: self.stack.iter().rev().find_map(|o| o.author.clone()),
         }
     }
 
@@ -374,7 +379,7 @@ impl Builder {
             }
             "li" => {
                 self.runs.block();
-                self.stack.push(Open { name, link: None });
+                self.stack.push(Open { name, link: None, author: None });
                 self.runs.text("• ", Span::default());
                 return;
             }
@@ -383,7 +388,11 @@ impl Builder {
         }
         let link = (name == "a").then(|| attr(attrs, "href").map(|h| decode(&h))).flatten().filter(|h| safe_link(h));
         let mention = attr(attrs, "itemtype").is_some_and(|t| t.ends_with("/Mention"));
-        self.stack.push(Open { name: if mention { "mention".into() } else { name }, link });
+        let author = (self.quote > 0 && attr(attrs, "itemprop").as_deref() == Some("mri"))
+            .then(|| attr(attrs, "itemid"))
+            .flatten()
+            .filter(|id| !id.is_empty());
+        self.stack.push(Open { name: if mention { "mention".into() } else { name }, link, author });
     }
 
     fn close(&mut self, name: &str) {
@@ -721,6 +730,15 @@ mod tests {
     fn reply_quotes_know_their_message() {
         let html = r#"<blockquote itemscope="" itemtype="http://schema.skype.com/Reply" itemid="1698"><strong itemprop="mri">Maya</strong><p itemprop="preview">old</p></blockquote><p>new</p>"#;
         assert!(matches!(&from_html(html)[0], Block::Quote(_, Some(id)) if id == "1698"));
+    }
+
+    #[test]
+    fn reply_quotes_know_their_author() {
+        let html = r#"<blockquote itemscope="" itemtype="http://schema.skype.com/Reply" itemid="1698"><strong itemprop="mri" itemid="8:orgid:abc">Display Name</strong><p itemprop="preview">old</p></blockquote>"#;
+        let Block::Quote(runs, _) = &from_html(html)[0] else { panic!() };
+        assert_eq!(runs[0].text, "Display Name");
+        assert_eq!(runs[0].span.author.as_deref(), Some("8:orgid:abc"));
+        assert_eq!(runs.last().unwrap().span.author, None);
     }
 
     #[test]

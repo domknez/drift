@@ -732,6 +732,21 @@ impl Workspace {
         names
     }
 
+    /// Names by id of whoever may have written a quoted message: as `names`, plus the
+    /// authors of the loaded messages, and the user by name rather than "You".
+    pub fn authors(&self) -> HashMap<String, String> {
+        let mut names = self.names();
+        for m in self.messages.iter().flatten() {
+            if !m.author.name.trim().is_empty() {
+                names.entry(m.author.id.clone()).or_insert_with(|| m.author.name.clone());
+            }
+        }
+        if !self.me_id.is_empty() && !self.me.trim().is_empty() {
+            names.insert(self.me_id.clone(), self.me.clone());
+        }
+        names
+    }
+
     /// The people who can be mentioned: those the user chats with, and everyone who
     /// wrote in the open conversation.
     pub fn people(&self) -> Vec<Mention> {

@@ -307,15 +307,21 @@ pub enum Clicked {
     Image(String),
 }
 
-/// A message's blocks: paragraphs, tables, quotes, code and pictures.
-pub fn blocks(ui: &mut Ui, pictures: &mut Pictures, blocks: &[Block]) -> Option<Clicked> {
+/// A message's blocks: paragraphs, tables, quotes, code and pictures. `names` by id
+/// name who wrote a quoted message.
+pub fn blocks(
+    ui: &mut Ui,
+    pictures: &mut Pictures,
+    blocks: &[Block],
+    names: &std::collections::HashMap<String, String>,
+) -> Option<Clicked> {
     let p = colors();
     let mut clicked = None;
     for block in blocks {
         match block {
             Block::Text(runs) => rich_text(ui, pictures, runs, p.text),
             Block::Quote(runs, of) => {
-                if quote(ui, pictures, runs, of.is_some()) {
+                if quote(ui, pictures, runs, of.is_some(), names) {
                     clicked = of.clone().map(Clicked::Quote);
                 }
             }
@@ -391,7 +397,13 @@ pub fn lightbox(ctx: &egui::Context, pictures: &mut Pictures, url: &str) -> bool
 
 /// A quote (or the message a reply quotes): a tinted box with an accent edge, the
 /// quoted author in the accent. A reply's quote can be clicked (true when it was).
-fn quote(ui: &mut Ui, pictures: &mut Pictures, runs: &[Inline], clickable: bool) -> bool {
+fn quote(
+    ui: &mut Ui,
+    pictures: &mut Pictures,
+    runs: &[Inline],
+    clickable: bool,
+    names: &std::collections::HashMap<String, String>,
+) -> bool {
     let p = colors();
     let response = Frame::new()
         .fill(p.accent_fill.gamma_multiply(0.13))
@@ -402,7 +414,11 @@ fn quote(ui: &mut Ui, pictures: &mut Pictures, runs: &[Inline], clickable: bool)
             // The author's name (bold) in the accent, the quoted text dimmer.
             let (name, rest): (Vec<Inline>, Vec<Inline>) = runs.iter().cloned().partition(|r| r.span.bold && !r.text.contains('\n'));
             if !name.is_empty() {
-                let who: String = name.iter().map(|r| r.text.as_str()).collect();
+                // By the author's id when known: the name in the markup can be a placeholder.
+                let who: String = match name.iter().find_map(|r| names.get(r.span.author.as_deref()?)) {
+                    Some(known) => known.clone(),
+                    None => name.iter().map(|r| r.text.as_str()).collect(),
+                };
                 ui.label(RichText::new(who.trim()).font(ty::small_strong()).color(p.accent));
             }
             rich_text(ui, pictures, &rest, p.dim);

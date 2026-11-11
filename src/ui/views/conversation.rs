@@ -153,6 +153,7 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace) {
             let read_by = ws.read_by.clone();
             let members = conversation.as_ref().map(|c| c.members.clone()).unwrap_or_default();
             let names = ws.names();
+            let authors = ws.authors();
             let custom_emoji = ws.custom_emoji.clone();
             let recent_emoji = ws.recent_emoji.clone().unwrap_or_default();
             let mut view = View {
@@ -171,6 +172,7 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace) {
                 new_scrolled: ws.new_scrolled || ws.focus.is_some(),
                 members: &members,
                 names: &names,
+                authors: &authors,
             };
             let mut area = egui::ScrollArea::vertical().id_salt(("messages", &id)).stick_to_bottom(true).auto_shrink([false, false]);
             if let Some(y) = ws.scroll_to.take() {
@@ -463,6 +465,7 @@ fn pins(ui: &mut Ui, ws: &mut Workspace, body: Rect) {
     let width = (body.width() - 2.0 * metrics::PAGE_PAD).clamp(200.0, 640.0);
     let at = pos2(body.right() - metrics::PAGE_PAD - width, body.top() + 6.0);
     let pinned = ws.pinned.clone();
+    let authors = ws.authors();
     let loaded: Vec<bool> = pinned.iter().map(|m| ws.messages.iter().flatten().any(|l| l.id == m.id)).collect();
     let mut show = None;
     let mut close = false;
@@ -494,7 +497,7 @@ fn pins(ui: &mut Ui, ws: &mut Workspace, body: Rect) {
                                 ui.label(RichText::new(&m.author.name).font(ty::small_strong()).color(p.text));
                                 ui.label(RichText::new(ago(m.at)).font(ty::meta()).color(p.faint));
                             });
-                            widgets::blocks(ui, &mut ws.pictures, &m.body);
+                            widgets::blocks(ui, &mut ws.pictures, &m.body, &authors);
                             if !loaded[i] {
                                 ui.label(RichText::new("Further back than what's loaded here").font(ty::meta()).color(p.faint));
                             }
@@ -712,6 +715,8 @@ pub struct View<'a> {
     pub members: &'a [crate::model::Mention],
     /// Names by id, for who reacted.
     pub names: &'a HashMap<String, String>,
+    /// Names by id, for who wrote a quoted message.
+    pub authors: &'a HashMap<String, String>,
 }
 
 /// Who has read a message of the user's (by name) and who hasn't yet, in a chat
@@ -1075,7 +1080,7 @@ pub fn bubble(
         }
         widgets::set_jumbo(jumbo);
         if !m.body.is_empty()
-            && let Some(click) = widgets::blocks(ui, pictures, &m.body)
+            && let Some(click) = widgets::blocks(ui, pictures, &m.body, view.authors)
         {
             clicked = Some(click);
         }
