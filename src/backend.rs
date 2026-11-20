@@ -94,6 +94,12 @@ pub trait Backend: Send + Sync {
         Ok(None)
     }
 
+    /// Save a file shared in a message (by its address) to `to`.
+    fn download(&self, url: &str, to: &std::path::Path) -> Result<()> {
+        let _ = (url, to);
+        Err(Error::Service("downloading isn't supported here".into()))
+    }
+
     /// Upload a picture for a message in `conversation`: the address to put in it.
     fn upload_image(&self, conversation: &str, name: &str, bytes: &[u8], mime: &str) -> Result<String>;
 

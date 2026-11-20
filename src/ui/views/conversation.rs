@@ -46,6 +46,10 @@ pub enum Action {
     View(String),
     /// Pick a conversation to forward the message to.
     Forward(Message),
+    /// Reply in a one-on-one chat with whoever wrote it, quoting it.
+    ReplyPrivately(Message),
+    /// Save a file shared in a message.
+    Download(crate::model::File),
 }
 
 /// Do what a click on a message asked for; `reply` when it came from the thread.
@@ -75,6 +79,22 @@ pub fn apply(ui: &Ui, ws: &mut Workspace, action: Action, reply: bool) {
         Action::View(url) => ws.viewing = Some(url),
         Action::UnreadFrom(message) => ws.unread_from(ui.ctx(), &message),
         Action::Forward(message) => ws.switcher = Some(super::switcher::Switcher::forwarding(message)),
+        Action::ReplyPrivately(message) => {
+            ws.reply_privately(message);
+            focus_composer(ui, false);
+        }
+        Action::Download(file) => {
+            let downloads = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
+                .map(|home| std::path::PathBuf::from(home).join("Downloads"))
+                .filter(|d| d.is_dir());
+            let mut dialog = rfd::FileDialog::new().set_title("Download").set_file_name(&file.name);
+            if let Some(dir) = downloads {
+                dialog = dialog.set_directory(dir);
+            }
+            if let Some(to) = dialog.save_file() {
+                ws.download(ui.ctx(), &file, to);
+            }
+        }
         Action::Earlier => {
             ws.newest += crate::ui::workspace::NEWEST;
             ws.earlier_from = ws.list_height.as_ref().map(|(_, h)| *h);
@@ -154,6 +174,7 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace) {
             let members = conversation.as_ref().map(|c| c.members.clone()).unwrap_or_default();
             let names = ws.names();
             let authors = ws.authors();
+            let private = ws.private_chats();
             let custom_emoji = ws.custom_emoji.clone();
             let recent_emoji = ws.recent_emoji.clone().unwrap_or_default();
             let mut view = View {
@@ -173,6 +194,7 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace) {
                 members: &members,
                 names: &names,
                 authors: &authors,
+                private: &private,
             };
             let mut area = egui::ScrollArea::vertical().id_salt(("messages", &id)).stick_to_bottom(true).auto_shrink([false, false]);
             if let Some(y) = ws.scroll_to.take() {
@@ -717,6 +739,8 @@ pub struct View<'a> {
     pub names: &'a HashMap<String, String>,
     /// Names by id, for who wrote a quoted message.
     pub authors: &'a HashMap<String, String>,
+    /// The user's one-on-one chats, by who they're with (for replying privately).
+    pub private: &'a HashMap<String, String>,
 }
 
 /// Who has read a message of the user's (by name) and who hasn't yet, in a chat
@@ -970,6 +994,14 @@ fn message_menu(ui: &mut Ui, m: &Message, mine: bool, thread: bool, view: &View,
         *action = Some(Action::OpenThread(m.id.clone()));
         ui.close();
     }
+    if !mine
+        && let Some(chat) = view.private.get(&m.author.id)
+        && chat != conversation
+        && ui.button("Reply privately").clicked()
+    {
+        *action = Some(Action::ReplyPrivately(m.clone()));
+        ui.close();
+    }
     if ui.button("Forward…").clicked() {
         *action = Some(Action::Forward(m.clone()));
         ui.close();
@@ -1089,7 +1121,9 @@ pub fn bubble(
             widgets::card(ui, card);
         }
         for file in &m.files {
-            widgets::file(ui, file);
+            if widgets::file(ui, file) {
+                clicked = Some(widgets::Clicked::Download(file.clone()));
+            }
         }
     };
     // Measure it first (an invisible pass), so the bubble is as wide as its text.
@@ -1150,6 +1184,7 @@ pub fn bubble(
     match clicked.take() {
         Some(widgets::Clicked::Quote(id)) => action = Some(Action::Show(id)),
         Some(widgets::Clicked::Image(url)) => action = Some(Action::View(url)),
+        Some(widgets::Clicked::Download(file)) => action = Some(Action::Download(file)),
         None => {}
     }
     if focused && !view.scrolled {

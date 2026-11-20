@@ -670,6 +670,12 @@ impl Backend for Teams {
         self.chat_write(Method::Post, &path, &body)
     }
 
+    fn download(&self, url: &str, to: &std::path::Path) -> Result<()> {
+        let bearer = format!("Bearer {}", self.session().access(GRAPH)?);
+        let content = format!("https://graph.microsoft.com/v1.0/shares/{}/driveItem/content", share_id(url));
+        http::download(&content, &[("Authorization", &bearer)], to)
+    }
+
     fn upload_file(&self, place: &FilePlace, name: &str, bytes: &[u8]) -> Result<Upload> {
         match place {
             FilePlace::Chat { members } => self.upload_to_onedrive(members, name, bytes),
@@ -958,6 +964,20 @@ fn onedrive_name(name: &str) -> String {
     if clean.is_empty() { "file".into() } else { clean }
 }
 
+/// How Graph's `/shares/` takes a file's address: `u!` and the address in unpadded
+/// base64url.
+fn share_id(url: &str) -> String {
+    const ABC: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let mut out = String::from("u!");
+    for chunk in url.as_bytes().chunks(3) {
+        let n = chunk.iter().enumerate().fold(0u32, |n, (i, b)| n | u32::from(*b) << (16 - 8 * i));
+        for i in 0..=chunk.len() {
+            out.push(ABC[(n >> (18 - 6 * i) & 63) as usize] as char);
+        }
+    }
+    out
+}
+
 /// An uploaded file as OneDrive or SharePoint answers it.
 fn uploaded(item: &Value, site: &str) -> Result<Upload> {
     let ids = &item["sharepointIds"];
@@ -1024,6 +1044,16 @@ fn is_ams(url: &str) -> bool {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn files_are_fetched_by_their_address() {
+        // Graph's own example.
+        assert_eq!(
+            share_id("https://onedrive.live.com/redir?resid=1231244193912!12&authKey=1201919!12921!1"),
+            "u!aHR0cHM6Ly9vbmVkcml2ZS5saXZlLmNvbS9yZWRpcj9yZXNpZD0xMjMxMjQ0MTkzOTEyITEyJmF1dGhLZXk9MTIwMTkxOSExMjkyMSEx"
+        );
+        assert_eq!(share_id("ab"), "u!YWI");
+    }
 
     #[test]
     fn files_go_as_teams_sends_them() {

@@ -164,6 +164,8 @@ pub struct Workspace {
     /// Writes in the background (reactions, read marks); true asks to fetch the
     /// messages again after.
     chores: Vec<(Chore, Load<bool, Error>)>,
+    /// Files being saved: where to.
+    downloads: Vec<(std::path::PathBuf, Load<(), Error>)>,
     /// The message being sent, and one that couldn't be (with why), in its conversation.
     outbox: Option<Outbox>,
     pub unsent: Option<(String, bool, String)>,
@@ -424,6 +426,7 @@ impl Workspace {
             drafts_loaded: false,
             sending: Load::Idle,
             chores: Vec::new(),
+            downloads: Vec::new(),
             outbox: None,
             unsent: None,
             pending_delete: None,
@@ -600,6 +603,30 @@ impl Workspace {
     pub fn quote(&mut self, message: Message, reply: bool) {
         self.editing = None;
         self.quoting = Some((reply, message));
+    }
+
+    /// The user's one-on-one chats, by who they're with.
+    pub fn private_chats(&self) -> HashMap<String, String> {
+        let Some(directory) = self.directory.as_ref() else { return HashMap::new() };
+        directory.conversations.iter().filter_map(|c| Some((person(c)?.to_string(), c.id.clone()))).collect()
+    }
+
+    /// The user's one-on-one chat with `person`, if there is one.
+    pub fn private_chat(&self, with: &str) -> Option<String> {
+        self.directory.as_ref()?.conversations.iter().find(|c| person(c) == Some(with)).map(|c| c.id.clone())
+    }
+
+    /// Reply to a message in a one-on-one chat with whoever wrote it, quoting it.
+    pub fn reply_privately(&mut self, message: Message) {
+        let Some(chat) = self.private_chat(&message.author.id) else { return };
+        self.open(&chat);
+        self.quote(message, false);
+    }
+
+    /// Save a file shared in a message to `to`; shown in the file manager when done.
+    pub fn download(&mut self, ctx: &egui::Context, file: &crate::model::File, to: std::path::PathBuf) {
+        let (backend, url, path) = (self.backend.clone(), file.url.clone(), to.clone());
+        self.downloads.push((to, Load::start(ctx, move || backend.download(&url, &path))));
     }
 
     /// Edit one of the user's messages in the composer (the thread's when `reply`).
@@ -1251,6 +1278,17 @@ impl Workspace {
             }
         }
         self.chores.retain(|(_, load)| load.is_running());
+        for (to, load) in &mut self.downloads {
+            match load.take() {
+                Some(Ok(())) => reveal(to),
+                Some(Err(e)) => {
+                    let name = to.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+                    self.error = Some(format!("Couldn't download {name}. {e}"));
+                }
+                None => {}
+            }
+        }
+        self.downloads.retain(|(_, load)| load.is_running());
         for (chore, e) in failed {
             log_warn!("{chore:?}: {e}");
             // What's on screen goes back to what the service has.
@@ -1996,6 +2034,20 @@ fn person(c: &Conversation) -> Option<&str> {
     }
 }
 
+/// Show a saved file in the file manager (its folder, elsewhere than macOS).
+fn reveal(path: &std::path::Path) {
+    let shown = if cfg!(target_os = "macos") {
+        std::process::Command::new("open").arg("-R").arg(path).spawn()
+    } else {
+        let folder = path.parent().unwrap_or(path);
+        let opener = if cfg!(windows) { "explorer" } else { "xdg-open" };
+        std::process::Command::new(opener).arg(folder).spawn()
+    };
+    if let Err(e) = shown {
+        log_warn!("showing a download: {e}");
+    }
+}
+
 /// Teams on the web, where a caller is called back (drift doesn't take calls itself).
 const TEAMS_WEB: &str = "https://teams.microsoft.com/";
 
@@ -2208,6 +2260,22 @@ mod tests {
         set(&mut d, "19:alerts@thread.tacv2", true, Follow::Posts); // followed: counts
         set(&mut d, "19:design@thread.tacv2", true, Follow::Nothing); // not followed: doesn't
         assert_eq!(ws.badge_count(&d), 2);
+    }
+
+    #[test]
+    fn a_private_reply_goes_to_the_one_on_one_chat_quoting_the_message() {
+        let mut ws = workspace(crate::demo::OPEN);
+        ws.directory = Some(crate::demo::Demo.directory().unwrap());
+        assert_eq!(ws.private_chats().get("8:orgid:maya").map(String::as_str), Some("19:maya"));
+        let mut m = ws.messages.iter().flatten().next().unwrap().clone();
+        m.author.id = "8:orgid:maya".into();
+        ws.reply_privately(m.clone());
+        assert_eq!(ws.open.as_deref(), Some("19:maya"));
+        assert_eq!(ws.quoting.as_ref().map(|(reply, q)| (*reply, q.id.clone())), Some((false, m.id.clone())));
+        // Nobody to reply to: nothing changes.
+        m.author.id = "8:orgid:nobody".into();
+        ws.reply_privately(m);
+        assert_eq!(ws.open.as_deref(), Some("19:maya"));
     }
 
     #[test]

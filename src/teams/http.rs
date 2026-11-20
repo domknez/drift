@@ -122,6 +122,35 @@ pub fn fetch(url: &str, headers: &[(&str, &str)]) -> Result<Vec<u8>> {
     response.into_body().with_config().limit(16 << 20).read_to_vec().map_err(|e| Error::Network(e.to_string()))
 }
 
+/// GET a file of any size straight into `to` (written whole or not at all). A
+/// refusal is the service's answer, not a sign-out: the file may just be out of reach.
+pub fn download(url: &str, headers: &[(&str, &str)], to: &std::path::Path) -> Result<()> {
+    let mut req = SLOW_AGENT.get(url);
+    for (k, v) in headers {
+        req = req.header(*k, *v);
+    }
+    let response = req.call().map_err(|e| Error::Network(e.to_string()))?;
+    let status = response.status().as_u16();
+    if !(200..300).contains(&status) {
+        log_warn!("download {}: HTTP {status}", url.split('?').next().unwrap_or(url));
+        return Err(Error::Service(format!("HTTP {status}")));
+    }
+    let part = to.with_extension(match to.extension() {
+        Some(ext) => format!("{}.part", ext.to_string_lossy()),
+        None => "part".into(),
+    });
+    let written = (|| {
+        let mut file = std::fs::File::create(&part)?;
+        std::io::copy(&mut response.into_body().into_reader(), &mut file)?;
+        file.sync_all()?;
+        std::fs::rename(&part, to)
+    })();
+    written.map_err(|e| {
+        let _ = std::fs::remove_file(&part);
+        Error::Network(e.to_string())
+    })
+}
+
 /// What an error answer says, short, for the log (never the whole body).
 fn error_text(json: &Value, raw: &str) -> String {
     let said = ["error_description", "message", "errorCode", "error"].iter().find_map(|k| match &json[*k] {

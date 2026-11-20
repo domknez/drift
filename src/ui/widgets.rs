@@ -305,6 +305,8 @@ pub enum Clicked {
     Quote(String),
     /// A picture: its URL.
     Image(String),
+    /// A file's download button.
+    Download(crate::model::File),
 }
 
 /// A message's blocks: paragraphs, tables, quotes, code and pictures. `names` by id
@@ -496,29 +498,40 @@ fn table(ui: &mut Ui, pictures: &mut Pictures, rows: &[Vec<Vec<Inline>>], header
 }
 
 /// A file shared in a message, as a row with its kind and name; clicking it opens
-/// it in the browser (where it can be downloaded too).
-pub fn file(ui: &mut Ui, file: &crate::model::File) {
+/// it in the browser. True when it's to be downloaded (its button, or its menu).
+pub fn file(ui: &mut Ui, file: &crate::model::File) -> bool {
     let p = colors();
     ui.add_space(2.0);
-    let response = Frame::new()
-        .fill(p.panel)
-        .corner_radius(CornerRadius::same(12))
-        .inner_margin(Margin::symmetric(12, 8))
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 10.0;
-                let (tile, _) = ui.allocate_exact_size(vec2(30.0, 30.0), Sense::hover());
-                ui.painter().rect_filled(tile, CornerRadius::same(8), p.selected);
-                icons::paint(ui.painter(), Rect::from_center_size(tile.center(), vec2(16.0, 16.0)), Icon::File, p.accent);
-                ui.vertical(|ui| {
-                    ui.spacing_mut().item_spacing.y = 1.0;
-                    ui.add(egui::Label::new(RichText::new(&file.name).font(ty::small_strong()).color(p.text)).truncate());
-                    ui.label(RichText::new(file.kind()).font(ty::meta()).color(p.faint));
+    let mut download = false;
+    // The chip's own click (open) goes in before what's on it: the download button
+    // on top takes its clicks.
+    let response = ui
+        .scope_builder(egui::UiBuilder::new().sense(Sense::click()), |ui| {
+            Frame::new()
+                .fill(p.panel)
+                .corner_radius(CornerRadius::same(12))
+                .inner_margin(Margin { left: 12, right: 6, top: 8, bottom: 8 })
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 10.0;
+                        let (tile, _) = ui.allocate_exact_size(vec2(30.0, 30.0), Sense::hover());
+                        ui.painter().rect_filled(tile, CornerRadius::same(8), p.selected);
+                        icons::paint(ui.painter(), Rect::from_center_size(tile.center(), vec2(16.0, 16.0)), Icon::File, p.accent);
+                        ui.vertical(|ui| {
+                            ui.spacing_mut().item_spacing.y = 1.0;
+                            ui.add(
+                                egui::Label::new(RichText::new(&file.name).font(ty::small_strong()).color(p.text))
+                                    .truncate()
+                                    .selectable(false),
+                            );
+                            ui.add(egui::Label::new(RichText::new(file.kind()).font(ty::meta()).color(p.faint)).selectable(false));
+                        });
+                        download |= icon_button(ui, Icon::Download, "Download").clicked();
+                    });
                 });
-            });
         })
         .response;
-    let response = response.interact(Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text("Open in the browser");
+    let response = response.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text("Open in the browser");
     if response.clicked() {
         ui.ctx().open_url(egui::OpenUrl::new_tab(&file.url));
     }
@@ -527,11 +540,16 @@ pub fn file(ui: &mut Ui, file: &crate::model::File) {
             ui.ctx().open_url(egui::OpenUrl::new_tab(&file.url));
             ui.close();
         }
+        if ui.button("Download").clicked() {
+            download = true;
+            ui.close();
+        }
         if ui.button("Copy link").clicked() {
             ui.ctx().copy_text(file.url.clone());
             ui.close();
         }
     });
+    download
 }
 
 /// A card a bot posted, as one compact row; clicking it opens its link.

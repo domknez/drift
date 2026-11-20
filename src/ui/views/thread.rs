@@ -52,6 +52,7 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace) {
             let recent_emoji = ws.recent_emoji.clone().unwrap_or_default();
             let names = ws.names();
             let authors = ws.authors();
+            let private = ws.private_chats();
             let mut view = conversation::View {
                 me: &me,
                 read_by: &[],
@@ -69,6 +70,7 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace) {
                 members: &[],
                 names: &names,
                 authors: &authors,
+                private: &private,
             };
             action = conversation::list(ui, &mut ws.pictures, &thread, &mut view);
             ws.focus_scrolled |= view.scrolled;
