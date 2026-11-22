@@ -1382,17 +1382,34 @@ fn typed(text: &str) -> egui::text::LayoutJob {
 /// a "replying to" or "editing" line above when there's one. Enter sends, Shift+Enter
 /// breaks the line, ↑ in an empty box edits the last message, Esc cancels, `@` offers
 /// people to mention. `reply` is the thread's composer.
+/// How far past its glyph an emoji's picture may reach, in the composer.
+const EMOJI_SPILL: f32 = 6.0;
+
 /// Emoji in what's typed, drawn as Teams' pictures over their plain glyphs (a text
 /// box can't draw colour fonts). One whose picture isn't in yet keeps its glyph.
 fn emoji_over_text(ui: &Ui, pictures: &mut Pictures, output: &egui::text_edit::TextEditOutput, behind: egui::Color32) {
     let galley = &output.galley;
-    let painter = ui.painter().with_clip_rect(output.text_clip_rect);
-    for (i, ch) in galley.text().chars().enumerate() {
-        let Some(key) = crate::model::emoji::key_of(ch) else { continue };
-        let (from, to) = (galley.pos_from_cursor(egui::text::CCursor::new(i)), galley.pos_from_cursor(egui::text::CCursor::new(i + 1)));
-        // At a line's end the next position is on the next row: the glyph keeps its own width then.
-        let right = if (to.min.y - from.min.y).abs() < 1.0 { to.min.x } else { from.min.x + from.height() };
-        let glyph = Rect::from_min_max(from.min, pos2(right, from.max.y)).translate(output.galley_pos.to_vec2());
+    // The pictures are a little wider than the glyphs they cover: one at the end of a
+    // line isn't cut off (the text wraps short of the edge to leave them the room).
+    let mut painter = ui.painter().clone();
+    painter.set_clip_rect(output.text_clip_rect.expand2(vec2(EMOJI_SPILL, 0.0)));
+    // By the rows as laid out: a cursor at a wrap is at the end of the row before,
+    // and an emoji that starts a row got its picture there.
+    // An emoji reaches to the next character on its row (over a variation selector
+    // after it, say), or keeps its own width at the row's end.
+    let glyphs = galley.rows.iter().flat_map(|row| {
+        // What only modifies an emoji (a variation selector, say) is laid out as a
+        // glyph of no width carrying the emoji's own character: not one more emoji.
+        row.glyphs.iter().enumerate().filter(|(_, g)| g.advance_width > 0.0).map(move |(i, g)| {
+            let next = row.glyphs[i + 1..].iter().find(|n| n.advance_width > 0.0).map(|n| n.pos.x);
+            (g, next, row.pos)
+        })
+    });
+    for (g, next, row) in glyphs {
+        let Some(key) = crate::model::emoji::key_of(g.chr) else { continue };
+        let mut glyph = g.logical_rect();
+        glyph.max.x = next.unwrap_or(glyph.max.x).max(glyph.max.x);
+        let glyph = glyph.translate(row.to_vec2() + output.galley_pos.to_vec2());
         let Some(texture) = pictures.get(&Picture::Emoji(key.to_string())) else { continue };
         painter.rect_filled(glyph, CornerRadius::ZERO, behind);
         let side = glyph.height().min(glyph.width() + 4.0) * 0.95;
@@ -1553,8 +1570,9 @@ pub fn composer(ui: &mut Ui, ws: &mut Workspace, rect: Rect, hint: &str, reply: 
     // The text, centred while it's one line, then filling the box less its padding.
     let text_h = ws.composer_text[usize::from(reply)];
     let text_top = (inner.center().y - text_h / 2.0).max(inner.top() + TEXT_PAD);
+    // Clear of the tools by more than an emoji's picture spills past its glyph.
     let text_rect =
-        Rect::from_min_max(pos2(inner.left() + 16.0, text_top), pos2(send_rect.left() - tools_w - 10.0, inner.bottom() - TEXT_PAD));
+        Rect::from_min_max(pos2(inner.left() + 16.0, text_top), pos2(send_rect.left() - tools_w - 18.0, inner.bottom() - TEXT_PAD));
 
     // Keys the box shouldn't see: ↑ to edit, Esc to cancel, Tab/Enter to pick a person.
     let id = composer_id(reply);
@@ -1605,7 +1623,7 @@ pub fn composer(ui: &mut Ui, ws: &mut Workspace, rect: Rect, hint: &str, reply: 
     // The Markdown shows as it will be sent while it's typed.
     let mut layouter = |ui: &Ui, text: &dyn egui::TextBuffer, wrap: f32| {
         let mut job = typed(text.as_str());
-        job.wrap.max_width = wrap;
+        job.wrap.max_width = wrap - EMOJI_SPILL;
         ui.fonts_mut(|f| f.layout_job(job))
     };
     let edit = egui::TextEdit::multiline(ws.draft_mut(reply))
