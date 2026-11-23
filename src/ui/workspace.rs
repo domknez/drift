@@ -187,6 +187,8 @@ pub struct Workspace {
     rang_at: Option<Instant>,
     /// The keyboard shortcuts' sheet is open.
     pub shortcuts: bool,
+    /// Settings open, on this page.
+    pub settings: Option<super::views::settings::Page>,
     /// When the others were last told the user is typing (and where).
     typing_sent: Option<(String, Instant)>,
     /// Who's typing where (by conversation: their id and name, and when they last said so).
@@ -195,6 +197,10 @@ pub struct Workspace {
     marked: Option<(String, String)>,
     /// Show a notification for each new message (the user's setting).
     pub notifications: bool,
+    /// How drift behaves, as set in Settings.
+    pub options: crate::settings::Options,
+    /// Notifications paused until then (Unix ms), from the user's menu.
+    pub paused_until: Option<i64>,
     /// The newest message seen in each conversation (notifications are for newer ones).
     seen: HashMap<String, i64>,
     seen_once: bool,
@@ -436,6 +442,7 @@ impl Workspace {
             pending_delete: None,
             offline: false,
             shortcuts: false,
+            settings: None,
             ringing: None,
             address_load: Load::Idle,
             rang_at: None,
@@ -445,6 +452,8 @@ impl Workspace {
             typing_sent: None,
             marked: None,
             notifications: true,
+            options: Default::default(),
+            paused_until: None,
             seen: HashMap::new(),
             seen_once: false,
             clicked: std::sync::mpsc::channel(),
@@ -838,16 +847,37 @@ impl Workspace {
         }
     }
 
+    /// The tabs in the top bar, in order: Chats and those not turned off.
+    pub fn tabs(&self) -> Vec<Section> {
+        let o = &self.options;
+        [(Section::Activity, o.activity_tab), (Section::Chats, true), (Section::Teams, o.teams_tab), (Section::Meetings, o.calendar_tab)]
+            .into_iter()
+            .filter(|(_, on)| *on)
+            .map(|(s, _)| s)
+            .collect()
+    }
+
+    /// Whether notifications are on and not paused.
+    pub fn may_notify(&self) -> bool {
+        self.notifications && !self.paused_until.is_some_and(|until| crate::model::time::now_ms() < until)
+    }
+
+    /// What a system notification says of a message: its text, or only that there's
+    /// one when the user keeps the text out of notifications.
+    fn told(&self, text: String, channel: bool) -> String {
+        if self.options.notification_text { text } else { if channel { "New post" } else { "New message" }.into() }
+    }
+
     /// The count on the Dock icon: conversations with something unread that notify,
     /// chats and meeting chats, and channels followed (in Teams or in drift). Not
-    /// muted ones.
+    /// muted ones, nor channels with the Teams tab hidden.
     fn badge_count(&self, d: &Directory) -> usize {
         d.conversations
             .iter()
             .filter(|c| c.unread && !c.muted)
             .filter(|c| match c.kind {
                 Kind::Chat | Kind::Meeting => true,
-                Kind::Channel => self.is_following(&c.id) || d.follow(&c.id) != Follow::Nothing,
+                Kind::Channel => self.options.teams_tab && (self.is_following(&c.id) || d.follow(&c.id) != Follow::Nothing),
                 _ => false,
             })
             .count()
@@ -871,12 +901,12 @@ impl Workspace {
             let follow = if self.is_following(&c.id) { Follow::Everything } else { directory.follow(&c.id) };
             match c.kind {
                 Kind::Chat | Kind::Meeting if fresh && !self.is_mine(last) => new.push(c),
-                Kind::Channel if follow.covers(last) && fresh && !self.is_mine(last) => new.push(c),
+                Kind::Channel if self.options.channel_posts && follow.covers(last) && fresh && !self.is_mine(last) => new.push(c),
                 _ => {}
             }
         }
         self.seen_once = true;
-        if !self.notifications || new.is_empty() {
+        if !self.may_notify() || new.is_empty() {
             return;
         }
         // A handful each on its own; more than that as one.
@@ -895,7 +925,7 @@ impl Workspace {
             );
             return;
         }
-        if focused {
+        if focused && self.options.sound {
             crate::notify::chime();
         }
         for c in new {
@@ -912,6 +942,7 @@ impl Workspace {
                 self.toasts.push(&last.author, place, &body, &c.id);
                 continue;
             }
+            let body = self.told(body, c.kind == Kind::Channel);
             let (tx, id, ctx) = (self.clicked.0.clone(), c.id.clone(), ctx.clone());
             crate::notify::show(&last.author, place, &body, move || {
                 let _ = tx.send(id);
@@ -953,7 +984,7 @@ impl Workspace {
         }
         for m in due {
             self.reminded.insert(reminder_key(&m));
-            if !self.notifications {
+            if !self.may_notify() {
                 continue;
             }
             let minutes = (m.start - now) / 60_000;
@@ -1929,7 +1960,7 @@ impl Workspace {
     /// chats aren't, as the chat's own message already was; followed channels' posts
     /// aren't in Activity's items at all (the channels notify themselves).
     fn notify_activity(&self, ctx: &egui::Context, new: &[Message]) {
-        if !self.notifications {
+        if !self.may_notify() {
             return;
         }
         let directory = self.directory.as_ref();
@@ -1959,6 +1990,7 @@ impl Workspace {
             let title = if verb.is_empty() { m.author.name.clone() } else { format!("{} {verb}", m.author.name) };
             let place = source.map(|s| s.title.as_str()).filter(|t| !t.is_empty());
             let body: String = crate::model::text::said(&m.body).chars().take(160).collect();
+            let body = self.told(body, false);
             crate::notify::show(&title, place, &body, click());
         }
     }

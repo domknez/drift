@@ -2,7 +2,7 @@
 //! unread, search, today's meeting with Join, and the user's menu.
 
 use crate::model::{Availability, Conversation, Directory, Kind, Picture, Status, time};
-use crate::settings::{Accent, Appearance, Look, TEXT_SIZES, Theme};
+use crate::settings::Theme;
 use crate::ui::app::Request;
 use crate::ui::style::icons::{self, Icon};
 use crate::ui::style::palette;
@@ -14,7 +14,7 @@ use eframe::egui::{self, Align2, CornerRadius, Frame, Margin, Rect, RichText, Se
 
 const PILL_HEIGHT: f32 = 36.0;
 
-pub fn show(ui: &mut Ui, ws: &mut Workspace, look: Look, updates: &Updates) -> Option<Request> {
+pub fn show(ui: &mut Ui, ws: &mut Workspace, updates: &Updates) -> Option<Request> {
     let p = colors();
     let full = ui.max_rect();
     super::drag_area(ui, full, "topbar-drag");
@@ -34,12 +34,16 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace, look: Look, updates: &Updates) -> O
     // there are many and most are only looked in on.
     let counts = (ws.activity_unread(), ws.directory.as_ref().map_or(0, unread_chats));
     let channels = ws.directory.as_ref().is_some_and(unread_channels);
-    let tabs = [
+    let shown = ws.tabs();
+    let tabs: Vec<_> = [
         (Section::Activity, Icon::Bell, "Activity", Badge::Count(counts.0)),
         (Section::Chats, Icon::Chat, "Chats", Badge::Count(counts.1)),
         (Section::Teams, Icon::Members, "Teams", Badge::Dot(channels)),
         (Section::Meetings, Icon::Calendar, "Calendar", Badge::Count(0)),
-    ];
+    ]
+    .into_iter()
+    .filter(|t| shown.contains(&t.0))
+    .collect();
     let widths: Vec<f32> = tabs.iter().map(|t| tab_width(ui, t.2, t.3)).collect();
     let group = Rect::from_min_size(
         pos2(x, cy - PILL_HEIGHT / 2.0 - 1.0),
@@ -62,7 +66,7 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace, look: Look, updates: &Updates) -> O
     // The user's menu at the far right, a new version before it, then today's meeting.
     let size = 32.0;
     let avatar = Rect::from_min_size(pos2(full.right() - 16.0 - size, cy - size / 2.0), vec2(size, size));
-    let mut request = user_menu(ui, ws, avatar, look, updates);
+    let mut request = user_menu(ui, ws, avatar);
     let mut right = avatar.left() - 12.0;
     if let Some(offer) = updates.offer() {
         let (left, clicked) = update_pill(ui, &offer, right, cy);
@@ -332,14 +336,14 @@ fn truncate(s: &str, max: usize) -> String {
 
 /// The user's avatar, with a menu: who's signed in, the theme, signing out.
 /// A hairline across the menu, with room around it.
-fn divider(ui: &mut Ui) {
+pub(super) fn divider(ui: &mut Ui) {
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 9.0), Sense::hover());
     ui.painter().hline(rect.x_range(), rect.center().y, Stroke::new(1.0, colors().line));
 }
 
 /// A row of the menu with a switch: its name, a line under it, and whether it's on.
 /// Returns whether it was clicked.
-fn switch_row(ui: &mut Ui, name: &str, detail: &str, on: bool) -> bool {
+pub(super) fn switch_row(ui: &mut Ui, name: &str, detail: &str, on: bool) -> bool {
     let p = colors();
     let (row, response) = ui.allocate_exact_size(vec2(ui.available_width(), 46.0), Sense::click());
     let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
@@ -356,8 +360,23 @@ fn switch_row(ui: &mut Ui, name: &str, detail: &str, on: bool) -> bool {
     response.clicked()
 }
 
+/// A row of the menu: what it does, and a detail (a shortcut, say) on the right.
+/// Returns whether it was clicked.
+fn menu_row(ui: &mut Ui, label: &str, detail: &str, color: egui::Color32) -> bool {
+    let p = colors();
+    let (row, response) = ui.allocate_exact_size(vec2(ui.available_width(), 32.0), Sense::click());
+    let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
+    widgets::control(ui, &response, egui::Role::Button, label);
+    if response.hovered() {
+        ui.painter().rect_filled(row.shrink2(vec2(2.0, 1.0)), CornerRadius::same(8), p.hover);
+    }
+    ui.painter().text(pos2(row.left() + 10.0, row.center().y), Align2::LEFT_CENTER, label, ty::small(), color);
+    ui.painter().text(pos2(row.right() - 10.0, row.center().y), Align2::RIGHT_CENTER, detail, ty::meta(), p.faint);
+    response.clicked()
+}
+
 /// A small heading in the menu.
-fn menu_label(ui: &mut Ui, text: &str) {
+pub(super) fn menu_label(ui: &mut Ui, text: &str) {
     ui.add_space(4.0);
     ui.horizontal(|ui| {
         ui.add_space(8.0);
@@ -366,7 +385,7 @@ fn menu_label(ui: &mut Ui, text: &str) {
     ui.add_space(8.0);
 }
 
-fn user_menu(ui: &mut Ui, ws: &mut Workspace, rect: Rect, look: Look, updates: &Updates) -> Option<Request> {
+fn user_menu(ui: &mut Ui, ws: &mut Workspace, rect: Rect) -> Option<Request> {
     let p = colors();
     let me = Picture::Person { id: ws.me_id.clone(), name: ws.me.clone() };
     let picture = if ws.me_id.is_empty() { None } else { ws.pictures.get(&me) };
@@ -448,116 +467,32 @@ fn user_menu(ui: &mut Ui, ws: &mut Workspace, rect: Rect, look: Look, updates: &
             divider(ui);
         }
 
-        // Appearance: light, dark or as the system is; the themes; the accent; the size.
-        menu_label(ui, "Appearance");
-        let modes = [(Appearance::System, "System"), (Appearance::Light, "Light"), (Appearance::Dark, "Dark")];
-        if let Some(mode) = segments(ui, "appearance", &modes, look.mode) {
-            request = Some(Request::Look(Look { mode, ..look }));
-        }
-        ui.add_space(10.0);
-        let dark_now = ui.visuals().dark_mode;
-        ui.horizontal(|ui| {
-            ui.add_space(6.0);
-            ui.spacing_mut().item_spacing.x = 6.0;
-            for theme in Theme::ALL.iter().copied() {
-                // The one in use, and the other kind's pick (used when drift is that kind).
-                let picked = theme == if theme.dark() { look.dark } else { look.light };
-                let in_use = picked && theme.dark() == dark_now;
-                if theme_swatch(ui, theme, picked, in_use).clicked() {
-                    // Picking the other kind's theme switches to it too.
-                    let mut to = if theme.dark() { Look { dark: theme, ..look } } else { Look { light: theme, ..look } };
-                    if theme.dark() != dark_now {
-                        to.mode = if theme.dark() { Appearance::Dark } else { Appearance::Light };
-                    }
-                    request = Some(Request::Look(to));
+        // Notifications paused for a while, or back on.
+        let now = time::now_ms();
+        match ws.paused_until.filter(|u| *u > now) {
+            Some(until) => {
+                let label = format!("Notifications paused until {}", time::clock(until));
+                if menu_row(ui, &label, "Resume", p.accent) {
+                    request = Some(Request::Pause(None));
                 }
             }
-        });
-        ui.add_space(10.0);
-        ui.horizontal(|ui| {
-            ui.add_space(8.0);
-            ui.spacing_mut().item_spacing.x = 8.0;
-            for accent in Accent::ALL.iter().copied() {
-                let (dot, response) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::click());
-                let response = response.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(accent.label());
-                widgets::control(ui, &response, egui::Role::RadioButton, &format!("{} accent", accent.label()));
-                ui.painter().circle_filled(dot.center(), 9.0, palette::accent_swatch(accent, dark_now));
-                if accent == look.accent {
-                    ui.painter().circle_stroke(dot.center(), 11.0, Stroke::new(1.5, p.text));
-                } else if response.hovered() {
-                    ui.painter().circle_stroke(dot.center(), 11.0, Stroke::new(1.0, p.border));
+            None => {
+                if menu_row(ui, "Pause notifications for 1 hour", "", p.text) {
+                    request = Some(Request::Pause(Some(now + 3_600_000)));
+                    ui.close();
                 }
-                if response.clicked() {
-                    request = Some(Request::Look(Look { accent, ..look }));
+                if menu_row(ui, "Pause until tomorrow", "8:00", p.text) {
+                    request = Some(Request::Pause(Some(time::tomorrow_at(now, 8))));
+                    ui.close();
                 }
             }
-        });
-        ui.add_space(10.0);
-        let sizes: Vec<(u16, String)> = TEXT_SIZES.iter().map(|s| (*s, format!("{s}%"))).collect();
-        let sizes: Vec<(u16, &str)> = sizes.iter().map(|(s, l)| (*s, l.as_str())).collect();
-        if let Some(text_size) = segments(ui, "text-size", &sizes, look.text_size).filter(|s| *s != look.text_size) {
-            request = Some(Request::Look(Look { text_size, ..look }));
         }
-        ui.add_space(12.0);
         divider(ui);
 
-        if switch_row(ui, "Notifications", "For new messages, when drift is behind", ws.notifications) {
-            request = Some(Request::Notifications(!ws.notifications));
-        }
-        ui.add_space(4.0);
-        divider(ui);
-
-        // This version, and whether there's a newer one.
-        let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), 46.0), Sense::hover());
-        ui.painter().text(
-            pos2(row.left() + 10.0, row.top() + 15.0),
-            egui::Align2::LEFT_CENTER,
-            format!("drift {}", crate::update::CURRENT),
-            ty::small_strong(),
-            p.text,
-        );
-        let color = match updates.notable() {
-            Some(true) => p.accent,
-            Some(false) => p.danger,
-            None => p.faint,
-        };
-        ui.painter().text(pos2(row.left() + 10.0, row.top() + 32.0), egui::Align2::LEFT_CENTER, updates.status(), ty::meta(), color);
-        let (label, on_click, strong) = match updates.offer() {
-            Some(offer) if offer.installs => ("Restart", Request::InstallUpdate, true),
-            Some(_) => ("Download", Request::InstallUpdate, true),
-            None => ("Check", Request::CheckForUpdates, false),
-        };
-        let text_color = if strong { p.on_accent } else { p.text };
-        let galley = ui.painter().layout_no_wrap(label.into(), ty::small_strong(), text_color);
-        let button = Rect::from_min_size(
-            pos2(row.right() - 10.0 - galley.size().x - 24.0, row.center().y - 14.0),
-            vec2(galley.size().x + 24.0, 28.0),
-        );
-        let click = ui.interact(button, ui.scope_id().with("update"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
-        let fill = if strong { p.accent_fill } else { p.surface };
-        ui.painter().rect_filled(button, CornerRadius::same(8), if click.hovered() { p.hover.lerp_to_gamma(fill, 0.5) } else { fill });
-        ui.painter().galley(button.center() - galley.size() / 2.0, galley, text_color);
-        if click.clicked() && !updates.checking() {
-            request = Some(on_click);
-        }
-        if switch_row(ui, "Update automatically", "Installs new versions when drift restarts", updates.auto) {
-            request = Some(Request::AutoUpdate(!updates.auto));
-        }
-        ui.add_space(4.0);
-        divider(ui);
-
-        // The keyboard shortcuts, in a sheet.
-        let (row, response) = ui.allocate_exact_size(vec2(ui.available_width(), 32.0), Sense::click());
-        let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
-        widgets::control(ui, &response, egui::Role::Button, "Keyboard shortcuts");
-        if response.hovered() {
-            ui.painter().rect_filled(row.shrink2(vec2(2.0, 2.0)), CornerRadius::same(8), p.hover);
-        }
-        ui.painter().text(pos2(row.left() + 10.0, row.center().y), egui::Align2::LEFT_CENTER, "Keyboard shortcuts", ty::small(), p.dim);
-        let keys = ui.ctx().format_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Slash));
-        ui.painter().text(pos2(row.right() - 10.0, row.center().y), egui::Align2::RIGHT_CENTER, keys, ty::meta(), p.faint);
-        if response.clicked() {
-            ws.shortcuts = true;
+        // Settings, in its sheet.
+        let keys = ui.ctx().format_shortcut(&super::settings::opener());
+        if menu_row(ui, "Settings…", &keys, p.text) {
+            ws.settings = Some(Default::default());
             ui.close();
         }
         divider(ui);
@@ -592,7 +527,7 @@ fn user_menu(ui: &mut Ui, ws: &mut Workspace, rect: Rect, look: Look, updates: &
 }
 
 /// Options side by side in a track, the picked one raised; returns the one clicked.
-fn segments<T: Copy + PartialEq>(ui: &mut Ui, salt: &str, options: &[(T, &str)], picked: T) -> Option<T> {
+pub(super) fn segments<T: Copy + PartialEq>(ui: &mut Ui, salt: &str, options: &[(T, &str)], picked: T) -> Option<T> {
     let p = colors();
     let mut clicked = None;
     let (track, _) = ui.allocate_exact_size(vec2(ui.available_width(), 34.0), Sense::hover());
@@ -619,7 +554,7 @@ fn segments<T: Copy + PartialEq>(ui: &mut Ui, salt: &str, options: &[(T, &str)],
 }
 
 /// A theme in small: its canvas with a panel and two lines of text on it.
-fn theme_swatch(ui: &mut Ui, theme: Theme, picked: bool, in_use: bool) -> egui::Response {
+pub(super) fn theme_swatch(ui: &mut Ui, theme: Theme, picked: bool, in_use: bool) -> egui::Response {
     let p = colors();
     let (rect, response) = ui.allocate_exact_size(vec2(48.0, 34.0), Sense::click());
     let response = response.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(theme.label());

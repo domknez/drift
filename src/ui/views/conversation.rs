@@ -196,6 +196,7 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace) {
                 names: &names,
                 authors: &authors,
                 private: &private,
+                compact: ws.options.compact,
             };
             let mut area = egui::ScrollArea::vertical().id_salt(("messages", &id)).stick_to_bottom(true).auto_shrink([false, false]);
             if let Some(y) = ws.scroll_to.take() {
@@ -742,6 +743,8 @@ pub struct View<'a> {
     pub authors: &'a HashMap<String, String>,
     /// The user's one-on-one chats, by who they're with (for replying privately).
     pub private: &'a HashMap<String, String>,
+    /// Smaller bubbles (the user's setting).
+    pub compact: bool,
 }
 
 /// Who has read a message of the user's (by name) and who hasn't yet, in a chat
@@ -1134,7 +1137,8 @@ pub fn bubble(
         ui.new_child(egui::UiBuilder::new().max_rect(probe_rect).layout(Layout::top_down(Align::Min)).sizing_pass().invisible());
     content(&mut probe);
     let width = (probe.min_rect().width() + 2.0 * PAD_X).min(max);
-    let height = probe.min_rect().height() + 20.0;
+    let pad_y: i8 = if view.compact { 6 } else { 10 };
+    let height = probe.min_rect().height() + 2.0 * f32::from(pad_y);
     // The bubble's own click area (right-click menu) goes in first, under its text:
     // links and cards inside are added after it and so take their clicks.
     let left = if mine { ui.max_rect().right() - width } else { ui.max_rect().left() + indent };
@@ -1172,7 +1176,7 @@ pub fn bubble(
                 .fill(if focused { p.selected } else { fill })
                 .stroke(if focused { Stroke::new(1.5, p.accent) } else { Stroke::NONE })
                 .corner_radius(radius)
-                .inner_margin(Margin::symmetric(PAD_X as i8, 10))
+                .inner_margin(Margin::symmetric(PAD_X as i8, pad_y))
                 .show(ui, |ui| {
                     ui.set_width(width - 2.0 * PAD_X);
                     content(ui);
@@ -1628,6 +1632,7 @@ pub fn composer(ui: &mut Ui, ws: &mut Workspace, rect: Rect, hint: &str, reply: 
         job.wrap.max_width = wrap - EMOJI_SPILL;
         ui.fonts_mut(|f| f.layout_job(job))
     };
+    let enter_sends = ws.options.enter_sends;
     let edit = egui::TextEdit::multiline(ws.draft_mut(reply))
         .id(id)
         .hint_text(RichText::new(hint).color(p.faint))
@@ -1636,7 +1641,11 @@ pub fn composer(ui: &mut Ui, ws: &mut Workspace, rect: Rect, hint: &str, reply: 
         .margin(Margin::ZERO)
         .desired_rows(1)
         .desired_width(f32::INFINITY)
-        .return_key(Some(egui::KeyboardShortcut::new(egui::Modifiers::SHIFT, egui::Key::Enter)))
+        // The other Enter breaks the line: Shift+Enter when Enter sends, Enter itself when ⌘Enter does.
+        .return_key(Some(egui::KeyboardShortcut::new(
+            if enter_sends { egui::Modifiers::SHIFT } else { egui::Modifiers::NONE },
+            egui::Key::Enter,
+        )))
         .layouter(&mut layouter);
     // Taller than the box can grow: it scrolls, keeping the end (where one types) in view.
     // Its bar shows only then (not for the frame a new line takes to grow the box).
@@ -1660,7 +1669,7 @@ pub fn composer(ui: &mut Ui, ws: &mut Workspace, rect: Rect, hint: &str, reply: 
     let response = output.response.response;
     if response.changed() {
         // An emoticon just finished (a space or a new line after it) turns into its emoji.
-        if emoticon_typed(ws.draft_mut(reply)) {
+        if ws.options.emoticons && emoticon_typed(ws.draft_mut(reply)) {
             set_cursor_to_end(ui, id, ws.draft(reply));
         }
         // What's typed changed: the suggestions start over at the first.
@@ -1678,7 +1687,10 @@ pub fn composer(ui: &mut Ui, ws: &mut Workspace, rect: Rect, hint: &str, reply: 
     if !reply && ws.find.is_none() && ws.switcher.is_none() && ui.memory(|m| m.focused().is_none()) {
         response.request_focus();
     }
-    let enter = response.has_focus() && t.input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.shift);
+    let enter = response.has_focus()
+        && t.input(|i| {
+            i.key_pressed(egui::Key::Enter) && if enter_sends { !i.modifiers.shift } else { i.modifiers.command && !i.modifiers.shift }
+        });
     let has_text = !ws.draft(reply).trim().is_empty() || ws.attachments.iter().any(|(r, _)| *r == reply);
 
     // People to mention, above the box, while an @word is being typed.
@@ -1842,7 +1854,7 @@ pub fn composer(ui: &mut Ui, ws: &mut Workspace, rect: Rect, hint: &str, reply: 
     let below = pos2(inner.left() + 16.0, inner.bottom() + BELOW / 2.0 + 1.0);
     if let Some(typing) = (!reply).then(|| ws.typing(ui.ctx())).flatten() {
         ui.painter().text(below, egui::Align2::LEFT_CENTER, typing, ty::meta(), p.dim);
-    } else if response.has_focus() || has_text {
+    } else if ws.options.markdown_hints && (response.has_focus() || has_text) {
         let tip = "**bold**  *italic*  ~~strike~~  `code`  > quote  - list";
         ui.painter().text(below, egui::Align2::LEFT_CENTER, tip, ty::meta(), p.faint);
     }

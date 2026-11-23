@@ -5,6 +5,7 @@ mod call;
 pub mod conversation;
 pub mod emoji_picker;
 pub mod list;
+pub mod settings;
 mod shortcuts;
 pub mod sign_in;
 mod splash;
@@ -27,14 +28,14 @@ pub fn workspace(ui: &mut egui::Ui, ws: &mut Workspace, look: Look, updates: &Up
     if ui.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::R))) {
         ws.refresh();
     }
-    // ⌘1–⌘4: the tabs, in the top bar's order.
+    // ⌘1–⌘4: the tabs, in the top bar's order (those shown). One turned off while
+    // it was open gives way to Chats.
     use super::workspace::Section;
-    for (key, section) in [
-        (egui::Key::Num1, Section::Activity),
-        (egui::Key::Num2, Section::Chats),
-        (egui::Key::Num3, Section::Teams),
-        (egui::Key::Num4, Section::Meetings),
-    ] {
+    let tabs = ws.tabs();
+    if !tabs.contains(&ws.section) {
+        ws.section = Section::Chats;
+    }
+    for (key, section) in [egui::Key::Num1, egui::Key::Num2, egui::Key::Num3, egui::Key::Num4].into_iter().zip(tabs) {
         if ui.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, key))) {
             ws.section = section;
             ws.filter.clear();
@@ -102,7 +103,7 @@ pub fn workspace(ui: &mut egui::Ui, ws: &mut Workspace, look: Look, updates: &Up
     egui::CentralPanel::default().frame(Frame::new().fill(p.canvas)).show(ui, |ui| {
         let full = ui.max_rect();
         let bar = Rect::from_min_size(full.min, vec2(full.width(), metrics::TOP_BAR));
-        if let Some(asked) = topbar::show(&mut child(ui, bar), ws, look, updates) {
+        if let Some(asked) = topbar::show(&mut child(ui, bar), ws, updates) {
             request = Some(asked);
         }
 
@@ -146,7 +147,10 @@ pub fn workspace(ui: &mut egui::Ui, ws: &mut Workspace, look: Look, updates: &Up
         }
     });
     switcher::show(ui.ctx(), ws);
-    shortcuts::show(ui.ctx(), &mut ws.shortcuts);
+    shortcuts::show(ui.ctx(), &mut ws.shortcuts, ws.options.enter_sends);
+    if let Some(asked) = settings::show(ui.ctx(), ws, look, updates) {
+        request = Some(asked);
+    }
     call::show(ui.ctx(), ws);
     start_up(ui.ctx(), ws);
     if let Some(url) = ws.viewing.clone() {

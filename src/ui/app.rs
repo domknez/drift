@@ -70,6 +70,10 @@ pub enum Request {
     /// The theme, accent or size changed.
     Look(crate::settings::Look),
     Notifications(bool),
+    /// What shows, notifies and sends, as set in Settings.
+    Options(crate::settings::Options),
+    /// Pause notifications until then (Unix ms), or no longer.
+    Pause(Option<i64>),
     /// Turn updating automatically on or off.
     AutoUpdate(bool),
     CheckForUpdates,
@@ -105,6 +109,10 @@ impl App {
                 let mut parts = focus.split(',').map(str::to_string);
                 let (message, root) = (parts.next(), parts.next());
                 workspace.open_message(&open, message, root);
+            }
+            // DRIFT_DEMO_SETTINGS=<page>: Settings open on that page (`appearance`, `layout`, …).
+            if let Ok(page) = std::env::var("DRIFT_DEMO_SETTINGS") {
+                workspace.settings = Some(views::settings::Page::from_key(&page));
             }
             // DRIFT_DEMO_PINS=1: the list of pinned messages open.
             workspace.pins_open = std::env::var_os("DRIFT_DEMO_PINS").is_some();
@@ -257,6 +265,8 @@ impl App {
         match request {
             Request::Look(look) => self.prefs.set_look(look),
             Request::Notifications(on) => self.prefs.update(|p| p.notifications = on),
+            Request::Options(options) => self.prefs.update(|p| p.options = options),
+            Request::Pause(until) => self.prefs.update(|p| p.paused_until = until),
             Request::AutoUpdate(on) => {
                 self.updates.auto = on;
                 self.prefs.update(|p| p.auto_update = on);
@@ -294,6 +304,13 @@ impl eframe::App for App {
     /// status), run also while the window is covered or on another desktop: then no
     /// `ui` pass runs, and without it Teams would see the user as away.
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // The settings that decide what notifies, before the work that notifies.
+        crate::notify::set_sound(self.prefs.options.sound);
+        if let Screen::Signed(workspace) = &mut self.screen {
+            workspace.notifications = self.prefs.notifications;
+            workspace.options = self.prefs.options;
+            workspace.paused_until = self.prefs.paused_until;
+        }
         if let Screen::Signed(workspace) = &mut self.screen
             && let Some(Outcome::SignedOut) = workspace.tick(ctx)
         {
@@ -327,6 +344,8 @@ impl eframe::App for App {
             Screen::Signed(workspace) => {
                 let before = workspace.open.clone();
                 workspace.notifications = self.prefs.notifications;
+                workspace.options = self.prefs.options;
+                workspace.paused_until = self.prefs.paused_until;
                 if workspace.muted_here.is_none() {
                     workspace.muted_here = Some(self.prefs.muted.iter().cloned().collect());
                 }

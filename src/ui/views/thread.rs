@@ -71,6 +71,7 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace) {
                 names: &names,
                 authors: &authors,
                 private: &private,
+                compact: ws.options.compact,
             };
             action = conversation::list(ui, &mut ws.pictures, &thread, &mut view);
             ws.focus_scrolled |= view.scrolled;

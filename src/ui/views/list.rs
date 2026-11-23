@@ -646,15 +646,28 @@ fn preview(ws: &Workspace, c: &Conversation) -> String {
 fn row(ui: &mut Ui, ws: &mut Workspace, d: &Directory, c: &Conversation) {
     let p = colors();
     let selected = ws.open.as_deref() == Some(c.id.as_str());
-    let (outer, response) = ui.allocate_exact_size(vec2(ui.available_width(), metrics::ROW + 2.0), Sense::click());
+    // Two lines (the name, the newest message), or the name alone; tighter when compact.
+    let (compact, previews) = (ws.options.compact, ws.options.list_previews);
+    let height = match (previews, compact) {
+        (true, false) => metrics::ROW,
+        (true, true) => 44.0,
+        (false, false) => 40.0,
+        (false, true) => 32.0,
+    };
+    let (outer, response) = ui.allocate_exact_size(vec2(ui.available_width(), height + 2.0), Sense::click());
     let unread = if c.unread && !c.muted { ", unread" } else { "" };
     let presence = ws.presence_of(c).map_or(String::new(), |p| format!(", {}", p.label()));
     widgets::control(ui, &response, egui::Role::ListItem, &format!("{}{presence}{unread}", c.title));
-    let rect = Rect::from_min_size(outer.min + vec2(8.0, 1.0), vec2(outer.width() - 16.0, metrics::ROW));
+    let rect = Rect::from_min_size(outer.min + vec2(8.0, 1.0), vec2(outer.width() - 16.0, height));
     if selected || response.hovered() {
         ui.painter().rect_filled(rect, CornerRadius::same(12), if selected { p.selected } else { p.hover });
     }
-    let size = metrics::LIST_AVATAR;
+    let size = match (previews, compact) {
+        (true, false) => metrics::LIST_AVATAR,
+        (true, true) => 30.0,
+        (false, false) => 28.0,
+        (false, true) => 22.0,
+    };
     let pic = Rect::from_min_size(pos2(rect.left() + 10.0, rect.center().y - size / 2.0), vec2(size, size));
     let behind = if selected {
         p.selected
@@ -670,8 +683,12 @@ fn row(ui: &mut Ui, ws: &mut Workspace, d: &Directory, c: &Conversation) {
     let when = c.last.as_ref().map(|l| short_time(l.at)).unwrap_or_default();
     let galley = ui.painter().layout_no_wrap(when, ty::meta(), p.faint);
     let time_w = galley.size().x;
-    ui.painter().galley(pos2(right - time_w, rect.top() + 10.0), galley, p.faint);
-    let mark = pos2(right - 5.0, rect.bottom() - 15.0);
+    // From the top and bottom edges to the text (two lines); one line is centred.
+    let pad = if compact { 4.0 } else { 8.0 };
+    let time_y = if previews { rect.top() + pad + 2.0 } else { rect.center().y - galley.size().y / 2.0 };
+    ui.painter().galley(pos2(right - time_w, time_y), galley, p.faint);
+    // Under the time, or before it when there's one line.
+    let mark = if previews { pos2(right - 5.0, rect.bottom() - pad - 7.0) } else { pos2(right - time_w - 10.0, rect.center().y) };
     if c.muted {
         icons::paint(ui.painter(), Rect::from_center_size(mark, vec2(13.0, 13.0)), Icon::Mute, p.faint);
     } else if c.unread {
@@ -680,7 +697,7 @@ fn row(ui: &mut Ui, ws: &mut Workspace, d: &Directory, c: &Conversation) {
 
     // Name and preview.
     let text_left = pic.right() + 11.0;
-    let text_right = right - time_w.max(14.0) - 8.0;
+    let text_right = right - time_w.max(14.0) - if previews { 8.0 } else { 22.0 };
     let strong = c.unread || selected;
     let name_color = if c.muted {
         p.faint
@@ -696,11 +713,22 @@ fn row(ui: &mut Ui, ws: &mut Workspace, d: &Directory, c: &Conversation) {
     {
         name = format!("{name} · {}", team.name);
     }
-    let top = Rect::from_min_max(pos2(text_left, rect.top() + 8.0), pos2(text_right, rect.top() + 26.0));
+    let top = if previews {
+        Rect::from_min_max(pos2(text_left, rect.top() + pad), pos2(text_right, rect.top() + pad + 18.0))
+    } else {
+        Rect::from_min_max(pos2(text_left, rect.center().y - 9.0), pos2(text_right, rect.center().y + 9.0))
+    };
     let mut t = ui.new_child(egui::UiBuilder::new().max_rect(top).layout(Layout::left_to_right(Align::Center)));
     let name_font = if c.unread && !c.muted { ty::item_unread() } else { ty::item() };
     t.add(egui::Label::new(RichText::new(name).font(name_font).color(name_color)).truncate().selectable(false));
-    let bottom = Rect::from_min_max(pos2(text_left, rect.top() + 28.0), pos2(rect.right() - 26.0, rect.bottom() - 6.0));
+    if response.clicked() {
+        ws.open(&c.id);
+    }
+    response.context_menu(|ui| conversation_menu(ui, ws, c));
+    if !previews {
+        return;
+    }
+    let bottom = Rect::from_min_max(pos2(text_left, rect.top() + pad + 20.0), pos2(rect.right() - 26.0, rect.bottom() - pad + 2.0));
     let mut b = ui.new_child(egui::UiBuilder::new().max_rect(bottom).layout(Layout::left_to_right(Align::Center)));
     let preview_color = if c.unread && !c.muted { p.dim } else { p.faint };
     match ws.drafts.get(&c.id).filter(|_| !selected) {
@@ -715,11 +743,6 @@ fn row(ui: &mut Ui, ws: &mut Workspace, d: &Directory, c: &Conversation) {
             b.add(egui::Label::new(RichText::new(preview(ws, c)).font(ty::small()).color(preview_color)).truncate().selectable(false));
         }
     }
-
-    if response.clicked() {
-        ws.open(&c.id);
-    }
-    response.context_menu(|ui| conversation_menu(ui, ws, c));
 }
 
 /// What a right click on a conversation offers.

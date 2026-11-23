@@ -5,7 +5,7 @@ use crate::ui::style::{colors, typography as ty};
 use eframe::egui::{self, Context, CornerRadius, Frame, Key, KeyboardShortcut, Margin, Modifiers, RichText, vec2};
 
 /// Show the sheet while `open`; Esc, a click outside or Close shut it.
-pub fn show(ctx: &Context, open: &mut bool) {
+pub fn show(ctx: &Context, open: &mut bool, enter_sends: bool) {
     if !*open {
         return;
     }
@@ -16,7 +16,7 @@ pub fn show(ctx: &Context, open: &mut bool) {
         ui.label(RichText::new("Keyboard shortcuts").font(ty::title()).color(p.text));
         ui.add_space(14.0);
         egui::Grid::new("shortcut-list").num_columns(2).spacing(vec2(24.0, 7.0)).show(ui, |ui| {
-            for (keys, what) in list(ctx) {
+            for (keys, what) in list(ctx, enter_sends) {
                 ui.label(RichText::new(keys).font(ty::small_strong()).color(p.text));
                 ui.label(RichText::new(what).font(ty::small()).color(p.dim));
                 ui.end_row();
@@ -41,7 +41,7 @@ pub fn keys(ctx: &Context, shortcut: &KeyboardShortcut) -> String {
     ctx.format_shortcut(shortcut).replace('⏶', "↑").replace('⏷', "↓").replace('⏴', "←").replace('⏵', "→")
 }
 
-fn list(ctx: &Context) -> Vec<(String, &'static str)> {
+fn list(ctx: &Context, enter_sends: bool) -> Vec<(String, &'static str)> {
     let key = |modifiers, key| keys(ctx, &KeyboardShortcut::new(modifiers, key));
     let cmd = Modifiers::COMMAND;
     let alt_shift = Modifiers::ALT | Modifiers::SHIFT;
@@ -53,8 +53,8 @@ fn list(ctx: &Context) -> Vec<(String, &'static str)> {
         (format!("{}  {}", key(alt_shift, Key::ArrowUp), key(alt_shift, Key::ArrowDown)), "Previous or next unread one"),
         (key(cmd | Modifiers::SHIFT, Key::U), "Mark the conversation unread"),
         (key(cmd, Key::F), "Find in the conversation"),
-        (key(Modifiers::NONE, Key::Enter), "Send"),
-        (key(Modifiers::SHIFT, Key::Enter), "New line"),
+        (key(if enter_sends { Modifiers::NONE } else { cmd }, Key::Enter), "Send"),
+        (key(if enter_sends { Modifiers::SHIFT } else { Modifiers::NONE }, Key::Enter), "New line"),
         (key(Modifiers::NONE, Key::ArrowUp), "Edit your last message (in an empty box)"),
         (key(Modifiers::NONE, Key::Escape), "Cancel a quote or an edit"),
         (key(Modifiers::NONE, Key::Tab), "Move between controls and messages"),
@@ -63,5 +63,6 @@ fn list(ctx: &Context) -> Vec<(String, &'static str)> {
         (format!("{}  {}  {}", key(cmd, Key::Plus), key(cmd, Key::Minus), key(cmd, Key::Num0)), "Bigger, smaller, usual size"),
         (key(cmd, Key::R), "Refresh"),
         (key(cmd, Key::Slash), "These shortcuts"),
+        (key(cmd, Key::Comma), "Settings"),
     ]
 }

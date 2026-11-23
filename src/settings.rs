@@ -183,6 +183,51 @@ impl Look {
     }
 }
 
+/// How drift behaves, as set in Settings: what shows, what notifies, how the
+/// composer sends.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Options {
+    /// The top bar's tabs besides Chats (which always shows).
+    pub activity_tab: bool,
+    pub teams_tab: bool,
+    pub calendar_tab: bool,
+    /// Tighter rows in the list and smaller message bubbles.
+    pub compact: bool,
+    /// The newest message under each conversation's name in the list.
+    pub list_previews: bool,
+    /// drift's sound with a notification.
+    pub sound: bool,
+    /// What was written, in a system notification (off: only who, and where).
+    pub notification_text: bool,
+    /// A notification for each post in a followed channel (off: only mentions and
+    /// replies, through Activity).
+    pub channel_posts: bool,
+    /// Enter sends (Shift+Enter breaks the line); off, ⌘Enter sends and Enter breaks it.
+    pub enter_sends: bool,
+    /// The Markdown it takes, under the composer.
+    pub markdown_hints: bool,
+    /// `:)` and the like become emoji as they're typed.
+    pub emoticons: bool,
+}
+
+impl Default for Options {
+    fn default() -> Options {
+        Options {
+            activity_tab: true,
+            teams_tab: true,
+            calendar_tab: true,
+            compact: false,
+            list_previews: true,
+            sound: true,
+            notification_text: true,
+            channel_posts: true,
+            enter_sends: true,
+            markdown_hints: true,
+            emoticons: true,
+        }
+    }
+}
+
 /// The user's preferences, as kept in the settings file. Change them with
 /// [`Prefs::update`], which saves what changed.
 #[derive(Clone, Debug, PartialEq)]
@@ -213,6 +258,9 @@ pub struct Prefs {
     pub recent_emoji: Vec<String>,
     /// Check for new versions now and then, and download them to install on restart.
     pub auto_update: bool,
+    pub options: Options,
+    /// Notifications paused until then (Unix ms).
+    pub paused_until: Option<i64>,
     /// The settings file changes are saved to; None keeps them in memory.
     file: Option<PathBuf>,
 }
@@ -238,6 +286,29 @@ impl Prefs {
             conversation: get("conversation").map(str::to_string),
             notifications: get("notifications") != Some("false"),
             auto_update: get("auto_update") != Some("false"),
+            options: {
+                let d = Options::default();
+                let flag = |k: &str, default: bool| match get(k) {
+                    Some("true") => true,
+                    Some("false") => false,
+                    _ => default,
+                };
+                let hidden: Vec<&str> = get("hidden_tabs").map(|v| v.split(',').collect()).unwrap_or_default();
+                Options {
+                    activity_tab: !hidden.contains(&"activity"),
+                    teams_tab: !hidden.contains(&"teams"),
+                    calendar_tab: !hidden.contains(&"calendar"),
+                    compact: flag("compact", d.compact),
+                    list_previews: flag("list_previews", d.list_previews),
+                    sound: flag("notification_sound", d.sound),
+                    notification_text: flag("notification_text", d.notification_text),
+                    channel_posts: flag("channel_posts", d.channel_posts),
+                    enter_sends: get("send_with") != Some("cmd-enter"),
+                    markdown_hints: flag("markdown_hints", d.markdown_hints),
+                    emoticons: flag("emoticons", d.emoticons),
+                }
+            },
+            paused_until: get("paused_until").and_then(|v| v.parse().ok()),
             recent_emoji: get("recent_emoji")
                 .map(|v| v.split(',').filter(|s| !s.is_empty()).map(str::to_string).collect())
                 .unwrap_or_default(),
@@ -289,10 +360,27 @@ impl Prefs {
         }
     }
 
-    fn values(&self) -> [(&'static str, String); 14] {
+    fn values(&self) -> [(&'static str, String); 24] {
+        let flag = |on: bool| if on { "true" } else { "false" }.to_string();
+        let o = &self.options;
+        let hidden_tabs: Vec<&str> = [(o.activity_tab, "activity"), (o.teams_tab, "teams"), (o.calendar_tab, "calendar")]
+            .into_iter()
+            .filter(|(on, _)| !on)
+            .map(|(_, k)| k)
+            .collect();
         [
             ("accent", self.accent.key().into()),
             ("auto_update", if self.auto_update { "true" } else { "false" }.into()),
+            ("channel_posts", flag(o.channel_posts)),
+            ("compact", flag(o.compact)),
+            ("emoticons", flag(o.emoticons)),
+            ("hidden_tabs", hidden_tabs.join(",")),
+            ("list_previews", flag(o.list_previews)),
+            ("markdown_hints", flag(o.markdown_hints)),
+            ("notification_sound", flag(o.sound)),
+            ("notification_text", flag(o.notification_text)),
+            ("paused_until", self.paused_until.map_or(String::new(), |at| at.to_string())),
+            ("send_with", if o.enter_sends { "enter" } else { "cmd-enter" }.into()),
             ("conversation", self.conversation.clone().unwrap_or_default()),
             ("dark_theme", self.dark_theme.key().into()),
             (
@@ -336,7 +424,7 @@ fn merge(text: &str, changes: &[(&str, String)]) -> String {
 mod tests {
     use super::*;
 
-    const SAVED: &str = "accent=teal\nauto_update=false\nconversation=19:abc@thread.v2\ndark_theme=slate\nfolded=meetings,team:19:t@thread.tacv2\nfollowing=19:prs@thread.tacv2\nhidden=19:old@thread.v2|1793000000000\nlight_theme=cool\nlist_width=360\nmuted=19:x@thread.v2,19:y\nnotifications=false\nrecent_emoji=yes,wave;0-weu-d1-abc\ntext_size=110\ntheme=light\n";
+    const SAVED: &str = "accent=teal\nauto_update=false\nchannel_posts=false\ncompact=true\nconversation=19:abc@thread.v2\ndark_theme=slate\nemoticons=false\nfolded=meetings,team:19:t@thread.tacv2\nfollowing=19:prs@thread.tacv2\nhidden=19:old@thread.v2|1793000000000\nhidden_tabs=teams,calendar\nlight_theme=cool\nlist_previews=false\nlist_width=360\nmarkdown_hints=false\nmuted=19:x@thread.v2,19:y\nnotification_sound=false\nnotification_text=false\nnotifications=false\npaused_until=1793000000000\nrecent_emoji=yes,wave;0-weu-d1-abc\nsend_with=cmd-enter\ntext_size=110\ntheme=light\n";
 
     #[test]
     fn reads_a_saved_file() {
@@ -347,6 +435,16 @@ mod tests {
         assert_eq!(p.following, ["19:prs@thread.tacv2"]);
         assert_eq!((p.light_theme, p.dark_theme, p.accent, p.text_size), (Theme::Cool, Theme::Slate, Accent::Teal, 110));
         assert_eq!(p.list_width, Some(360));
+        let o = p.options;
+        assert!(o.activity_tab && !o.teams_tab && !o.calendar_tab);
+        assert!(o.compact && !o.list_previews && !o.sound && !o.notification_text && !o.channel_posts);
+        assert!(!o.enter_sends && !o.markdown_hints && !o.emoticons);
+        assert_eq!(p.paused_until, Some(1793000000000));
+    }
+
+    #[test]
+    fn options_start_as_drift_always_was() {
+        assert_eq!(Prefs::parse("").options, Options::default());
     }
 
     #[test]

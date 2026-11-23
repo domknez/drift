@@ -53,8 +53,9 @@ a fraction of the memory the official app keeps busy doing nothing.
 - **Notifications** for new messages in your chats and meeting chats, and for mentions
   and replies (Activity), with a sound of drift's own; a click opens the conversation.
   Channels you pick ("Notify about every post") notify for every post. Muted chats and
-  the one on screen stay quiet; the Dock icon shows how many chats are unread. Off in
-  the menu under your picture
+  the one on screen stay quiet; the Dock icon shows how many chats are unread. Pause
+  them for an hour or until tomorrow from the menu under your picture; sound, message
+  text and channel posts in Settings
 - **Meeting reminders** a minute before each meeting; a click joins it
 - **Who has read it:** "Seen by" under your last message, and in group chats the names
   in a message's menu
@@ -67,8 +68,11 @@ a fraction of the memory the official app keeps busy doing nothing.
   you chat with shows theirs (out of office too)
 - **Live:** new messages arrive as they're sent, pushed by Teams
 - **Quick switcher (⌘T)** to jump to any chat, channel or tab; ⌘1–⌘4 for the tabs;
-  ⌥↑ ⌥↓ for the previous or next conversation (with ⇧, the next unread); the menu
-  under your picture lists every shortcut
+  ⌥↑ ⌥↓ for the previous or next conversation (with ⇧, the next unread); ⌘/ lists
+  every shortcut
+- **Settings (⌘,):** themes, accent and text size; which tabs the top bar shows; a
+  compact list, with or without message previews; what notifies; Enter or ⌘Enter to
+  send
 - **Pin and unpin** chats and channels from their right-click menu
 - **Pinned messages** in a strip under the conversation's header: click it to go to
   the message, or open the list of all of them
@@ -155,7 +159,8 @@ src/
 ├── ui/
 │   ├── app.rs        the sign-in page or the workspace, the theme
 │   ├── workspace.rs  the signed-in state: sidebar, open conversation, refreshes
-│   ├── views/        the top bar, the list, the conversation, the thread, sign-in
+│   ├── views/        the top bar, the list, the conversation, the thread, Settings,
+│   │                 sign-in
 │   ├── widgets.rs    avatars, message text, cards, reactions
 │   └── style/        palette, type scale, metrics, icons — all visual constants
 ├── demo.rs        a made-up workspace (DRIFT_DEMO=1) for screenshots

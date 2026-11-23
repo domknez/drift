@@ -29,6 +29,19 @@ pub fn settings() -> String {
     "shown through the desktop's notification service".into()
 }
 
+/// Whether notifications come with drift's sound (the user's setting).
+static SOUND: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+/// Turn the sound of notifications on or off.
+pub fn set_sound(on: bool) {
+    SOUND.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+#[cfg_attr(windows, allow(dead_code))]
+fn sound() -> bool {
+    SOUND.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// Show a notification; `on_click` runs (on another thread) if the user clicks it.
 pub fn show(title: &str, subtitle: Option<&str>, body: &str, on_click: impl FnOnce() + Send + 'static) {
     // macOS shows nothing for a notification without a body (a bot's card, say).
@@ -55,7 +68,9 @@ pub fn show(title: &str, subtitle: Option<&str>, body: &str, on_click: impl FnOn
             n.summary(&title).body(&body).appname("drift");
             // The desktop's own sound for a new message (freedesktop's sound theme).
             #[cfg(unix)]
-            n.sound_name("message-new-instant");
+            if sound() {
+                n.sound_name("message-new-instant");
+            }
             match n.show() {
                 #[cfg(unix)]
                 Ok(handle) => handle.wait_for_action(|action| {
@@ -244,7 +259,9 @@ mod center {
         }
         content.setBody(&NSString::from_str(body));
         // drift's own sound (in the app bundle), as Teams has its own.
-        content.setSound(Some(&UNNotificationSound::soundNamed(&NSString::from_str("message.wav"))));
+        if super::sound() {
+            content.setSound(Some(&UNNotificationSound::soundNamed(&NSString::from_str("message.wav"))));
+        }
         // Unique across runs too: a notification with the identifier of one still in
         // Notification Center (from an earlier run) replaces it quietly, with no banner.
         let started =

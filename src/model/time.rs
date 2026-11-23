@@ -135,6 +135,13 @@ pub fn day(ms: i64, now: i64) -> String {
     }
 }
 
+/// `hour`:00 local time on the day after `now` (Unix ms).
+pub fn tomorrow_at(now: i64, hour: i64) -> i64 {
+    let local = (day_number(now) + 1) * 86_400 + hour * 3_600;
+    // The zone's offset then (summer time may begin or end overnight).
+    (local - local_offset(local - local_offset(local))) * 1000
+}
+
 /// The local calendar day of `ms`, for telling whether two times fall on the same day.
 pub fn day_number(ms: i64) -> i64 {
     let c = local(ms);
@@ -193,6 +200,15 @@ fn month_name(m: u32) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn tomorrow_morning_is_the_next_local_day() {
+        let now = now_ms();
+        let at = tomorrow_at(now, 8);
+        assert_eq!(day_number(at), day_number(now) + 1);
+        assert_eq!(clock(at), "08:00");
+    }
+
     use super::*;
 
     #[test]
