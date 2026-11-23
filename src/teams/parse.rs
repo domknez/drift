@@ -151,7 +151,7 @@ fn preview(m: &Value) -> Option<Preview> {
     let kind = str_of(m, &["messagetype", "messageType"]).unwrap_or("");
     let body = if kind.starts_with("RichText") { text::from_html(content) } else { text::plain(content) };
     // A card's markup says little or nothing: what the card says, and its title.
-    let mut text = text::flatten(&body);
+    let mut text = text::said(&body);
     if kind == "RichText/Media_Card" || text.trim().is_empty() {
         let swift = (kind == "RichText/Media_Card").then(|| swift(content)).flatten();
         let summary = swift.as_ref().and_then(|s| s["summary"].as_str()).map(|s| text::flatten(&text::plain(s))).unwrap_or_default();

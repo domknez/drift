@@ -1958,7 +1958,7 @@ impl Workspace {
             let verb = source.map_or("", |s| s.verb());
             let title = if verb.is_empty() { m.author.name.clone() } else { format!("{} {verb}", m.author.name) };
             let place = source.map(|s| s.title.as_str()).filter(|t| !t.is_empty());
-            let body: String = crate::model::text::flatten(&m.body).chars().take(160).collect();
+            let body: String = crate::model::text::said(&m.body).chars().take(160).collect();
             crate::notify::show(&title, place, &body, click());
         }
     }
@@ -2032,7 +2032,7 @@ impl Workspace {
 /// The Teams markup of a quoted message, put above the reply.
 fn quote_html(m: &Message) -> String {
     let esc = |s: &str| s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
-    let preview: String = text::flatten(&m.body).chars().take(240).collect();
+    let preview: String = text::said(&m.body).chars().take(240).collect();
     format!(
         "<blockquote itemscope=\"\" itemtype=\"http://schema.skype.com/Reply\" itemid=\"{id}\"><strong itemprop=\"mri\" itemid=\"{mri}\">{name}</strong><span itemprop=\"time\" itemid=\"{id}\"></span><p itemprop=\"preview\">{preview}</p></blockquote>",
         id = m.id,

@@ -130,6 +130,14 @@ pub fn flatten(body: &[Block]) -> String {
     flatten_with(body, |r| r.text.clone())
 }
 
+/// What a message itself says, on one line: [`flatten`] without the message a
+/// reply quotes (as Teams previews it); all of it if that leaves nothing.
+pub fn said(body: &[Block]) -> String {
+    let own: Vec<Block> = body.iter().filter(|b| !matches!(b, Block::Quote(_, Some(_)))).cloned().collect();
+    let text = flatten(&own);
+    if text.trim().is_empty() { flatten(body) } else { text }
+}
+
 /// On one line like [`flatten`], with links kept as Markdown's `[text](url)`.
 pub fn flatten_keeping_links(body: &[Block]) -> String {
     flatten_with(body, |r| match &r.span.link {
@@ -730,6 +738,17 @@ mod tests {
     fn reply_quotes_know_their_message() {
         let html = r#"<blockquote itemscope="" itemtype="http://schema.skype.com/Reply" itemid="1698"><strong itemprop="mri">Maya</strong><p itemprop="preview">old</p></blockquote><p>new</p>"#;
         assert!(matches!(&from_html(html)[0], Block::Quote(_, Some(id)) if id == "1698"));
+    }
+
+    #[test]
+    fn a_reply_says_what_it_adds_not_what_it_quotes() {
+        let html = r#"<blockquote itemscope="" itemtype="http://schema.skype.com/Reply" itemid="1698"><strong itemprop="mri" itemid="8:orgid:abc">Display Name</strong><p itemprop="preview">old</p></blockquote><p>Great to hear!</p>"#;
+        assert_eq!(said(&from_html(html)), "Great to hear!");
+        // Nothing but the quote: that, rather than nothing.
+        let only = r#"<blockquote itemtype="http://schema.skype.com/Reply" itemid="1"><p>old</p></blockquote>"#;
+        assert_eq!(said(&from_html(only)), "old");
+        // A plain quote is part of what's said.
+        assert_eq!(said(&from_html("<blockquote><p>cited</p></blockquote><p>so</p>")), "cited so");
     }
 
     #[test]
