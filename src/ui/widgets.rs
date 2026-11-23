@@ -307,6 +307,35 @@ pub enum Clicked {
     Image(String),
     /// A file's download button.
     Download(crate::model::File),
+    /// A picture's menu: what to do with it, and its URL.
+    Picture(PictureAction, String),
+}
+
+/// What a picture's menu does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PictureAction {
+    Copy,
+    Save,
+}
+
+/// A picture's right-click menu; `view` offers seeing it big (not when it already is).
+fn picture_menu(response: &Response, view: bool) -> (bool, Option<PictureAction>) {
+    let (mut open, mut action) = (false, None);
+    response.context_menu(|ui| {
+        if view && ui.button("Open").clicked() {
+            open = true;
+            ui.close();
+        }
+        if ui.button("Copy image").clicked() {
+            action = Some(PictureAction::Copy);
+            ui.close();
+        }
+        if ui.button("Save image as…").clicked() {
+            action = Some(PictureAction::Save);
+            ui.close();
+        }
+    });
+    (open, action)
 }
 
 /// A message's blocks: paragraphs, tables, quotes, code and pictures. `names` by id
@@ -339,19 +368,20 @@ pub fn blocks(
                 );
             }
             Block::Table { rows, header } => table(ui, pictures, rows, *header),
-            Block::Image { url, size } => {
-                if image(ui, pictures, url, *size) {
-                    clicked = Some(Clicked::Image(url.clone()));
-                }
-            }
+            Block::Image { url, size } => match image(ui, pictures, url, *size) {
+                (true, _) => clicked = Some(Clicked::Image(url.clone())),
+                (false, Some(action)) => clicked = Some(Clicked::Picture(action, url.clone())),
+                (false, None) => {}
+            },
         }
     }
     clicked
 }
 
 /// A picture in a message, at most this wide, its corners rounded; a soft placeholder
-/// of the right shape while it loads. True when it was clicked (to see it big).
-fn image(ui: &mut Ui, pictures: &mut Pictures, url: &str, size: Option<(u32, u32)>) -> bool {
+/// of the right shape while it loads. Whether it was clicked (to see it big), and
+/// what its menu asked for.
+fn image(ui: &mut Ui, pictures: &mut Pictures, url: &str, size: Option<(u32, u32)>) -> (bool, Option<PictureAction>) {
     const MAX: f32 = 320.0;
     let p = colors();
     let texture = pictures.get(&Picture::Image(url.to_string()));
@@ -367,19 +397,23 @@ fn image(ui: &mut Ui, pictures: &mut Pictures, url: &str, size: Option<(u32, u32
     match texture {
         Some(t) => {
             egui::Image::new((t, shown)).corner_radius(10).paint_at(ui, rect);
-            response.on_hover_cursor(egui::CursorIcon::ZoomIn).clicked()
+            let response = response.on_hover_cursor(egui::CursorIcon::ZoomIn);
+            let (open, action) = picture_menu(&response, true);
+            (response.clicked() || open, action)
         }
         None => {
             ui.painter().rect_filled(rect, CornerRadius::same(10), p.hover);
-            false
+            (false, None)
         }
     }
 }
 
 /// A picture over the whole window, as big as fits; a click anywhere or Esc closes
-/// it. False once it's closed.
-pub fn lightbox(ctx: &egui::Context, pictures: &mut Pictures, url: &str) -> bool {
-    let Some(texture) = pictures.get(&Picture::Image(url.to_string())) else { return false };
+/// it, a right-click on it has its menu. False once it's closed; what its menu
+/// asked for.
+pub fn lightbox(ctx: &egui::Context, pictures: &mut Pictures, url: &str) -> (bool, Option<PictureAction>) {
+    let Some(texture) = pictures.get(&Picture::Image(url.to_string())) else { return (false, None) };
+    let mut action = None;
     let natural = ctx.tex_manager().read().meta(texture).map_or(vec2(1.0, 1.0), |m| vec2(m.size[0] as f32, m.size[1] as f32));
     let mut open = !ctx.input(|i| i.key_pressed(egui::Key::Escape));
     egui::Area::new(egui::Id::unique("lightbox")).order(egui::Order::Foreground).fixed_pos(egui::Pos2::ZERO).show(ctx, |ui| {
@@ -393,8 +427,13 @@ pub fn lightbox(ctx: &egui::Context, pictures: &mut Pictures, url: &str) -> bool
         if response.clicked() {
             open = false;
         }
+        let on_picture = ui.interact(rect, ui.scope_id().with("lightbox-picture"), Sense::click());
+        action = picture_menu(&on_picture, false).1;
+        if on_picture.clicked() {
+            open = false;
+        }
     });
-    open
+    (open, action)
 }
 
 /// A quote (or the message a reply quotes): a tinted box with an accent edge, the

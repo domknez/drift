@@ -25,7 +25,8 @@ flate2 = "1"
 # Checking a downloaded update against its release's checksums.
 sha2 = "0.11"
 # The clipboard's HTML, for links in pasted text (egui only hands over its plain text).
-arboard = { version = "3.7", default-features = false }
+# Its pictures too, to copy one (egui's own clipboard has them on already).
+arboard = { version = "3.7", default-features = false, features = ["image-data"] }
 # The system's file dialog, for attaching pictures.
 rfd = "0.15"
 # The Microsoft sign-in page, shown in a helper process (see login.rs).

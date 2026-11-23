@@ -149,10 +149,14 @@ pub fn workspace(ui: &mut egui::Ui, ws: &mut Workspace, look: Look, updates: &Up
     shortcuts::show(ui.ctx(), &mut ws.shortcuts);
     call::show(ui.ctx(), ws);
     start_up(ui.ctx(), ws);
-    if let Some(url) = ws.viewing.clone()
-        && !super::widgets::lightbox(ui.ctx(), &mut ws.pictures, &url)
-    {
-        ws.viewing = None;
+    if let Some(url) = ws.viewing.clone() {
+        let (open, action) = super::widgets::lightbox(ui.ctx(), &mut ws.pictures, &url);
+        if let Some(action) = action {
+            ws.picture(ui.ctx(), &url, action);
+        }
+        if !open {
+            ws.viewing = None;
+        }
     }
     request
 }

@@ -166,7 +166,7 @@ pub fn image_info(bytes: &[u8]) -> Option<(u32, u32, &'static str)> {
 }
 
 /// JPEG, PNG or GIF, by their signature.
-fn decode(bytes: &[u8]) -> Option<ColorImage> {
+pub fn decode(bytes: &[u8]) -> Option<ColorImage> {
     if bytes.starts_with(b"\x89PNG") {
         decode_png(bytes)
     } else if bytes.starts_with(b"GIF8") {

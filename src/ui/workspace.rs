@@ -3,6 +3,7 @@
 
 use super::load::Load;
 use super::pictures::Pictures;
+use super::widgets::PictureAction;
 use crate::backend::{Backend, Error, Push};
 use crate::model::markdown::{self, Mention};
 use crate::model::{
@@ -166,6 +167,8 @@ pub struct Workspace {
     chores: Vec<(Chore, Load<bool, Error>)>,
     /// Files being saved: where to.
     downloads: Vec<(std::path::PathBuf, Load<(), Error>)>,
+    /// A picture being fetched, to copy or save.
+    picture_job: Option<(super::widgets::PictureAction, Load<Vec<u8>, Error>)>,
     /// The message being sent, and one that couldn't be (with why), in its conversation.
     outbox: Option<Outbox>,
     pub unsent: Option<(String, bool, String)>,
@@ -427,6 +430,7 @@ impl Workspace {
             sending: Load::Idle,
             chores: Vec::new(),
             downloads: Vec::new(),
+            picture_job: None,
             outbox: None,
             unsent: None,
             pending_delete: None,
@@ -621,6 +625,13 @@ impl Workspace {
         let Some(chat) = self.private_chat(&message.author.id) else { return };
         self.open(&chat);
         self.quote(message, false);
+    }
+
+    /// Copy a picture in a message to the clipboard, or save it where the user picks
+    /// (once it's fetched: its kind decides the name's ending).
+    pub fn picture(&mut self, ctx: &egui::Context, url: &str, what: PictureAction) {
+        let (backend, picture) = (self.backend.clone(), crate::model::Picture::Image(url.to_string()));
+        self.picture_job = Some((what, Load::start(ctx, move || backend.picture(&picture))));
     }
 
     /// Save a file shared in a message to `to`; shown in the file manager when done.
@@ -1289,6 +1300,18 @@ impl Workspace {
             }
         }
         self.downloads.retain(|(_, load)| load.is_running());
+        if let Some((what, load)) = &mut self.picture_job
+            && let Some(done) = load.take()
+        {
+            let what = *what;
+            self.picture_job = None;
+            match done.and_then(|bytes| picture_done(what, &bytes)) {
+                Ok(()) => {}
+                Err(e) => {
+                    self.error = Some(format!("Couldn't {} the picture. {e}", if what == PictureAction::Copy { "copy" } else { "save" }))
+                }
+            }
+        }
         for (chore, e) in failed {
             log_warn!("{chore:?}: {e}");
             // What's on screen goes back to what the service has.
@@ -2032,6 +2055,41 @@ fn person(c: &Conversation) -> Option<&str> {
         [one] if c.kind == Kind::Chat => Some(one.id.as_str()),
         _ => None,
     }
+}
+
+/// A fetched picture copied, or saved where the user picks (nothing if they don't).
+fn picture_done(what: PictureAction, bytes: &[u8]) -> Result<(), Error> {
+    let failed = |e: String| Error::Service(e);
+    match what {
+        PictureAction::Copy => {
+            let image = super::pictures::decode(bytes).ok_or_else(|| failed("It isn't a picture drift can read.".into()))?;
+            let rgba: Vec<u8> = image.pixels.iter().flat_map(|c| c.to_srgba_unmultiplied()).collect();
+            let data = arboard::ImageData { width: image.size[0], height: image.size[1], bytes: rgba.into() };
+            arboard::Clipboard::new().and_then(|mut c| c.set_image(data)).map_err(|e| failed(e.to_string()))
+        }
+        PictureAction::Save => {
+            let ending = match super::pictures::image_info(bytes).map(|(_, _, mime)| mime) {
+                Some("image/png") => "png",
+                Some("image/gif") => "gif",
+                _ => "jpg",
+            };
+            let mut dialog = rfd::FileDialog::new().set_title("Save image").set_file_name(format!("image.{ending}"));
+            if let Some(dir) = downloads_folder() {
+                dialog = dialog.set_directory(dir);
+            }
+            let Some(to) = dialog.save_file() else { return Ok(()) };
+            std::fs::write(&to, bytes).map_err(|e| failed(e.to_string()))?;
+            reveal(&to);
+            Ok(())
+        }
+    }
+}
+
+/// The user's Downloads folder, if there is one.
+pub fn downloads_folder() -> Option<std::path::PathBuf> {
+    std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
+        .map(|home| std::path::PathBuf::from(home).join("Downloads"))
+        .filter(|d| d.is_dir())
 }
 
 /// Show a saved file in the file manager (its folder, elsewhere than macOS).

@@ -50,6 +50,8 @@ pub enum Action {
     ReplyPrivately(Message),
     /// Save a file shared in a message.
     Download(crate::model::File),
+    /// Copy or save a picture in a message.
+    Picture(widgets::PictureAction, String),
 }
 
 /// Do what a click on a message asked for; `reply` when it came from the thread.
@@ -83,10 +85,9 @@ pub fn apply(ui: &Ui, ws: &mut Workspace, action: Action, reply: bool) {
             ws.reply_privately(message);
             focus_composer(ui, false);
         }
+        Action::Picture(what, url) => ws.picture(ui.ctx(), &url, what),
         Action::Download(file) => {
-            let downloads = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
-                .map(|home| std::path::PathBuf::from(home).join("Downloads"))
-                .filter(|d| d.is_dir());
+            let downloads = crate::ui::workspace::downloads_folder();
             let mut dialog = rfd::FileDialog::new().set_title("Download").set_file_name(&file.name);
             if let Some(dir) = downloads {
                 dialog = dialog.set_directory(dir);
@@ -1185,6 +1186,7 @@ pub fn bubble(
         Some(widgets::Clicked::Quote(id)) => action = Some(Action::Show(id)),
         Some(widgets::Clicked::Image(url)) => action = Some(Action::View(url)),
         Some(widgets::Clicked::Download(file)) => action = Some(Action::Download(file)),
+        Some(widgets::Clicked::Picture(what, url)) => action = Some(Action::Picture(what, url)),
         None => {}
     }
     if focused && !view.scrolled {
