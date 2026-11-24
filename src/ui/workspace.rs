@@ -1176,7 +1176,7 @@ impl Workspace {
         c.read_up_to = Some(up_to);
         // The open one isn't marked read again until something new comes.
         if !read && self.open.as_deref() == Some(id) {
-            let last = self.messages.as_ref().and_then(|m| m.last()).map(|m| m.id.clone()).unwrap_or_default();
+            let last = self.newest_listed().unwrap_or_default();
             self.marked = Some((id.to_string(), last));
         }
         let (backend, id) = (self.backend.clone(), id.to_string());
@@ -1220,7 +1220,7 @@ impl Workspace {
             c.read_up_to = Some(at - 1);
         }
         // Not marked read again until something new comes.
-        let last = self.messages.as_ref().and_then(|m| m.last()).map(|m| m.id.clone()).unwrap_or_default();
+        let last = self.newest_listed().unwrap_or_default();
         self.marked = Some((id.clone(), last));
         let backend = self.backend.clone();
         let up_to = (at - 1).to_string();
@@ -1274,6 +1274,12 @@ impl Workspace {
         self.following.as_ref().is_some_and(|f| f.contains(id))
     }
 
+    /// The id of the open conversation's newest message Teams has (one still on its
+    /// way has only a made-up id, which Teams can't be told was read).
+    fn newest_listed(&self) -> Option<String> {
+        self.messages.as_ref()?.iter().rev().find(|m| !m.sending && m.id.parse::<i64>().is_ok()).map(|m| m.id.clone())
+    }
+
     /// Mark the open conversation read up to its newest message, once per message;
     /// only while drift is in front, so what comes in while the user is elsewhere
     /// stays unread (on the Dock icon too) until they come back to it.
@@ -1281,7 +1287,7 @@ impl Workspace {
         if !ctx.input(|i| i.viewport().focused.unwrap_or(true)) {
             return;
         }
-        let (Some(open), Some(last)) = (self.open.clone(), self.messages.as_ref().and_then(|m| m.last()).map(|m| m.id.clone())) else {
+        let (Some(open), Some(last)) = (self.open.clone(), self.newest_listed()) else {
             return;
         };
         if self.marked.as_ref() == Some(&(open.clone(), last.clone())) {
