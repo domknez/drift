@@ -2,6 +2,7 @@
 //! channels, messages and the people who wrote them.
 
 pub mod emoji;
+pub mod event;
 pub mod markdown;
 pub mod text;
 pub mod time;
@@ -92,6 +93,9 @@ pub struct Preview {
     pub at: i64,
     /// A reply in a channel's thread, not a post.
     pub reply: bool,
+    /// Not a message but something that happened (someone added, …); `text` says it
+    /// without names.
+    pub event: Option<event::Event>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -159,6 +163,8 @@ pub struct Message {
     pub source: Option<Source>,
     /// Written here and on its way: shown at once, replaced by what Teams has once it's there.
     pub sending: bool,
+    /// Not a message but something that happened (someone added, …), shown as a line.
+    pub event: Option<event::Event>,
 }
 
 /// Where an activity happened: the conversation, its name, and what it was.

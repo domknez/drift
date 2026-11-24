@@ -51,6 +51,7 @@ fn chat(id: &str, kind: Kind, title: &str, last: (&str, &str, i64), unread: bool
             text: last.1.into(),
             at: last.2,
             reply: false,
+            event: None,
         }),
         unread,
         read_up_to: None,
@@ -74,7 +75,7 @@ fn channel_preview(id: &str) -> Preview {
         "19:side@thread.tacv2" => ("Priya Nair", "Build 0.4 is up for testing", today(11, 0) - 30 * 86_400_000),
         _ => ("Lea Novak", "Welcome to Halcyon!", today(11, 0) - 20 * 86_400_000),
     };
-    Preview { author: author.into(), author_id: String::new(), text: text.into(), at, reply: false }
+    Preview { author: author.into(), author_id: String::new(), text: text.into(), at, reply: false, event: None }
 }
 
 fn channel(id: &str, name: &str, general: bool, unread: bool, pinned: bool) -> Channel {
@@ -313,6 +314,18 @@ impl Backend for Demo {
             };
             let mut messages = vec![message("2001", None, who, today(10, 0), &format!("<p>{line}</p>"), None, vec![])];
             if conversation == "19:release" {
+                // Someone added, as Teams sends it: ids, and since when they may read.
+                let added = format!(
+                    "<addmember><eventtime>{at}</eventtime><initiator>8:orgid:priya</initiator><target>8:orgid:jonas</target><detailedtargetinfo><id>8:orgid:jonas</id><sharehistorytime>{from}</sharehistorytime></detailedtargetinfo></addmember>",
+                    at = today(10, 2),
+                    from = today(10, 2) - 3 * 86_400_000
+                );
+                messages.push(Message {
+                    author: author("priya"),
+                    body: Vec::new(),
+                    event: crate::model::event::Event::parse("ThreadActivity/AddMember", &added),
+                    ..message("2001.5", None, "priya", today(10, 2), "", None, vec![])
+                });
                 messages.push(message("2002", None, ME, today(10, 4), "<p>Release notes are ready for review.</p>", None, vec![]));
             }
             return Ok(messages);
@@ -622,6 +635,7 @@ fn message(id: &str, root: Option<&str>, who: &str, at: i64, html: &str, card: O
         reactions,
         source: None,
         sending: false,
+        event: None,
     }
 }
 

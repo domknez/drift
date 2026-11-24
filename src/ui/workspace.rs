@@ -546,6 +546,7 @@ impl Workspace {
                     reactions: Vec::new(),
                     source: None,
                     sending: true,
+                    event: None,
                 };
                 if let Some(messages) = self.messages.as_mut() {
                     messages.push(shown.clone());

@@ -631,6 +631,12 @@ pub fn lead(ui: &mut Ui, ws: &mut Workspace, c: &Conversation, rect: Rect, behin
 /// The newest message, as "Name: text" (or "You: text").
 fn preview(ws: &Workspace, c: &Conversation) -> String {
     let Some(last) = &c.last else { return String::new() };
+    // Someone added, a new name: told with the names the conversation knows.
+    if let Some(event) = &last.event {
+        let mut names: std::collections::HashMap<String, String> = ws.people().into_iter().map(|p| (p.id, p.name)).collect();
+        names.extend(c.members.iter().map(|m| (m.id.clone(), m.name.clone())));
+        return event.told(&names, &ws.me_id, if c.kind == Kind::Channel { "team" } else { "chat" });
+    }
     let first = last.author.split_whitespace().next().unwrap_or("");
     if (!last.author_id.is_empty() && last.author_id == ws.me_id) || (last.author_id.is_empty() && last.author == ws.me) {
         format!("You: {}", last.text)

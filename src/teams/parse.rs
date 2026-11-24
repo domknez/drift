@@ -1,11 +1,13 @@
 //! The services' JSON as `model` types. Fields are read leniently: the web client's
 //! API isn't documented, and what's missing gets a default rather than an error.
 
+use crate::model::event::Event;
 use crate::model::{
     Author, Availability, Card, Channel, Conversation, CustomEmoji, File, Follow, Kind, Meeting, Message, Picture, Presence, Preview,
     Reaction, SearchHit, Source, Status, Team, text, time,
 };
 use serde_json::Value;
+use std::collections::HashMap;
 
 fn str_of<'a>(v: &'a Value, keys: &[&str]) -> Option<&'a str> {
     keys.iter().find_map(|k| v[*k].as_str()).filter(|s| !s.is_empty())
@@ -152,7 +154,8 @@ fn preview(m: &Value) -> Option<Preview> {
     // Someone added, a new name, a call: said in words, by no one (so it never
     // notifies, nor reads as someone's message).
     if let Some(text) = event(kind, content) {
-        return Some(Preview { author: String::new(), author_id: String::new(), text, at, reply: false });
+        let event = Event::parse(kind, content);
+        return Some(Preview { author: String::new(), author_id: String::new(), text, at, reply: false, event });
     }
     let body = if kind.starts_with("RichText") { text::from_html(content) } else { text::plain(content) };
     // A card's markup says little or nothing: what the card says, and its title.
@@ -180,42 +183,16 @@ fn preview(m: &Value) -> Option<Preview> {
     let link_root = str_of(m, &["conversationLink"]).and_then(|l| l.split_once(";messageid=")).map(|(_, r)| r);
     let root = str_of(m, &["rootMessageId"]).or(link_root);
     let reply = !id.is_empty() && root.is_some_and(|r| r != id);
-    Some(Preview { author, author_id, text, at, reply })
+    Some(Preview { author, author_id, text, at, reply, event: None })
 }
 
-/// What a membership or conversation event says, for the list (its content is
-/// markup naming people by id only); None for messages.
+/// What a membership or conversation event says, without names (the list puts
+/// them in from the event, where it knows them); None for messages.
 fn event(kind: &str, content: &str) -> Option<String> {
-    let Some(what) = kind.strip_prefix("ThreadActivity/") else {
+    if !kind.starts_with("ThreadActivity/") {
         return kind.starts_with("Event/Call").then(|| "Call".to_string());
-    };
-    let tags = |tag: &str| {
-        let (open, close) = (format!("<{tag}>"), format!("</{tag}>"));
-        content.split(open.as_str()).skip(1).filter_map(|rest| rest.split_once(close.as_str()).map(|(v, _)| v.trim())).collect::<Vec<_>>()
-    };
-    let people = |n: usize, verb: &str| match n {
-        0 | 1 => format!("Someone was {verb}"),
-        n => format!("{n} people were {verb}"),
-    };
-    Some(match what {
-        "AddMember" => people(tags("target").len(), "added"),
-        "DeleteMember" => {
-            let (initiator, targets) = (tags("initiator"), tags("target"));
-            if targets.len() <= 1 && initiator.first().is_some_and(|i| targets.first() == Some(i)) {
-                "Someone left".to_string()
-            } else {
-                people(targets.len(), "removed")
-            }
-        }
-        "MemberJoined" => "Someone joined".to_string(),
-        "MemberLeft" => "Someone left".to_string(),
-        "TopicUpdate" => match tags("value").first().map(|v| text::flatten(&text::from_html(v))).filter(|v| !v.is_empty()) {
-            Some(name) => format!("Renamed to {name}"),
-            None => "Renamed".to_string(),
-        },
-        "PictureUpdate" => "Changed the picture".to_string(),
-        _ => "Conversation updated".to_string(),
-    })
+    }
+    Some(Event::parse(kind, content).map_or_else(|| "Conversation updated".into(), |e| e.told(&HashMap::new(), "", "chat")))
 }
 
 /// What in a channel notifies: its notification settings (JSON in a string), or
@@ -254,6 +231,26 @@ pub fn pinned(thread: &Value) -> Vec<String> {
 
 pub fn message(m: &Value, me: &str) -> Option<Message> {
     let kind = str_of(m, &["messagetype"])?;
+    if let Some(event) = Event::parse(kind, str_of(m, &["content"]).unwrap_or("")) {
+        let by = event.by.as_ref().map_or_else(
+            || Author { id: String::new(), name: String::new() },
+            |(id, name)| Author { id: id.clone(), name: name.clone().unwrap_or_default() },
+        );
+        return Some(Message {
+            id: str_of(m, &["id"])?.to_string(),
+            root: None,
+            author: by,
+            at: str_of(m, &["originalarrivaltime", "composetime"]).and_then(time::parse_iso).unwrap_or(0),
+            body: Vec::new(),
+            card: None,
+            files: Vec::new(),
+            edited: false,
+            reactions: Vec::new(),
+            source: None,
+            sending: false,
+            event: Some(event),
+        });
+    }
     if !matches!(kind, "Text" | "RichText" | "RichText/Html" | "RichText/Media_Card") || m["properties"]["deletetime"].is_string() {
         return None;
     }
@@ -320,6 +317,7 @@ pub fn message(m: &Value, me: &str) -> Option<Message> {
         reactions: reactions(&m["properties"]["emotions"], me),
         source,
         sending: false,
+        event: None,
     })
 }
 
@@ -590,15 +588,9 @@ mod tests {
             &json!({"messagetype": "ThreadActivity/AddMember", "content": add, "composetime": "2026-10-30T10:42:00Z", "from": "8:orgid:a"}),
         )
         .unwrap();
-        assert_eq!((p.text.as_str(), p.author.as_str(), p.author_id.as_str()), ("Someone was added", "", ""));
-        let two = "<addmember><target>8:orgid:b</target><target>8:orgid:c</target></addmember>";
-        assert_eq!(event("ThreadActivity/AddMember", two).as_deref(), Some("2 people were added"));
-        let left = "<deletemember><initiator>8:orgid:b</initiator><target>8:orgid:b</target></deletemember>";
-        assert_eq!(event("ThreadActivity/DeleteMember", left).as_deref(), Some("Someone left"));
-        let removed = "<deletemember><initiator>8:orgid:a</initiator><target>8:orgid:b</target></deletemember>";
-        assert_eq!(event("ThreadActivity/DeleteMember", removed).as_deref(), Some("Someone was removed"));
-        let topic = "<topicupdate><eventtime>1</eventtime><initiator>8:orgid:a</initiator><value>Launch &amp; co</value></topicupdate>";
-        assert_eq!(event("ThreadActivity/TopicUpdate", topic).as_deref(), Some("Renamed to Launch & co"));
+        assert_eq!((p.text.as_str(), p.author.as_str(), p.author_id.as_str()), ("Someone added Someone to the chat.", "", ""));
+        let names = HashMap::from([("8:orgid:a".to_string(), "Ana".to_string()), ("8:orgid:b".to_string(), "Bo".to_string())]);
+        assert_eq!(p.event.unwrap().told(&names, "", "chat"), "Ana added Bo to the chat.");
         assert_eq!(event("ThreadActivity/HistoryDisclosedUpdate", "<x/>").as_deref(), Some("Conversation updated"));
         assert_eq!(event("RichText/Html", "<p>hi</p>"), None);
     }

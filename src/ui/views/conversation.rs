@@ -803,7 +803,7 @@ pub fn list(ui: &mut Ui, pictures: &mut Pictures, messages: &[Message], view: &m
         }
     }
     // "Seen" goes under the user's newest message.
-    let newest_mine = shown.iter().rev().find(|m| !view.me.is_empty() && m.author.id == view.me).map(|m| m.id.clone());
+    let newest_mine = shown.iter().rev().find(|m| m.event.is_none() && !view.me.is_empty() && m.author.id == view.me).map(|m| m.id.clone());
     let mut action = None;
     // Only the newest are laid out (fewer pictures loading above them, and a short list
     // to scroll), back far enough to include a message to bring into view.
@@ -845,6 +845,10 @@ pub fn list(ui: &mut Ui, pictures: &mut Pictures, messages: &[Message], view: &m
                 view.new_scrolled = true;
             }
         }
+        if let Some(event) = &m.event {
+            event_line(ui, event, view);
+            continue;
+        }
         let prev_thread = prev.is_some_and(|prev| replies.contains_key(prev.id.as_str()));
         let first = new_day || prev_thread || !prev.is_some_and(|prev| continues(prev, m));
         let last = !thread.is_empty() || !next.is_some_and(|n| continues(m, n) && time::day_number(n.at) == time::day_number(m.at));
@@ -878,7 +882,22 @@ fn new_messages(ui: &mut Ui) -> Rect {
 }
 
 fn continues(prev: &Message, m: &Message) -> bool {
-    prev.author.id == m.author.id && m.at - prev.at < metrics::GROUP_GAP
+    prev.event.is_none() && m.event.is_none() && prev.author.id == m.author.id && m.at - prev.at < metrics::GROUP_GAP
+}
+
+/// Something that happened to the conversation (someone added, a new name), as a
+/// quiet line between the messages, as Teams shows it.
+fn event_line(ui: &mut Ui, event: &crate::model::event::Event, view: &View) {
+    let p = colors();
+    let told = event.told(view.authors, view.me, if view.channel { "team" } else { "chat" });
+    ui.add_space(10.0);
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing.x = 8.0;
+        ui.add_space(6.0);
+        widgets::icon(ui, Icon::Members, 15.0, p.faint);
+        ui.label(RichText::new(told).font(ty::small()).color(p.dim));
+    });
+    ui.add_space(6.0);
 }
 
 /// The id of a message's "More actions" menu.
