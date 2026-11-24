@@ -142,9 +142,56 @@ pub fn tomorrow_at(now: i64, hour: i64) -> i64 {
 
 /// `hour`:00 local time `days` days after `now`'s (Unix ms).
 pub fn days_ahead_at(now: i64, days: i64, hour: i64) -> i64 {
-    let local = (day_number(now) + days) * 86_400 + hour * 3_600;
+    local_at(now, days, hour * 60)
+}
+
+/// `minutes` past midnight, local time, `days` days after `now`'s (Unix ms).
+pub fn local_at(now: i64, days: i64, minutes: i64) -> i64 {
+    let local = (day_number(now) + days) * 86_400 + minutes * 60;
     // The zone's offset then (summer time may begin or end overnight).
     (local - local_offset(local - local_offset(local))) * 1000
+}
+
+/// Minutes past local midnight at `ms`.
+pub fn minutes_of_day(ms: i64) -> i64 {
+    let c = local(ms);
+    i64::from(c.hour) * 60 + i64::from(c.minute)
+}
+
+/// A time of day as typed (`9`, `09:30`, `9.30`, `930`, `1745`) in minutes past
+/// midnight; None for anything else.
+pub fn parse_clock(s: &str) -> Option<i64> {
+    let s = s.trim();
+    let (h, m) = match s.split_once([':', '.']) {
+        Some((h, m)) if m.len() == 2 => (h, m),
+        Some(_) => return None,
+        None if s.len() <= 2 => (s, "0"),
+        None if s.len() <= 4 => s.split_at(s.len() - 2),
+        None => return None,
+    };
+    if h.is_empty() || !h.bytes().chain(m.bytes()).all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let (h, m): (i64, i64) = (h.parse().ok()?, m.parse().ok()?);
+    (h < 24 && m < 60).then_some(h * 60 + m)
+}
+
+/// The day `days` after `now`'s: `Today`, `Tomorrow`, `Wednesday 26 November`.
+pub fn day_ahead(now: i64, days: i64) -> String {
+    let today = local(now);
+    let d = days_from_civil(today.year, today.month, today.day) + days;
+    match days {
+        0 => "Today".into(),
+        1 => "Tomorrow".into(),
+        _ => {
+            let c = local(local_at(now, days, 12 * 60));
+            if c.year == today.year {
+                format!("{} {} {}", weekday(d), c.day, month_name(c.month))
+            } else {
+                format!("{} {} {} {}", weekday(d), c.day, month_name(c.month), c.year)
+            }
+        }
+    }
 }
 
 /// `hour`:00 local time next Monday (a week on, when `now` is a Monday).
@@ -157,12 +204,9 @@ pub fn next_monday_at(now: i64, hour: i64) -> i64 {
 /// A time to come, for saying when something will be: `14:05` today,
 /// `Tomorrow 09:00`, `Monday 1 December 09:00`.
 pub fn ahead(ms: i64, now: i64) -> String {
-    let (c, today) = (local(ms), local(now));
-    let d = days_from_civil(c.year, c.month, c.day);
-    match d - days_from_civil(today.year, today.month, today.day) {
+    match day_number(ms) - day_number(now) {
         0 => clock(ms),
-        1 => format!("Tomorrow {}", clock(ms)),
-        _ => format!("{} {} {} {}", weekday(d), c.day, month_name(c.month), clock(ms)),
+        days => format!("{} {}", day_ahead(now, days), clock(ms)),
     }
 }
 
@@ -231,6 +275,28 @@ mod tests {
         let at = tomorrow_at(now, 8);
         assert_eq!(day_number(at), day_number(now) + 1);
         assert_eq!(clock(at), "08:00");
+    }
+
+    #[test]
+    fn reads_times_as_typed() {
+        for (typed, minutes) in [("9", 540), ("09:30", 570), ("9.30", 570), ("930", 570), ("1745", 1065), (" 0 ", 0), ("23:59", 1439)] {
+            assert_eq!(parse_clock(typed), Some(minutes), "{typed}");
+        }
+        for typed in ["", "24", "9:3", "12:60", "abc", "9:30pm", "12345", ":30"] {
+            assert_eq!(parse_clock(typed), None, "{typed}");
+        }
+    }
+
+    #[test]
+    fn local_times_land_on_their_day() {
+        let now = now_ms();
+        let at = local_at(now, 3, 17 * 60 + 45);
+        assert_eq!(day_number(at), day_number(now) + 3);
+        assert_eq!(clock(at), "17:45");
+        assert_eq!(minutes_of_day(at), 17 * 60 + 45);
+        assert_eq!(day_ahead(now, 0), "Today");
+        assert_eq!(day_ahead(now, 1), "Tomorrow");
+        assert!(ahead(at, now).starts_with(&day_ahead(now, 3)));
     }
 
     #[test]

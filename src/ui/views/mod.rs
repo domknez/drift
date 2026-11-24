@@ -5,6 +5,7 @@ mod call;
 pub mod conversation;
 pub mod emoji_picker;
 pub mod list;
+pub mod remind;
 pub mod settings;
 mod shortcuts;
 pub mod sign_in;
@@ -151,6 +152,7 @@ pub fn workspace(ui: &mut egui::Ui, ws: &mut Workspace, look: Look, updates: &Up
     if let Some(asked) = settings::show(ui.ctx(), ws, look, updates) {
         request = Some(asked);
     }
+    remind::show(ui.ctx(), ws);
     call::show(ui.ctx(), ws);
     start_up(ui.ctx(), ws);
     if let Some(url) = ws.viewing.clone() {

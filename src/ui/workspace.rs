@@ -208,6 +208,8 @@ pub struct Workspace {
     clicked: (Sender<String>, Receiver<String>),
     /// Reminders the user set on messages (None until the saved ones are in).
     pub reminders: Option<crate::reminders::Reminders>,
+    /// A reminder being set for a time the user picks, while its dialog is open.
+    pub custom_reminder: Option<super::views::remind::Custom>,
     /// Reminders whose notification was clicked.
     reminder_clicked: (Sender<crate::reminders::Reminder>, Receiver<crate::reminders::Reminder>),
     /// How many of the open conversation's newest messages are shown.
@@ -462,6 +464,7 @@ impl Workspace {
             seen_once: false,
             clicked: std::sync::mpsc::channel(),
             reminders: None,
+            custom_reminder: None,
             reminder_clicked: std::sync::mpsc::channel(),
             newest: NEWEST,
             earlier_from: None,

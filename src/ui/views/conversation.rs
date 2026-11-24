@@ -54,6 +54,8 @@ pub enum Action {
     Picture(widgets::PictureAction, String),
     /// Remind the user of a message then; None to not.
     Remind(Message, Option<i64>),
+    /// Pick when to be reminded of a message.
+    RemindAt(Message),
 }
 
 /// Do what a click on a message asked for; `reply` when it came from the thread.
@@ -89,6 +91,7 @@ pub fn apply(ui: &Ui, ws: &mut Workspace, action: Action, reply: bool) {
         }
         Action::Picture(what, url) => ws.picture(ui.ctx(), &url, what),
         Action::Remind(message, at) => ws.remind(&message, at),
+        Action::RemindAt(message) => ws.custom_reminder = Some(super::remind::Custom::new(message)),
         Action::Download(file) => {
             let downloads = crate::ui::workspace::downloads_folder();
             let mut dialog = rfd::FileDialog::new().set_title("Download").set_file_name(&file.name);
@@ -1022,6 +1025,11 @@ fn remind_menu(ui: &mut Ui, m: &Message, view: &View, action: &mut Option<Action
                 *action = Some(Action::Remind(m.clone(), Some(at)));
                 ui.close();
             }
+        }
+        ui.separator();
+        if ui.button("Custom…").clicked() {
+            *action = Some(Action::RemindAt(m.clone()));
+            ui.close();
         }
     });
 }

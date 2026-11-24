@@ -124,6 +124,12 @@ impl App {
                 });
             }
             workspace.reminders = Some(reminders);
+            // DRIFT_DEMO_REMIND_AT=<message>: picking when to be reminded of it.
+            if let Ok(id) = std::env::var("DRIFT_DEMO_REMIND_AT")
+                && let Some(message) = demo::Demo.messages(&open).ok().and_then(|m| m.into_iter().find(|m| m.id == id))
+            {
+                workspace.custom_reminder = Some(views::remind::Custom::new(message));
+            }
             // DRIFT_DEMO_SETTINGS=<page>: Settings open on that page (`appearance`, `layout`, …).
             if let Ok(page) = std::env::var("DRIFT_DEMO_SETTINGS") {
                 workspace.settings = Some(views::settings::Page::from_key(&page));
