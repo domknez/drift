@@ -963,16 +963,38 @@ impl Workspace {
             // Followed in drift: everything; in Teams: as set there. Teams' own Activity
             // items for these come late or not at all, so the channel itself is watched.
             let follow = if self.is_following(&c.id) { Follow::Everything } else { directory.follow(&c.id) };
-            match c.kind {
-                Kind::Chat | Kind::Meeting if fresh && !self.is_mine(last) => new.push(c),
-                Kind::Channel if self.options.channel_posts && follow.covers(last) && fresh && !self.is_mine(last) => new.push(c),
-                _ => {}
+            let wanted = match c.kind {
+                Kind::Chat | Kind::Meeting => fresh && !self.is_mine(last),
+                Kind::Channel => self.options.channel_posts && follow.covers(last) && fresh && !self.is_mine(last),
+                _ => false,
+            };
+            if wanted {
+                new.push(c);
+            } else if self.seen_once && newer && !self.is_mine(last) && c.kind != Kind::Feed {
+                // Something new from someone else that won't notify, and why (ids only).
+                log_debug!(
+                    "notify: not for {} ({:?}): muted={} on_screen={} following={follow:?} channel_posts={}",
+                    c.id,
+                    c.kind,
+                    c.muted,
+                    on_screen,
+                    self.options.channel_posts
+                );
             }
         }
         self.seen_once = true;
-        if !self.may_notify() || new.is_empty() {
+        if new.is_empty() {
             return;
         }
+        if !self.may_notify() {
+            log_debug!("notify: {} new, but notifications are off or paused", new.len());
+            return;
+        }
+        log_debug!(
+            "notify: {} ({})",
+            new.iter().map(|c| c.id.as_str()).collect::<Vec<_>>().join(", "),
+            if focused { "toast" } else { "system" }
+        );
         // A handful each on its own; more than that as one.
         if new.len() > 3 && !focused {
             let tx = self.clicked.0.clone();

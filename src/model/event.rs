@@ -77,6 +77,14 @@ impl Event {
                 from => Some(History::Days(((at - from) as f64 / 86_400_000.0).round().max(1.0) as i64)),
             }
         });
+        // Whoever adds others is listed among them at a meeting chat's start; Teams
+        // names only the others.
+        let mut whom = whom;
+        if let Some((id, _)) = &by
+            && whom.len() > 1
+        {
+            whom.retain(|(w, _)| w != id);
+        }
         // Nobody named: nothing to tell.
         if whom.is_empty() && (by.is_none() || matches!(what, What::Added | What::Removed)) {
             return None;
@@ -91,7 +99,7 @@ impl Event {
 
     /// The event in words: names by id from `names` (the user as "You", under
     /// `me`), else as the event gives them; `place` is what it happened to
-    /// ("chat", "team").
+    /// ("chat", "team", "meeting": people join a meeting's chat, the meeting is named).
     pub fn told(&self, names: &HashMap<String, String>, me: &str, place: &str) -> String {
         let name = |(id, given): &(String, Option<String>)| {
             if !me.is_empty() && id == me {
@@ -102,6 +110,9 @@ impl Event {
         };
         let by = self.by.as_ref().map_or_else(|| "Someone".to_string(), name);
         let whom = list(&self.whom.iter().map(name).collect::<Vec<_>>());
+        let meeting = place == "meeting";
+        let named = place;
+        let place = if meeting { "chat" } else { place };
         match &self.what {
             What::Added => {
                 let shared = match self.history {
@@ -115,9 +126,10 @@ impl Event {
             What::Removed => format!("{by} removed {whom} from the {place}."),
             What::Left => format!("{} left the {place}.", if self.whom.is_empty() { by } else { whom }),
             What::Joined => format!("{} joined the {place}.", if self.whom.is_empty() { by } else { whom }),
-            What::Renamed(to) if to.is_empty() => format!("{by} renamed the {place}."),
-            What::Renamed(to) => format!("{by} renamed the {place} to {to}."),
-            What::Picture => format!("{by} changed the {place}'s picture."),
+            What::Renamed(to) if to.is_empty() => format!("{by} renamed the {named}."),
+            What::Renamed(to) if meeting => format!("{by} named the meeting {to}."),
+            What::Renamed(to) => format!("{by} renamed the {named} to {to}."),
+            What::Picture => format!("{by} changed the {named}'s picture."),
         }
     }
 }
@@ -193,5 +205,14 @@ mod tests {
         assert_eq!(Event::parse("ThreadActivity/HistoryDisclosedUpdate", "<x/>"), None);
         assert_eq!(Event::parse("RichText/Html", "<p>hi</p>"), None);
         assert_eq!(Event::parse("ThreadActivity/AddMember", "<addmember/>"), None);
+        assert_eq!(renamed.told(&names, "", "meeting"), "Ana named the meeting Launch & co.");
+    }
+
+    #[test]
+    fn whoever_adds_isnt_among_those_added() {
+        let content = "<addmember><initiator>8:orgid:a</initiator><target>8:orgid:a</target><target>8:orgid:me</target></addmember>";
+        let e = Event::parse("ThreadActivity/AddMember", content).unwrap();
+        let names = HashMap::from([("8:orgid:a".to_string(), "Markus Guerster".to_string())]);
+        assert_eq!(e.told(&names, "8:orgid:me", "meeting"), "Markus Guerster added You to the chat.");
     }
 }

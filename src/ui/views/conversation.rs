@@ -189,6 +189,7 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace) {
                 me: &me,
                 read_by: &read_by,
                 channel: is_channel,
+                meeting: kind == Some(Kind::Meeting),
                 open: open_thread.as_deref(),
                 focus: focus.as_deref(),
                 scrolled: ws.focus_scrolled,
@@ -725,6 +726,8 @@ pub struct View<'a> {
     /// In a chat, up to which message each other member has read (for "Seen").
     pub read_by: &'a [(String, i64)],
     pub channel: bool,
+    /// A meeting's chat (it's "named", as the meeting).
+    pub meeting: bool,
     pub open: Option<&'a str>,
     pub focus: Option<&'a str>,
     /// Set once the focused message has been scrolled to.
@@ -889,7 +892,17 @@ fn continues(prev: &Message, m: &Message) -> bool {
 /// quiet line between the messages, as Teams shows it.
 fn event_line(ui: &mut Ui, event: &crate::model::event::Event, view: &View) {
     let p = colors();
-    let told = event.told(view.authors, view.me, if view.channel { "team" } else { "chat" });
+    let told = event.told(
+        view.authors,
+        view.me,
+        if view.channel {
+            "team"
+        } else if view.meeting {
+            "meeting"
+        } else {
+            "chat"
+        },
+    );
     ui.add_space(10.0);
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing.x = 8.0;

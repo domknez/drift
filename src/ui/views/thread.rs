@@ -58,6 +58,7 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace) {
                 me: &me,
                 read_by: &[],
                 channel: false,
+                meeting: false,
                 open: None,
                 focus: focus.as_deref(),
                 scrolled: ws.focus_scrolled,

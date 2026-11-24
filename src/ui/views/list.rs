@@ -180,7 +180,18 @@ fn people_panel(ui: &mut Ui, ws: &mut Workspace, d: &Directory, full: Rect) {
 fn chips(ui: &mut Ui, ws: &mut Workspace, at: egui::Pos2) {
     let p = colors();
     let mut x = at.x;
-    for (chip, label) in [(Chip::All, "All"), (Chip::Unread, "Unread"), (Chip::People, "People"), (Chip::Meetings, "Meetings")] {
+    // A dot on a chip with something unread in it (not muted, not hidden).
+    let unread = |kind: Option<Kind>| {
+        ws.directory.as_ref().is_some_and(|d| {
+            d.conversations.iter().any(|c| {
+                matches!(c.kind, Kind::Chat | Kind::Meeting) && c.unread && !c.muted && !ws.is_hidden(c) && kind.is_none_or(|k| c.kind == k)
+            })
+        })
+    };
+    let marked = [false, unread(None), unread(Some(Kind::Chat)), unread(Some(Kind::Meeting))];
+    for (i, (chip, label)) in
+        [(Chip::All, "All"), (Chip::Unread, "Unread"), (Chip::People, "People"), (Chip::Meetings, "Meetings")].into_iter().enumerate()
+    {
         let galley = ui.painter().layout_no_wrap(label.to_string(), ty::small_strong(), p.text);
         let rect = Rect::from_min_size(pos2(x, at.y), vec2(galley.size().x + 22.0, 28.0));
         let response =
@@ -196,6 +207,10 @@ fn chips(ui: &mut Ui, ws: &mut Workspace, at: egui::Pos2) {
         };
         ui.painter().rect_filled(rect, CornerRadius::same(14), fill);
         ui.painter().text(rect.center(), Align2::CENTER_CENTER, label, ty::small_strong(), fg);
+        if marked[i] {
+            let dot = rect.right_top() + vec2(-5.0, 5.0);
+            ui.painter().circle(dot, 4.0, p.accent_fill, Stroke::new(2.0, p.panel));
+        }
         if response.clicked() {
             ws.chip = chip;
         }
@@ -635,7 +650,15 @@ fn preview(ws: &Workspace, c: &Conversation) -> String {
     if let Some(event) = &last.event {
         let mut names: std::collections::HashMap<String, String> = ws.people().into_iter().map(|p| (p.id, p.name)).collect();
         names.extend(c.members.iter().map(|m| (m.id.clone(), m.name.clone())));
-        return event.told(&names, &ws.me_id, if c.kind == Kind::Channel { "team" } else { "chat" });
+        return event.told(
+            &names,
+            &ws.me_id,
+            match c.kind {
+                Kind::Channel => "team",
+                Kind::Meeting => "meeting",
+                _ => "chat",
+            },
+        );
     }
     let first = last.author.split_whitespace().next().unwrap_or("");
     if (!last.author_id.is_empty() && last.author_id == ws.me_id) || (last.author_id.is_empty() && last.author == ws.me) {
