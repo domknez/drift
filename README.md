@@ -56,6 +56,9 @@ a fraction of the memory the official app keeps busy doing nothing.
   the one on screen stay quiet; the Dock icon shows how many chats are unread. Pause
   them for an hour or until tomorrow from the menu under your picture; sound, message
   text and channel posts in Settings
+- **Remind me** of a message from its right-click menu: in 20 minutes, an hour, three hours,
+  tomorrow morning or next Monday. When it comes due you get a notification that opens the message
+  (one due while drift was closed comes when it next starts)
 - **Meeting reminders** a minute before each meeting; a click joins it
 - **Who has read it:** "Seen by" under your last message, and in group chats the names
   in a message's menu

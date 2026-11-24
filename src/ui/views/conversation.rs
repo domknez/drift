@@ -52,6 +52,8 @@ pub enum Action {
     Download(crate::model::File),
     /// Copy or save a picture in a message.
     Picture(widgets::PictureAction, String),
+    /// Remind the user of a message then; None to not.
+    Remind(Message, Option<i64>),
 }
 
 /// Do what a click on a message asked for; `reply` when it came from the thread.
@@ -86,6 +88,7 @@ pub fn apply(ui: &Ui, ws: &mut Workspace, action: Action, reply: bool) {
             focus_composer(ui, false);
         }
         Action::Picture(what, url) => ws.picture(ui.ctx(), &url, what),
+        Action::Remind(message, at) => ws.remind(&message, at),
         Action::Download(file) => {
             let downloads = crate::ui::workspace::downloads_folder();
             let mut dialog = rfd::FileDialog::new().set_title("Download").set_file_name(&file.name);
@@ -176,6 +179,7 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace) {
             let names = ws.names();
             let authors = ws.authors();
             let private = ws.private_chats();
+            let reminders = ws.reminders_here();
             let custom_emoji = ws.custom_emoji.clone();
             let recent_emoji = ws.recent_emoji.clone().unwrap_or_default();
             let mut view = View {
@@ -196,6 +200,7 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace) {
                 names: &names,
                 authors: &authors,
                 private: &private,
+                reminders: &reminders,
                 compact: ws.options.compact,
             };
             let mut area = egui::ScrollArea::vertical().id_salt(("messages", &id)).stick_to_bottom(true).auto_shrink([false, false]);
@@ -743,6 +748,8 @@ pub struct View<'a> {
     pub authors: &'a HashMap<String, String>,
     /// The user's one-on-one chats, by who they're with (for replying privately).
     pub private: &'a HashMap<String, String>,
+    /// When the user is to be reminded of a message, by its id.
+    pub reminders: &'a HashMap<String, i64>,
     /// Smaller bubbles (the user's setting).
     pub compact: bool,
 }
@@ -985,6 +992,40 @@ fn hover_bar(ui: &mut Ui, pictures: &mut Pictures, m: &Message, mine: bool, thre
     action
 }
 
+/// "Remind me": when to be reminded of a message, or for one already set, when it
+/// is and a way to cancel it.
+fn remind_menu(ui: &mut Ui, m: &Message, view: &View, action: &mut Option<Action>) {
+    if m.sending {
+        return;
+    }
+    let now = time::now_ms();
+    let set = view.reminders.get(&m.id).copied();
+    ui.menu_button("Remind me", |ui| {
+        if let Some(at) = set {
+            ui.label(RichText::new(format!("Reminder set for {}", time::ahead(at, now))).font(ty::small()).color(colors().faint));
+            if ui.button("Cancel reminder").clicked() {
+                *action = Some(Action::Remind(m.clone(), None));
+                ui.close();
+            }
+            ui.separator();
+        }
+        let minutes = |n: i64| now + n * 60_000;
+        let choices = [
+            ("In 20 minutes".to_string(), minutes(20)),
+            ("In 1 hour".to_string(), minutes(60)),
+            ("In 3 hours".to_string(), minutes(180)),
+            (format!("Tomorrow at {}", time::clock(time::tomorrow_at(now, 9))), time::tomorrow_at(now, 9)),
+            (format!("Next week ({})", time::ahead(time::next_monday_at(now, 9), now)), time::next_monday_at(now, 9)),
+        ];
+        for (label, at) in choices {
+            if ui.button(label).clicked() {
+                *action = Some(Action::Remind(m.clone(), Some(at)));
+                ui.close();
+            }
+        }
+    });
+}
+
 /// A message's menu, after its quick reactions: replying, copying, reading, and for
 /// the user's own, editing and deleting.
 fn message_menu(ui: &mut Ui, m: &Message, mine: bool, thread: bool, view: &View, action: &mut Option<Action>) {
@@ -1010,6 +1051,7 @@ fn message_menu(ui: &mut Ui, m: &Message, mine: bool, thread: bool, view: &View,
         *action = Some(Action::Forward(m.clone()));
         ui.close();
     }
+    remind_menu(ui, m, view, action);
     ui.separator();
     if ui.button("Copy text").clicked() {
         ui.ctx().copy_text(text::flatten(&m.body));
@@ -1128,6 +1170,14 @@ pub fn bubble(
             if widgets::file(ui, file) {
                 clicked = Some(widgets::Clicked::Download(file.clone()));
             }
+        }
+        if let Some(at) = view.reminders.get(&m.id) {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 4.0;
+                widgets::icon(ui, Icon::Bell, 12.0, p.accent);
+                let when = format!("Reminder · {}", time::ahead(*at, time::now_ms()));
+                ui.label(RichText::new(when).font(ty::meta()).color(p.accent));
+            });
         }
     };
     // Measure it first (an invisible pass), so the bubble is as wide as its text.

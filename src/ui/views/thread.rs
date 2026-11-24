@@ -53,6 +53,7 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace) {
             let names = ws.names();
             let authors = ws.authors();
             let private = ws.private_chats();
+            let reminders = ws.reminders_here();
             let mut view = conversation::View {
                 me: &me,
                 read_by: &[],
@@ -71,6 +72,7 @@ pub fn show(ui: &mut Ui, ws: &mut Workspace) {
                 names: &names,
                 authors: &authors,
                 private: &private,
+                reminders: &reminders,
                 compact: ws.options.compact,
             };
             action = conversation::list(ui, &mut ws.pictures, &thread, &mut view);

@@ -110,6 +110,20 @@ impl App {
                 let (message, root) = (parts.next(), parts.next());
                 workspace.open_message(&open, message, root);
             }
+            // DRIFT_DEMO_REMIND=<message>: a reminder set on that message, for tomorrow.
+            let mut reminders = crate::reminders::Reminders::default();
+            if let Ok(message) = std::env::var("DRIFT_DEMO_REMIND") {
+                reminders.set(crate::reminders::Reminder {
+                    at: crate::model::time::tomorrow_at(crate::model::time::now_ms(), 9),
+                    conversation: open.clone(),
+                    message,
+                    root: None,
+                    author: String::new(),
+                    place: None,
+                    text: String::new(),
+                });
+            }
+            workspace.reminders = Some(reminders);
             // DRIFT_DEMO_SETTINGS=<page>: Settings open on that page (`appearance`, `layout`, …).
             if let Ok(page) = std::env::var("DRIFT_DEMO_SETTINGS") {
                 workspace.settings = Some(views::settings::Page::from_key(&page));
@@ -310,6 +324,10 @@ impl eframe::App for App {
             workspace.notifications = self.prefs.notifications;
             workspace.options = self.prefs.options;
             workspace.paused_until = self.prefs.paused_until;
+            // The saved reminders (not the demo's: it keeps its own in memory).
+            if workspace.reminders.is_none() {
+                workspace.reminders = Some(if self.keep_drafts { crate::reminders::Reminders::load() } else { Default::default() });
+            }
         }
         if let Screen::Signed(workspace) = &mut self.screen
             && let Some(Outcome::SignedOut) = workspace.tick(ctx)

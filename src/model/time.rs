@@ -137,9 +137,33 @@ pub fn day(ms: i64, now: i64) -> String {
 
 /// `hour`:00 local time on the day after `now` (Unix ms).
 pub fn tomorrow_at(now: i64, hour: i64) -> i64 {
-    let local = (day_number(now) + 1) * 86_400 + hour * 3_600;
+    days_ahead_at(now, 1, hour)
+}
+
+/// `hour`:00 local time `days` days after `now`'s (Unix ms).
+pub fn days_ahead_at(now: i64, days: i64, hour: i64) -> i64 {
+    let local = (day_number(now) + days) * 86_400 + hour * 3_600;
     // The zone's offset then (summer time may begin or end overnight).
     (local - local_offset(local - local_offset(local))) * 1000
+}
+
+/// `hour`:00 local time next Monday (a week on, when `now` is a Monday).
+pub fn next_monday_at(now: i64, hour: i64) -> i64 {
+    // 1970-01-01 was a Thursday: day 4 was a Monday.
+    let since_monday = (day_number(now) + 3).rem_euclid(7);
+    days_ahead_at(now, 7 - since_monday, hour)
+}
+
+/// A time to come, for saying when something will be: `14:05` today,
+/// `Tomorrow 09:00`, `Monday 1 December 09:00`.
+pub fn ahead(ms: i64, now: i64) -> String {
+    let (c, today) = (local(ms), local(now));
+    let d = days_from_civil(c.year, c.month, c.day);
+    match d - days_from_civil(today.year, today.month, today.day) {
+        0 => clock(ms),
+        1 => format!("Tomorrow {}", clock(ms)),
+        _ => format!("{} {} {} {}", weekday(d), c.day, month_name(c.month), clock(ms)),
+    }
 }
 
 /// The local calendar day of `ms`, for telling whether two times fall on the same day.
@@ -207,6 +231,18 @@ mod tests {
         let at = tomorrow_at(now, 8);
         assert_eq!(day_number(at), day_number(now) + 1);
         assert_eq!(clock(at), "08:00");
+    }
+
+    #[test]
+    fn next_monday_is_a_monday_within_a_week() {
+        let now = now_ms();
+        let at = next_monday_at(now, 9);
+        let days = day_number(at) - day_number(now);
+        assert!((1..=7).contains(&days), "{days}");
+        assert_eq!((day_number(at) + 3).rem_euclid(7), 0);
+        assert_eq!(clock(at), "09:00");
+        assert!(ahead(at, now).starts_with(if days == 1 { "Tomorrow" } else { "Monday" }));
+        assert_eq!(ahead(now, now), clock(now));
     }
 
     use super::*;

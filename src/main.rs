@@ -13,6 +13,7 @@ mod idle;
 mod login;
 mod model;
 mod notify;
+mod reminders;
 mod settings;
 mod teams;
 mod ui;

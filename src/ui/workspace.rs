@@ -206,6 +206,10 @@ pub struct Workspace {
     seen_once: bool,
     /// Conversations whose notification was clicked.
     clicked: (Sender<String>, Receiver<String>),
+    /// Reminders the user set on messages (None until the saved ones are in).
+    pub reminders: Option<crate::reminders::Reminders>,
+    /// Reminders whose notification was clicked.
+    reminder_clicked: (Sender<crate::reminders::Reminder>, Receiver<crate::reminders::Reminder>),
     /// How many of the open conversation's newest messages are shown.
     pub newest: usize,
     /// The list's height when earlier messages were asked for (to stay in place once they're in).
@@ -457,6 +461,8 @@ impl Workspace {
             seen: HashMap::new(),
             seen_once: false,
             clicked: std::sync::mpsc::channel(),
+            reminders: None,
+            reminder_clicked: std::sync::mpsc::channel(),
             newest: NEWEST,
             earlier_from: None,
             seen_down_to: None,
@@ -634,6 +640,60 @@ impl Workspace {
         let Some(chat) = self.private_chat(&message.author.id) else { return };
         self.open(&chat);
         self.quote(message, false);
+    }
+
+    /// Remind the user of a message of the open conversation then; None to not.
+    pub fn remind(&mut self, message: &Message, at: Option<i64>) {
+        let Some(conversation) = self.open.clone() else { return };
+        let reminders = self.reminders.get_or_insert_default();
+        let Some(at) = at else {
+            reminders.cancel(&message.id);
+            return;
+        };
+        let c = self.directory.as_ref().and_then(|d| d.conversation(&conversation));
+        let one_to_one = c.is_some_and(|c| c.kind == Kind::Chat && c.members.len() <= 1);
+        let mut text: String = text::said(&message.body).chars().take(160).collect();
+        if text.trim().is_empty() {
+            text = message.card.as_ref().map(|c| c.title.clone()).filter(|t| !t.is_empty()).unwrap_or_else(|| "A message".into());
+        }
+        reminders.set(crate::reminders::Reminder {
+            at,
+            conversation,
+            message: message.id.clone(),
+            root: message.root.clone(),
+            author: message.author.name.clone(),
+            place: c.filter(|_| !one_to_one).map(|c| c.title.clone()),
+            text,
+        });
+    }
+
+    /// When each message of the open conversation is to be reminded of, by its id.
+    pub fn reminders_here(&self) -> HashMap<String, i64> {
+        match (&self.reminders, &self.open) {
+            (Some(r), Some(open)) => r.of(open),
+            _ => HashMap::new(),
+        }
+    }
+
+    /// A notification for each reminder that came due (whether or not notifications
+    /// are on: the user asked for it); clicking it shows the message.
+    fn remind_messages(&mut self, ctx: &egui::Context) {
+        let Some(reminders) = &mut self.reminders else { return };
+        let now = crate::model::time::now_ms();
+        let due = reminders.due(now);
+        if let Some(at) = reminders.next() {
+            ctx.request_repaint_after(Duration::from_millis((at - now).clamp(0, 3_600_000) as u64));
+        }
+        for r in due {
+            let title = format!("Reminder: {}", r.author);
+            let body = self.told(r.text.clone(), r.root.is_some());
+            let (tx, ctx) = (self.reminder_clicked.0.clone(), ctx.clone());
+            let (place, reminder) = (r.place.clone(), r);
+            crate::notify::show(&title, place.as_deref(), &body, move || {
+                let _ = tx.send(reminder);
+                ctx.request_repaint();
+            });
+        }
     }
 
     /// Copy a picture in a message to the clipboard, or save it where the user picks
@@ -1304,6 +1364,13 @@ impl Workspace {
             ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
             ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
         }
+        while let Ok(r) = self.reminder_clicked.1.try_recv() {
+            self.section = Section::Chats;
+            self.open_message(&r.conversation, Some(r.message), r.root);
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        }
         let unread = self.directory.as_ref().map_or(0, |d| self.badge_count(d));
         if self.badge != Some(unread) {
             self.badge = Some(unread);
@@ -1421,6 +1488,7 @@ impl Workspace {
             }
         }
         self.remind_meetings(ctx);
+        self.remind_messages(ctx);
         self.ring(ctx);
         if let Some(result) = self.activity_load.take() {
             match result {
