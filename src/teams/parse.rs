@@ -149,6 +149,11 @@ fn preview(m: &Value) -> Option<Preview> {
     let at = str_of(m, &["composetime", "composeTime", "originalarrivaltime", "originalArrivalTime"]).and_then(time::parse_iso)?;
     let content = str_of(m, &["content"]).unwrap_or("");
     let kind = str_of(m, &["messagetype", "messageType"]).unwrap_or("");
+    // Someone added, a new name, a call: said in words, by no one (so it never
+    // notifies, nor reads as someone's message).
+    if let Some(text) = event(kind, content) {
+        return Some(Preview { author: String::new(), author_id: String::new(), text, at, reply: false });
+    }
     let body = if kind.starts_with("RichText") { text::from_html(content) } else { text::plain(content) };
     // A card's markup says little or nothing: what the card says, and its title.
     let mut text = text::said(&body);
@@ -176,6 +181,41 @@ fn preview(m: &Value) -> Option<Preview> {
     let root = str_of(m, &["rootMessageId"]).or(link_root);
     let reply = !id.is_empty() && root.is_some_and(|r| r != id);
     Some(Preview { author, author_id, text, at, reply })
+}
+
+/// What a membership or conversation event says, for the list (its content is
+/// markup naming people by id only); None for messages.
+fn event(kind: &str, content: &str) -> Option<String> {
+    let Some(what) = kind.strip_prefix("ThreadActivity/") else {
+        return kind.starts_with("Event/Call").then(|| "Call".to_string());
+    };
+    let tags = |tag: &str| {
+        let (open, close) = (format!("<{tag}>"), format!("</{tag}>"));
+        content.split(open.as_str()).skip(1).filter_map(|rest| rest.split_once(close.as_str()).map(|(v, _)| v.trim())).collect::<Vec<_>>()
+    };
+    let people = |n: usize, verb: &str| match n {
+        0 | 1 => format!("Someone was {verb}"),
+        n => format!("{n} people were {verb}"),
+    };
+    Some(match what {
+        "AddMember" => people(tags("target").len(), "added"),
+        "DeleteMember" => {
+            let (initiator, targets) = (tags("initiator"), tags("target"));
+            if targets.len() <= 1 && initiator.first().is_some_and(|i| targets.first() == Some(i)) {
+                "Someone left".to_string()
+            } else {
+                people(targets.len(), "removed")
+            }
+        }
+        "MemberJoined" => "Someone joined".to_string(),
+        "MemberLeft" => "Someone left".to_string(),
+        "TopicUpdate" => match tags("value").first().map(|v| text::flatten(&text::from_html(v))).filter(|v| !v.is_empty()) {
+            Some(name) => format!("Renamed to {name}"),
+            None => "Renamed".to_string(),
+        },
+        "PictureUpdate" => "Changed the picture".to_string(),
+        _ => "Conversation updated".to_string(),
+    })
 }
 
 /// What in a channel notifies: its notification settings (JSON in a string), or
@@ -542,6 +582,26 @@ pub fn address(v: &Value, person: &str) -> Option<String> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn events_read_as_words_by_no_one() {
+        let add = "<addmember><eventtime>1</eventtime><initiator>8:orgid:a</initiator><target>8:orgid:b</target><detailedtargetinfo><id>8:orgid:b</id></detailedtargetinfo></addmember>";
+        let p = preview(
+            &json!({"messagetype": "ThreadActivity/AddMember", "content": add, "composetime": "2026-10-30T10:42:00Z", "from": "8:orgid:a"}),
+        )
+        .unwrap();
+        assert_eq!((p.text.as_str(), p.author.as_str(), p.author_id.as_str()), ("Someone was added", "", ""));
+        let two = "<addmember><target>8:orgid:b</target><target>8:orgid:c</target></addmember>";
+        assert_eq!(event("ThreadActivity/AddMember", two).as_deref(), Some("2 people were added"));
+        let left = "<deletemember><initiator>8:orgid:b</initiator><target>8:orgid:b</target></deletemember>";
+        assert_eq!(event("ThreadActivity/DeleteMember", left).as_deref(), Some("Someone left"));
+        let removed = "<deletemember><initiator>8:orgid:a</initiator><target>8:orgid:b</target></deletemember>";
+        assert_eq!(event("ThreadActivity/DeleteMember", removed).as_deref(), Some("Someone was removed"));
+        let topic = "<topicupdate><eventtime>1</eventtime><initiator>8:orgid:a</initiator><value>Launch &amp; co</value></topicupdate>";
+        assert_eq!(event("ThreadActivity/TopicUpdate", topic).as_deref(), Some("Renamed to Launch & co"));
+        assert_eq!(event("ThreadActivity/HistoryDisclosedUpdate", "<x/>").as_deref(), Some("Conversation updated"));
+        assert_eq!(event("RichText/Html", "<p>hi</p>"), None);
+    }
 
     #[test]
     fn reads_a_sign_in_address() {
