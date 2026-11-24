@@ -49,7 +49,8 @@ pub fn show(ctx: &egui::Context, ws: &mut Workspace) {
         ui.spacing_mut().item_spacing.y = 6.0;
         ui.label(RichText::new("Remind me").font(ty::title()).color(p.text));
         let said: String = text::said(&custom.message.body).chars().take(90).collect();
-        let about = if said.trim().is_empty() { custom.message.author.name.clone() } else { format!("{}: {said}", custom.message.author.name) };
+        let about =
+            if said.trim().is_empty() { custom.message.author.name.clone() } else { format!("{}: {said}", custom.message.author.name) };
         ui.add(egui::Label::new(RichText::new(about).font(ty::small()).color(p.faint)).truncate());
         ui.add_space(10.0);
 
@@ -57,7 +58,8 @@ pub fn show(ctx: &egui::Context, ws: &mut Workspace) {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 6.0;
             let step = |ui: &mut egui::Ui, label: &str, enabled: bool| {
-                ui.add_enabled(enabled, egui::Button::new(RichText::new(label).font(ty::body_strong())).min_size(vec2(32.0, 30.0))).clicked()
+                ui.add_enabled(enabled, egui::Button::new(RichText::new(label).font(ty::body_strong())).min_size(vec2(32.0, 30.0)))
+                    .clicked()
             };
             if step(ui, "‹", custom.day > 0) {
                 custom.day -= 1;
