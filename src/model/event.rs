@@ -13,6 +13,10 @@ pub enum What {
     Joined,
     Renamed(String),
     Picture,
+    /// A meeting started in the conversation (by `by`).
+    MeetingStarted,
+    /// It ended, after so many seconds.
+    MeetingEnded(Option<i64>),
 }
 
 /// How much of what was said before someone added may see.
@@ -36,6 +40,16 @@ impl Event {
     /// An event from a message's type and content; None for messages, and for
     /// events nobody needs told of.
     pub fn parse(kind: &str, content: &str) -> Option<Event> {
+        // A meeting started or ended: who started it is the message's sender.
+        if kind.starts_with("Event/Call") {
+            let ended = content.contains("<ended/>") || content.contains("type=\"ended\"");
+            let what = if ended {
+                What::MeetingEnded(tags(content, "duration").into_iter().find_map(|d| d.parse().ok()))
+            } else {
+                What::MeetingStarted
+            };
+            return Some(Event { what, by: None, whom: Vec::new(), history: None });
+        }
         let what = kind.strip_prefix("ThreadActivity/")?;
         let first = |tag: &str| tags(content, tag).into_iter().next();
         let what = match what {
@@ -144,7 +158,20 @@ impl Event {
             What::Renamed(to) if meeting => format!("{by} named the meeting {to}."),
             What::Renamed(to) => format!("{by} renamed the {named} to {to}."),
             What::Picture => format!("{by} changed the {named}'s picture."),
+            What::MeetingStarted => format!("{by} started a meeting."),
+            What::MeetingEnded(Some(seconds)) => format!("Meeting ended: {}", lasted(*seconds)),
+            What::MeetingEnded(None) => "Meeting ended.".into(),
         }
+    }
+}
+
+/// How long, as Teams says it: "42s", "15m 3s", "1h 2m 3s".
+fn lasted(seconds: i64) -> String {
+    let (h, m, s) = (seconds / 3600, seconds / 60 % 60, seconds % 60);
+    match (h, m) {
+        (0, 0) => format!("{s}s"),
+        (0, m) => format!("{m}m {s}s"),
+        (h, m) => format!("{h}h {m}m {s}s"),
     }
 }
 
@@ -228,6 +255,23 @@ mod tests {
         let e = Event::parse("ThreadActivity/AddMember", content).unwrap();
         let names = HashMap::from([("8:orgid:a".to_string(), "Markus Guerster".to_string())]);
         assert_eq!(e.told(&names, "8:orgid:me", "meeting"), "Markus Guerster added You to the chat.");
+    }
+
+    #[test]
+    fn meetings_starting_and_ending() {
+        let mut started =
+            Event::parse("Event/Call", "<partlist alt=\"\"><part identity=\"8:orgid:a\"><name>8:orgid:a</name></part></partlist>").unwrap();
+        assert_eq!(started.what, What::MeetingStarted);
+        started.by = Some(("8:orgid:a".into(), Some("Mario Bošnjak".into())));
+        assert_eq!(started.told(&HashMap::new(), "", "chat"), "Mario Bošnjak started a meeting.");
+        let ended = Event::parse(
+            "Event/Call",
+            "<ended/><partlist count=\"2\"><part identity=\"8:orgid:a\"><duration>903</duration></part></partlist>",
+        )
+        .unwrap();
+        assert_eq!(ended.told(&HashMap::new(), "", "chat"), "Meeting ended: 15m 3s");
+        assert_eq!(lasted(42), "42s");
+        assert_eq!(lasted(3723), "1h 2m 3s");
     }
 
     #[test]

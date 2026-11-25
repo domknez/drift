@@ -2,6 +2,7 @@
 //! with their picture, the user's own on the right), and the composer. In a channel
 //! a post links to its thread. Right-clicking a message reacts, replies or copies.
 
+use crate::model::event::{Event, What};
 use crate::model::{Directory, Kind, Message, Picture, markdown, text, time};
 use crate::ui::pictures::Pictures;
 use crate::ui::style::icons::{self, Icon};
@@ -890,7 +891,7 @@ fn continues(prev: &Message, m: &Message) -> bool {
 
 /// Something that happened to the conversation (someone added, a new name), as a
 /// quiet line between the messages, as Teams shows it.
-fn event_line(ui: &mut Ui, event: &crate::model::event::Event, view: &View) {
+fn event_line(ui: &mut Ui, event: &Event, view: &View) {
     let p = colors();
     let told = event.told(
         view.authors,
@@ -907,7 +908,11 @@ fn event_line(ui: &mut Ui, event: &crate::model::event::Event, view: &View) {
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing.x = 8.0;
         ui.add_space(6.0);
-        widgets::icon(ui, Icon::Members, 15.0, p.faint);
+        let icon = match event.what {
+            What::MeetingStarted | What::MeetingEnded(_) => Icon::Video,
+            _ => Icon::Members,
+        };
+        widgets::icon(ui, icon, 15.0, p.faint);
         ui.label(RichText::new(told).font(ty::small()).color(p.dim));
     });
     ui.add_space(6.0);

@@ -1,7 +1,7 @@
 //! The services' JSON as `model` types. Fields are read leniently: the web client's
 //! API isn't documented, and what's missing gets a default rather than an error.
 
-use crate::model::event::Event;
+use crate::model::event::{Event, What};
 use crate::model::{
     Author, Availability, Card, Channel, Conversation, CustomEmoji, File, Follow, Kind, Meeting, Message, Picture, Presence, Preview,
     Reaction, SearchHit, Source, Status, Team, text, time,
@@ -152,9 +152,14 @@ fn preview(m: &Value) -> Option<Preview> {
     let content = str_of(m, &["content"]).unwrap_or("");
     let kind = str_of(m, &["messagetype", "messageType"]).unwrap_or("");
     // Someone added, a new name, a call: said in words, by no one (so it never
-    // notifies, nor reads as someone's message).
+    // notifies, nor reads as someone's message), but a meeting started notifies as
+    // its starter's.
     if let Some(text) = event(kind, content) {
-        let event = Event::parse(kind, content);
+        let event = event_of(m, kind, content);
+        if let Some(Event { what: What::MeetingStarted, by: Some((id, name)), .. }) = &event {
+            let author = name.clone().unwrap_or_default();
+            return Some(Preview { author, author_id: id.clone(), text: "Started a meeting".into(), at, reply: false, event });
+        }
         return Some(Preview { author: String::new(), author_id: String::new(), text, at, reply: false, event });
     }
     let body = if kind.starts_with("RichText") { text::from_html(content) } else { text::plain(content) };
@@ -190,7 +195,7 @@ fn preview(m: &Value) -> Option<Preview> {
 /// them in from the event, where it knows them); None for messages.
 fn event(kind: &str, content: &str) -> Option<String> {
     if !kind.starts_with("ThreadActivity/") {
-        return kind.starts_with("Event/Call").then(|| "Call".to_string());
+        return kind.starts_with("Event/Call").then(|| "Meeting".to_string());
     }
     Some(Event::parse(kind, content).map_or_else(|| "Conversation updated".into(), |e| e.told(&HashMap::new(), "", "chat")))
 }
@@ -229,9 +234,23 @@ pub fn pinned(thread: &Value) -> Vec<String> {
         .collect()
 }
 
+/// The event a message is, if it is one; a meeting's start is told as its sender's.
+fn event_of(m: &Value, kind: &str, content: &str) -> Option<Event> {
+    let mut event = Event::parse(kind, content)?;
+    if event.what == What::MeetingStarted && event.by.is_none() {
+        let from = str_of(m, &["from"]).unwrap_or("");
+        let id = from.rsplit('/').next().unwrap_or(from);
+        let name = str_of(m, &["imdisplayname", "imDisplayName"]).filter(|n| !n.trim().is_empty()).map(str::to_string);
+        if !id.is_empty() {
+            event.by = Some((id.to_string(), name));
+        }
+    }
+    Some(event)
+}
+
 pub fn message(m: &Value, me: &str) -> Option<Message> {
     let kind = str_of(m, &["messagetype"])?;
-    if let Some(event) = Event::parse(kind, str_of(m, &["content"]).unwrap_or("")) {
+    if let Some(event) = event_of(m, kind, str_of(m, &["content"]).unwrap_or("")) {
         let by = event.by.as_ref().map_or_else(
             || Author { id: String::new(), name: String::new() },
             |(id, name)| Author { id: id.clone(), name: name.clone().unwrap_or_default() },
