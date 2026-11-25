@@ -97,6 +97,20 @@ impl Event {
         Some(Event { what, by, whom, history: history.flatten() })
     }
 
+    /// Everyone it names, by id.
+    pub fn ids(&self) -> impl Iterator<Item = &String> {
+        self.by.iter().chain(&self.whom).map(|(id, _)| id)
+    }
+
+    /// Give the people it doesn't name a name from `names`, by id.
+    pub fn name(&mut self, names: &HashMap<String, String>) {
+        for (id, name) in self.by.iter_mut().chain(&mut self.whom) {
+            if name.is_none() {
+                *name = names.get(id).filter(|n| !n.trim().is_empty()).cloned();
+            }
+        }
+    }
+
     /// The event in words: names by id from `names` (the user as "You", under
     /// `me`), else as the event gives them; `place` is what it happened to
     /// ("chat", "team", "meeting": people join a meeting's chat, the meeting is named).
@@ -214,5 +228,16 @@ mod tests {
         let e = Event::parse("ThreadActivity/AddMember", content).unwrap();
         let names = HashMap::from([("8:orgid:a".to_string(), "Markus Guerster".to_string())]);
         assert_eq!(e.told(&names, "8:orgid:me", "meeting"), "Markus Guerster added You to the chat.");
+    }
+
+    #[test]
+    fn names_looked_up_fill_the_ones_it_lacks() {
+        let mut e = Event::parse("ThreadActivity/AddMember", ADDED).unwrap();
+        assert_eq!(e.ids().cloned().collect::<Vec<_>>(), ["8:orgid:markus", "8:orgid:joss"]);
+        e.name(&HashMap::from([("8:orgid:markus".to_string(), "Renner Markus".to_string())]));
+        assert_eq!(
+            e.told(&HashMap::new(), "", "chat"),
+            "Renner Markus added Someone to the chat and shared chat history from the past 3 days."
+        );
     }
 }

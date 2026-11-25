@@ -316,6 +316,27 @@ impl Teams {
         ids.iter().filter_map(|id| Some((id.clone(), names.get(id)?.clone()))).collect()
     }
 
+    /// Name the people events name only by id (someone added to a meeting's chat
+    /// isn't among those it knows).
+    fn name_events(&self, messages: &mut [Message]) {
+        let ids: Vec<String> = messages.iter().filter_map(|m| m.event.as_ref()).flat_map(|e| e.ids()).cloned().collect();
+        if ids.is_empty() {
+            return;
+        }
+        let names = self.names_of(&ids);
+        for m in messages.iter_mut() {
+            if let Some(event) = &mut m.event {
+                event.name(&names);
+            }
+            if m.event.is_some()
+                && m.author.name.trim().is_empty()
+                && let Some(name) = names.get(&m.author.id)
+            {
+                m.author.name = name.clone();
+            }
+        }
+    }
+
     fn look_up(&self, ids: &[&String]) -> Result<()> {
         let mut found = Vec::new();
         for batch in ids.chunks(200) {
@@ -553,15 +574,21 @@ impl Backend for Teams {
         // The chat service lists every conversation, newest first, as Teams itself
         // shows them. The roster names the chats and says who's in them.
         let roster_chats = parse::roster_chats(&roster);
+        // Members, and whoever the newest events name (someone added), to be named.
         let member_ids: Vec<String> = roster_chats
             .values()
             .flat_map(|c| c.members.iter())
+            .chain(listed.iter().filter_map(|c| c.last.as_ref()?.event.as_ref()).flat_map(|e| e.ids()))
             .filter(|m| **m != me)
             .cloned()
             .collect::<std::collections::HashSet<_>>()
             .into_iter()
             .collect();
         let names = self.names_of(&member_ids);
+        let mut listed = listed;
+        for event in listed.iter_mut().filter_map(|c| c.last.as_mut()?.event.as_mut()) {
+            event.name(&names);
+        }
 
         // Channels' fresh state (newest message, unread, pinned in drift) from the chat service, by id.
         let channel_state: std::collections::HashMap<String, (Option<crate::model::Preview>, bool, bool)> = listed
@@ -825,7 +852,9 @@ impl Backend for Teams {
             "/v1/users/ME/conversations/{}/messages?view=msnp24Equivalent|supportsMessageProperties&pageSize={PAGE}&startTime=1",
             http::encode(conversation)
         );
-        Ok(parse::messages(&self.chat_service(&path)?, &self.my_id()))
+        let mut messages = parse::messages(&self.chat_service(&path)?, &self.my_id());
+        self.name_events(&mut messages);
+        Ok(messages)
     }
 
     fn pinned(&self, conversation: &str) -> Result<Vec<Message>> {
