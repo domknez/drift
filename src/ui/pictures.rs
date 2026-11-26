@@ -22,11 +22,24 @@ const MAX_PIXELS: usize = 40_000_000;
 const UNUSED_FOR: Duration = Duration::from_secs(180);
 /// Pending fetches beyond this are dropped (oldest first) and asked for again if needed.
 const MAX_QUEUE: usize = 64;
+/// An animated GIF's frames, at most: this many, and this many bytes in all (the
+/// frames beyond are left out, and it loops over those it has).
+const MAX_FRAMES: usize = 600;
+const MAX_FRAME_BYTES: usize = 128 * 1024 * 1024;
+/// A frame shown for less than this (or not said for how long) is shown this long,
+/// as browsers do.
+const MIN_DELAY: Duration = Duration::from_millis(20);
+const DEFAULT_DELAY: Duration = Duration::from_millis(100);
+
+/// A picture's frames and how long each is shown: one, unless it's an animated GIF.
+pub type Frames = Vec<(ColorImage, Duration)>;
 
 enum Slot {
     Loading,
     Missing,
-    Ready(TextureHandle, Instant),
+    /// Its frames (one, but for an animation), when it was last drawn, and when it
+    /// came in (its animation runs from then).
+    Ready(Vec<(TextureHandle, Duration)>, Instant, Instant),
 }
 
 type Queue = Arc<(Mutex<VecDeque<Picture>>, Condvar)>;
@@ -36,9 +49,9 @@ pub struct Pictures {
     backend: Arc<dyn Backend>,
     slots: HashMap<String, Slot>,
     queue: Queue,
-    done: Receiver<(String, Option<ColorImage>)>,
+    done: Receiver<(String, Option<Frames>)>,
     /// For the workers, until they start (with the first picture asked for).
-    done_tx: Option<Sender<(String, Option<ColorImage>)>>,
+    done_tx: Option<Sender<(String, Option<Frames>)>>,
     swept: Instant,
 }
 
@@ -58,10 +71,20 @@ impl Pictures {
 
     /// Take in what the workers finished; call once per frame.
     pub fn begin_frame(&mut self) {
-        while let Ok((key, image)) = self.done.try_recv() {
-            let slot = match image {
-                Some(image) => Slot::Ready(self.ctx.load_texture(&key, image, TextureOptions::LINEAR), Instant::now()),
-                None => Slot::Missing,
+        while let Ok((key, frames)) = self.done.try_recv() {
+            let slot = match frames {
+                Some(frames) if !frames.is_empty() => {
+                    let textures = frames
+                        .into_iter()
+                        .enumerate()
+                        .map(|(i, (image, delay))| {
+                            let name = if i == 0 { key.clone() } else { format!("{key}#{i}") };
+                            (self.ctx.load_texture(name, image, TextureOptions::LINEAR), delay)
+                        })
+                        .collect();
+                    Slot::Ready(textures, Instant::now(), Instant::now())
+                }
+                _ => Slot::Missing,
             };
             self.slots.insert(key, slot);
         }
@@ -70,18 +93,23 @@ impl Pictures {
         if self.swept.elapsed() >= Duration::from_secs(30) {
             self.swept = Instant::now();
             self.slots
-                .retain(|key, slot| !(key.starts_with("image:") && matches!(slot, Slot::Ready(_, used) if used.elapsed() > UNUSED_FOR)));
+                .retain(|key, slot| !(key.starts_with("image:") && matches!(slot, Slot::Ready(_, used, _) if used.elapsed() > UNUSED_FOR)));
         }
     }
 
-    /// The picture's texture once it's loaded; until then (or without one) None,
-    /// and it's asked for.
+    /// The picture's texture once it's loaded (an animation's frame for now, the
+    /// next asked to be drawn when it's due); until then (or without one) None, and
+    /// it's asked for.
     pub fn get(&mut self, picture: &Picture) -> Option<TextureId> {
         let key = picture.key();
         match self.slots.get_mut(&key) {
-            Some(Slot::Ready(tex, used)) => {
+            Some(Slot::Ready(frames, used, since)) => {
                 *used = Instant::now();
-                Some(tex.id())
+                let (frame, left) = frame_at(frames.iter().map(|(_, delay)| *delay), since.elapsed());
+                if let Some(left) = left {
+                    self.ctx.request_repaint_after(left);
+                }
+                frames.get(frame).map(|(tex, _)| tex.id())
             }
             Some(_) => None,
             None => {
@@ -118,7 +146,7 @@ impl Pictures {
     }
 }
 
-fn worker(queue: &Queue, tx: &Sender<(String, Option<ColorImage>)>, backend: &dyn Backend, ctx: &egui::Context) {
+fn worker(queue: &Queue, tx: &Sender<(String, Option<Frames>)>, backend: &dyn Backend, ctx: &egui::Context) {
     loop {
         let picture = {
             let (lock, cvar) = &**queue;
@@ -131,7 +159,7 @@ fn worker(queue: &Queue, tx: &Sender<(String, Option<ColorImage>)>, backend: &dy
             }
         };
         let image = match backend.picture(&picture) {
-            Ok(bytes) => decode(&bytes),
+            Ok(bytes) => decode_frames(&bytes),
             Err(e) => {
                 // Without a picture's query (signed addresses carry their key there).
                 let key = picture.key();
@@ -165,19 +193,41 @@ pub fn image_info(bytes: &[u8]) -> Option<(u32, u32, &'static str)> {
     (w > 0 && h > 0 && fits(w, h)).then_some((w as u32, h as u32, mime))
 }
 
-/// JPEG, PNG or GIF, by their signature.
+/// JPEG, PNG or GIF, by their signature (an animation's first frame).
 pub fn decode(bytes: &[u8]) -> Option<ColorImage> {
-    if bytes.starts_with(b"\x89PNG") {
-        decode_png(bytes)
-    } else if bytes.starts_with(b"GIF8") {
-        decode_gif(bytes)
-    } else {
-        decode_jpeg(bytes)
-    }
+    if bytes.starts_with(b"GIF8") { decode_gif(bytes, 1).and_then(|f| f.into_iter().next()).map(|(image, _)| image) } else { still(bytes) }
 }
 
-/// A GIF's first frame, on its canvas.
-fn decode_gif(bytes: &[u8]) -> Option<ColorImage> {
+/// A picture's frames: an animated GIF's all (as many as are kept), else its one.
+pub fn decode_frames(bytes: &[u8]) -> Option<Frames> {
+    if bytes.starts_with(b"GIF8") { decode_gif(bytes, MAX_FRAMES) } else { still(bytes).map(|image| vec![(image, Duration::ZERO)]) }
+}
+
+fn still(bytes: &[u8]) -> Option<ColorImage> {
+    if bytes.starts_with(b"\x89PNG") { decode_png(bytes) } else { decode_jpeg(bytes) }
+}
+
+/// Which frame shows `elapsed` into an animation looping over frames shown this
+/// long each, and how long until the next; a still picture (or one that never
+/// moves) has no next.
+fn frame_at(delays: impl Iterator<Item = Duration> + Clone, elapsed: Duration) -> (usize, Option<Duration>) {
+    let total: Duration = delays.clone().sum();
+    if delays.clone().count() < 2 || total.is_zero() {
+        return (0, None);
+    }
+    let mut at = Duration::from_nanos((elapsed.as_nanos() % total.as_nanos()) as u64);
+    for (i, delay) in delays.enumerate() {
+        if at < delay {
+            return (i, Some(delay - at));
+        }
+        at -= delay;
+    }
+    (0, None)
+}
+
+/// A GIF's frames (up to `most`), each drawn on its canvas over what the ones
+/// before left there.
+fn decode_gif(bytes: &[u8], most: usize) -> Option<Frames> {
     let mut options = gif::DecodeOptions::new();
     options.set_color_output(gif::ColorOutput::RGBA);
     let mut decoder = options.read_info(std::io::Cursor::new(bytes)).ok()?;
@@ -185,22 +235,47 @@ fn decode_gif(bytes: &[u8]) -> Option<ColorImage> {
     if !fits(width, height) {
         return None;
     }
-    let frame = decoder.read_next_frame().ok()??;
     let mut canvas = vec![0u8; width * height * 4];
-    let (left, top, w) = (usize::from(frame.left), usize::from(frame.top), usize::from(frame.width));
-    if w == 0 {
-        return image_from(&canvas, [width, height]);
-    }
-    for (y, row) in frame.buffer.chunks_exact(w * 4).enumerate() {
-        let (y, x) = (top + y, left);
-        if y >= height || x >= width {
-            continue;
+    let mut frames = Frames::new();
+    while frames.len() < most && (frames.len() + 1) * canvas.len() <= MAX_FRAME_BYTES.max(canvas.len()) {
+        let frame = match decoder.read_next_frame() {
+            Ok(Some(frame)) => frame,
+            // A broken frame after good ones: those are kept.
+            Ok(None) | Err(_) => break,
+        };
+        let (left, top, w) = (usize::from(frame.left), usize::from(frame.top), usize::from(frame.width));
+        let before = (frame.dispose == gif::DisposalMethod::Previous).then(|| canvas.clone());
+        let mut drawn = Vec::new();
+        if w > 0 {
+            for (y, row) in frame.buffer.chunks_exact(w * 4).enumerate() {
+                let y = top + y;
+                if y >= height || left >= width {
+                    continue;
+                }
+                let n = w.min(width - left);
+                let at = (y * width + left) * 4;
+                // Transparent pixels leave what's under them.
+                for (dst, src) in canvas[at..at + n * 4].as_chunks_mut::<4>().0.iter_mut().zip(row.as_chunks::<4>().0) {
+                    if src[3] != 0 {
+                        dst.copy_from_slice(src);
+                    }
+                }
+                drawn.push((at, n * 4));
+            }
         }
-        let n = (w.min(width - x)) * 4;
-        let at = (y * width + x) * 4;
-        canvas[at..at + n].copy_from_slice(&row[..n]);
+        let delay = Some(Duration::from_millis(u64::from(frame.delay) * 10)).filter(|d| *d >= MIN_DELAY).unwrap_or(DEFAULT_DELAY);
+        frames.push((image_from(&canvas, [width, height])?, delay));
+        match (frame.dispose, before) {
+            (gif::DisposalMethod::Background, _) => {
+                for (at, n) in drawn {
+                    canvas[at..at + n].fill(0);
+                }
+            }
+            (gif::DisposalMethod::Previous, Some(before)) => canvas = before,
+            _ => {}
+        }
     }
-    image_from(&canvas, [width, height])
+    (!frames.is_empty()).then_some(frames)
 }
 
 fn decode_jpeg(bytes: &[u8]) -> Option<ColorImage> {
@@ -284,6 +359,38 @@ mod tests {
         let image = decode(&out).unwrap();
         assert_eq!(image.size, [2, 1]);
         assert_eq!(image.pixels[1], egui::Color32::from_rgb(0, 255, 0));
+    }
+
+    #[test]
+    fn decodes_every_frame_of_an_animation() {
+        // Two frames: red all over, then green over the right pixel only (the left
+        // stays red), shown 50 ms and (said as nothing) the default.
+        let mut out = Vec::new();
+        {
+            let mut encoder = gif::Encoder::new(&mut out, 2, 1, &[255, 0, 0, 0, 255, 0]).unwrap();
+            let first = gif::Frame { width: 2, height: 1, delay: 5, buffer: std::borrow::Cow::Borrowed(&[0, 0]), ..Default::default() };
+            let second = gif::Frame { left: 1, width: 1, height: 1, buffer: std::borrow::Cow::Borrowed(&[1]), ..Default::default() };
+            encoder.write_frame(&first).unwrap();
+            encoder.write_frame(&second).unwrap();
+        }
+        let frames = decode_frames(&out).unwrap();
+        assert_eq!(frames.len(), 2);
+        assert_eq!(frames[0].1, Duration::from_millis(50));
+        assert_eq!(frames[1].1, DEFAULT_DELAY);
+        assert_eq!(frames[1].0.pixels[0], egui::Color32::from_rgb(255, 0, 0));
+        assert_eq!(frames[1].0.pixels[1], egui::Color32::from_rgb(0, 255, 0));
+        // The picture alone is the first frame.
+        assert_eq!(decode(&out).unwrap().pixels[1], egui::Color32::from_rgb(255, 0, 0));
+    }
+
+    #[test]
+    fn picks_the_frame_for_the_time() {
+        let ms = Duration::from_millis;
+        let delays = [ms(50), ms(100)];
+        assert_eq!(frame_at(delays.iter().copied(), ms(0)), (0, Some(ms(50))));
+        assert_eq!(frame_at(delays.iter().copied(), ms(60)), (1, Some(ms(90))));
+        assert_eq!(frame_at(delays.iter().copied(), ms(160)), (0, Some(ms(40))));
+        assert_eq!(frame_at([Duration::ZERO].iter().copied(), ms(500)), (0, None));
     }
 
     #[test]
