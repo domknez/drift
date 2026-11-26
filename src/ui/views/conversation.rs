@@ -57,6 +57,8 @@ pub enum Action {
     Remind(Message, Option<i64>),
     /// Pick when to be reminded of a message.
     RemindAt(Message),
+    /// Show someone's card (their id and name), where they were clicked.
+    Profile(String, String, egui::Pos2),
 }
 
 /// Do what a click on a message asked for; `reply` when it came from the thread.
@@ -93,6 +95,7 @@ pub fn apply(ui: &Ui, ws: &mut Workspace, action: Action, reply: bool) {
         Action::Picture(what, url) => ws.picture(ui.ctx(), &url, what),
         Action::Remind(message, at) => ws.remind(&message, at),
         Action::RemindAt(message) => ws.custom_reminder = Some(super::remind::Custom::new(message)),
+        Action::Profile(id, name, at) => super::profile::open(ui.ctx(), ws, &id, &name, at),
         Action::Download(file) => {
             let downloads = crate::ui::workspace::downloads_folder();
             let mut dialog = rfd::FileDialog::new().set_title("Download").set_file_name(&file.name);
@@ -325,6 +328,18 @@ fn head(ui: &mut Ui, ws: &mut Workspace, rect: Rect, directory: &Directory, id: 
     t.spacing_mut().item_spacing.y = 1.0;
     let name = conversation.map_or("", |c| c.title.as_str());
     t.add(egui::Label::new(RichText::new(name).font(ty::title()).color(p.text)).truncate().selectable(false));
+    // In a one-on-one chat, their picture and name open their card.
+    let other = conversation.filter(|c| c.kind == Kind::Chat).and_then(|c| match c.members.as_slice() {
+        [one] => Some(one.clone()),
+        _ => None,
+    });
+    if let Some(person) = other {
+        let who = pic.union(t.min_rect());
+        let r = ui.interact(who, ui.scope_id().with("head-person"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
+        if r.clicked() {
+            super::profile::open(ui.ctx(), ws, &person.id, &person.name, pic.left_bottom());
+        }
+    }
     if !sub.is_empty() {
         t.label(RichText::new(sub).font(ty::small()).color(p.faint));
     }
@@ -1185,6 +1200,7 @@ pub fn bubble(
     let mut action = None;
     ui.add_space(if first { 8.0 } else { 3.0 });
     let mut clicked = None;
+    let mut clicked_profile: Option<egui::Pos2> = None;
     // What goes inside the bubble: who and when (on the first), the text, a card.
     let mut content = |ui: &mut Ui| {
         ui.spacing_mut().item_spacing.y = 4.0;
@@ -1192,7 +1208,12 @@ pub fn bubble(
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 6.0;
                 if !mine {
-                    ui.label(RichText::new(&m.author.name).font(ty::author()).color(p.text));
+                    let name = ui
+                        .add(egui::Label::new(RichText::new(&m.author.name).font(ty::author()).color(p.text)).sense(Sense::click()))
+                        .on_hover_cursor(egui::CursorIcon::PointingHand);
+                    if name.clicked() {
+                        clicked_profile = Some(name.rect.left_bottom());
+                    }
                 }
                 let mut stamp = time::clock(m.at);
                 if m.edited {
@@ -1298,6 +1319,15 @@ pub fn bubble(
         let picture = pictures.get(&Picture::Person { id: m.author.id.clone(), name: m.author.name.clone() });
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(at));
         widgets::avatar(&mut child, &m.author.id, &m.author.name, avatar, picture);
+        let r = ui
+            .interact(at, ui.scope_id().with(("author-picture", &m.id, thread.is_some())), Sense::click())
+            .on_hover_cursor(egui::CursorIcon::PointingHand);
+        if r.clicked() {
+            clicked_profile = Some(at.right_top());
+        }
+    }
+    if let Some(at) = clicked_profile.take() {
+        action = Some(Action::Profile(m.author.id.clone(), m.author.name.clone(), at));
     }
     response.context_menu(|ui| {
         ui.set_min_width(220.0);

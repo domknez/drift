@@ -550,6 +550,41 @@ impl Backend for Demo {
             })
             .collect())
     }
+
+    fn profile(&self, person: &str) -> Result<crate::model::Profile> {
+        // Made up, the same for each person every time; every third is away a week.
+        let n = person.bytes().map(usize::from).sum::<usize>();
+        let titles = [
+            ("Product Designer", "Design"),
+            ("Senior Engineer", "Platform"),
+            ("Engineering Manager", "Platform"),
+            ("Data Analyst", "Insights"),
+        ];
+        let (title, department) = titles[n % titles.len()];
+        let handle = person.strip_prefix("8:orgid:").unwrap_or(person);
+        let away = n % 3 == 0;
+        let now = crate::model::time::now_ms();
+        Ok(crate::model::Profile {
+            id: person.to_string(),
+            name: Some(self::person(handle)).filter(|(id, _)| *id == person).map(|(_, name)| name.to_string()).unwrap_or_default(),
+            title: title.into(),
+            department: department.into(),
+            company: "Halcyon".into(),
+            email: format!("{handle}@halcyon.example"),
+            phone: format!("+385 91 {:03} {:04}", n % 1000, n * 37 % 10_000),
+            office: ["Zagreb", "Berlin", "Remote"][n % 3].into(),
+            manager: if handle == "priya" { "Maya Lindqvist" } else { "Priya Nair" }.into(),
+            presence: Some(Presence { availability: if away { Availability::Away } else { Availability::Available }, out_of_office: away }),
+            activity: String::new(),
+            note: if n % 2 == 0 { "Heads down on the release, ping if urgent".into() } else { String::new() },
+            away_until: away.then(|| crate::model::time::days_ahead_at(now, 5, 0)),
+            away_note: if away {
+                "I'm away until next week with limited access to email. For anything urgent, reach Maya.".into()
+            } else {
+                String::new()
+            },
+        })
+    }
 }
 
 /// The activity feed: mentions and replies, oldest first.

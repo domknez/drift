@@ -130,6 +130,14 @@ impl App {
             {
                 workspace.custom_reminder = Some(views::remind::Custom::new(message));
             }
+            // DRIFT_DEMO_PROFILE=<person id>: their card open.
+            if let Ok(id) = std::env::var("DRIFT_DEMO_PROFILE")
+                && let Ok(profile) = demo::Demo.profile(&id)
+            {
+                let name = workspace.names().get(&id).cloned().unwrap_or_default();
+                workspace.profiles.insert(id.clone(), (std::time::Instant::now(), profile));
+                workspace.card = Some(views::profile::Card::new(&id, &name, egui::pos2(420.0, 150.0), 0, Default::default()));
+            }
             // DRIFT_DEMO_SETTINGS=<page>: Settings open on that page (`appearance`, `layout`, …).
             if let Ok(page) = std::env::var("DRIFT_DEMO_SETTINGS") {
                 workspace.settings = Some(views::settings::Page::from_key(&page));

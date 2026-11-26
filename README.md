@@ -56,6 +56,10 @@ a fraction of the memory the official app keeps busy doing nothing.
   the one on screen stay quiet; the Dock icon shows how many chats are unread. Pause
   them for an hour or until tomorrow from the menu under your picture; sound, message
   text and channel posts in Settings
+- **Profiles**: click someone's name or picture (in a message, the people panel, or a one-on-one
+  chat's header) for their card: title and department, how they show and what they're doing,
+  their status message, out of office and until when (with their automatic reply), email, phone,
+  office and manager, and a chat or call with them.
 - **Remind me** of a message from its right-click menu: in 20 minutes, an hour, three hours,
   tomorrow morning, next Monday, or a day and time you pick. When it comes due you get a notification that opens the message
   (one due while drift was closed comes when it next starts)

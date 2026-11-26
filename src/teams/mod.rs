@@ -15,7 +15,7 @@ mod trouter;
 use crate::backend::{Backend, Error, FilePlace, Push, Result};
 use crate::model::markdown::Outgoing;
 use crate::model::{
-    Availability, Conversation, CustomEmoji, Directory, Kind, Meeting, Message, Picture, Presence, SearchHit, Status, Upload,
+    Availability, Conversation, CustomEmoji, Directory, Kind, Meeting, Message, Picture, Presence, SearchHit, Status, Upload, time,
 };
 use auth::{CHAT_AGGREGATOR, GRAPH, PRESENCE, SEARCH, SPACES, Session};
 use http::{Body, Method};
@@ -817,6 +817,30 @@ impl Backend for Teams {
             Body::None,
         )?;
         Ok(parse::custom_emoji(&answer, &skype.ams))
+    }
+
+    fn profile(&self, person: &str) -> Result<crate::model::Profile> {
+        let mut profile = parse::profile(&self.short_profiles(&[person])?, person);
+        // How they show now, with their status message and out-of-office reply.
+        let body = Value::Array(vec![serde_json::json!({ "mri": person })]);
+        match self.presence_request(Method::Post, "/v1/presence/getpresence/", Body::Json(&body)) {
+            Ok(v) => parse::presence_details(&v, &mut profile, time::now_ms()),
+            Err(Error::SignedOut) => return Err(Error::SignedOut),
+            Err(e) => log_debug!("profile: presence: {e}"),
+        }
+        // Graph knows more (phone, office, manager), where the organisation lets it say.
+        if let Some(object) = person.strip_prefix("8:orgid:") {
+            let select = "jobTitle,department,companyName,mail,officeLocation,mobilePhone,businessPhones";
+            match self.graph(Method::Get, &format!("/users/{object}?$select={select}"), Body::None) {
+                Ok(v) => parse::graph_profile(&v, &mut profile),
+                Err(e) => log_debug!("profile: graph: {e}"),
+            }
+            match self.graph(Method::Get, &format!("/users/{object}/manager?$select=displayName"), Body::None) {
+                Ok(v) => profile.manager = v["displayName"].as_str().unwrap_or("").to_string(),
+                Err(e) => log_debug!("profile: manager: {e}"),
+            }
+        }
+        Ok(profile)
     }
 
     fn address(&self, person: &str) -> Result<Option<String>> {

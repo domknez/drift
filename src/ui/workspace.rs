@@ -210,6 +210,10 @@ pub struct Workspace {
     pub reminders: Option<crate::reminders::Reminders>,
     /// A reminder being set for a time the user picks, while its dialog is open.
     pub custom_reminder: Option<super::views::remind::Custom>,
+    /// Someone's card, open over the window.
+    pub card: Option<super::views::profile::Card>,
+    /// Profiles loaded, by id, with when (shown at once when a card opens again).
+    pub profiles: HashMap<String, (Instant, crate::model::Profile)>,
     /// Reminders whose notification was clicked.
     reminder_clicked: (Sender<crate::reminders::Reminder>, Receiver<crate::reminders::Reminder>),
     /// How many of the open conversation's newest messages are shown.
@@ -465,6 +469,8 @@ impl Workspace {
             clicked: std::sync::mpsc::channel(),
             reminders: None,
             custom_reminder: None,
+            card: None,
+            profiles: HashMap::new(),
             reminder_clicked: std::sync::mpsc::channel(),
             newest: NEWEST,
             earlier_from: None,

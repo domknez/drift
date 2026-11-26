@@ -147,6 +147,11 @@ pub trait Backend: Send + Sync {
         Ok(Vec::new())
     }
 
+    /// Someone's card. A service that knows nothing more of people gives just the id.
+    fn profile(&self, person: &str) -> Result<crate::model::Profile> {
+        Ok(crate::model::Profile { id: person.to_string(), ..Default::default() })
+    }
+
     /// The organisation's own emoji. A service without them has none.
     fn custom_emoji(&self) -> Result<Vec<CustomEmoji>> {
         Ok(Vec::new())

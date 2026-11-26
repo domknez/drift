@@ -427,6 +427,30 @@ impl Presence {
     }
 }
 
+/// Someone's card: who they are, how to reach them, and how they show now. What a
+/// service doesn't say is left empty.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Profile {
+    pub id: String,
+    pub name: String,
+    pub title: String,
+    pub department: String,
+    pub company: String,
+    pub email: String,
+    pub phone: String,
+    pub office: String,
+    /// Whom they report to.
+    pub manager: String,
+    pub presence: Option<Presence>,
+    /// What they're doing, beyond their availability ("In a meeting", "In a call").
+    pub activity: String,
+    /// The status message they set.
+    pub note: String,
+    /// Out of office: until when (if said), and their automatic reply.
+    pub away_until: Option<i64>,
+    pub away_note: String,
+}
+
 /// An emoji of the user's organisation (a tenant's own, added in Teams).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CustomEmoji {

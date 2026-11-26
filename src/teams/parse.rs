@@ -4,7 +4,7 @@
 use crate::model::event::{Event, What};
 use crate::model::{
     Author, Availability, Card, Channel, Conversation, CustomEmoji, File, Follow, Kind, Meeting, Message, Picture, Presence, Preview,
-    Reaction, SearchHit, Source, Status, Team, text, time,
+    Profile, Reaction, SearchHit, Source, Status, Team, text, time,
 };
 use serde_json::Value;
 use std::collections::HashMap;
@@ -586,6 +586,79 @@ pub fn profiles(v: &Value) -> Vec<(String, String)> {
         .flatten()
         .filter_map(|p| Some((str_of(p, &["mri"])?.to_string(), str_of(p, &["displayName", "givenName"])?.to_string())))
         .collect()
+}
+
+/// `person`'s card from a profile lookup's answer: who they are and their address.
+pub fn profile(v: &Value, person: &str) -> Profile {
+    let list = v["value"].as_array().filter(|a| !a.is_empty()).or(v["resolvedUsers"].as_array());
+    let found = list.into_iter().flatten().find(|p| p["mri"].as_str() == Some(person));
+    let s = |keys: &[&str]| found.and_then(|p| str_of(p, keys)).map(|s| s.trim().to_string()).unwrap_or_default();
+    Profile {
+        id: person.to_string(),
+        name: s(&["displayName", "givenName"]),
+        title: s(&["jobTitle"]),
+        department: s(&["department"]),
+        company: s(&["companyName"]),
+        email: Some(s(&["email", "userPrincipalName"])).filter(|a| a.contains('@')).unwrap_or_default(),
+        ..Default::default()
+    }
+}
+
+/// How `profile`'s person shows from a presence answer: availability, what they're
+/// doing, their status message, and whether (and until when) they're out of
+/// office. A message whose end has passed no longer counts.
+pub fn presence_details(v: &Value, profile: &mut Profile, now: i64) {
+    let Some(entry) = v.as_array().into_iter().flatten().find(|e| e["mri"].as_str() == Some(profile.id.as_str())) else { return };
+    let presence = &entry["presence"];
+    let calendar = &presence["calendarData"];
+    let out_of_office = calendar["isOutOfOffice"].as_bool().unwrap_or(false);
+    let availability = Availability::from_key(str_of(presence, &["availability"]).unwrap_or(""));
+    profile.presence = Some(Presence { availability, out_of_office });
+    profile.activity = activity(str_of(presence, &["activity"]).unwrap_or("")).to_string();
+    let end = |note: &Value| note["expiry"].as_str().and_then(time::parse_iso);
+    let said = |note: &Value| text::flatten(&text::from_html(note["message"].as_str().unwrap_or(""))).trim().to_string();
+    let note = &presence["note"];
+    if end(note).is_none_or(|end| end > now) {
+        profile.note = said(note);
+    }
+    if out_of_office {
+        let away = &calendar["outOfOfficeNote"];
+        profile.away_note = said(away);
+        // An end years away is no end: it's on until turned off.
+        profile.away_until = end(away).filter(|end| *end > now && *end < now + 400 * 86_400_000);
+    }
+}
+
+/// What someone's doing, in words, when it says more than their availability.
+fn activity(key: &str) -> &'static str {
+    match key {
+        "InAMeeting" => "In a meeting",
+        "InACall" | "InAConferenceCall" => "In a call",
+        "Presenting" => "Presenting",
+        "Focusing" => "Focusing",
+        "OffWork" => "Off work",
+        "UrgentInterruptionsOnly" => "Urgent interruptions only",
+        _ => "",
+    }
+}
+
+/// What Graph says of someone, where the profile lookup didn't: phone, office, and
+/// the rest when missing.
+pub fn graph_profile(v: &Value, profile: &mut Profile) {
+    let s = |key: &str| str_of(v, &[key]).map(str::trim).filter(|s| !s.is_empty()).map(str::to_string);
+    let fill = |field: &mut String, value: Option<String>| {
+        if field.is_empty()
+            && let Some(value) = value
+        {
+            *field = value;
+        }
+    };
+    fill(&mut profile.title, s("jobTitle"));
+    fill(&mut profile.department, s("department"));
+    fill(&mut profile.company, s("companyName"));
+    fill(&mut profile.email, s("mail"));
+    fill(&mut profile.office, s("officeLocation"));
+    fill(&mut profile.phone, s("mobilePhone").or_else(|| v["businessPhones"][0].as_str().map(str::to_string)));
 }
 
 /// The sign-in address of `person` in a profile lookup's answer.

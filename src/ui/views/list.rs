@@ -149,14 +149,10 @@ fn people_panel(ui: &mut Ui, ws: &mut Workspace, d: &Directory, full: Rect) {
             empty(ui, "Nobody yet.");
         }
         for person in &people {
-            let chat = d
-                .conversations
-                .iter()
-                .find(|c| matches!(&c.picture, Some(Picture::Person { id, .. }) if *id == person.id))
-                .map(|c| c.id.clone());
+            let chat = ws.private_chat(&person.id);
             let (outer, response) = ui.allocate_exact_size(vec2(ui.available_width(), 48.0), Sense::click());
             let rect = Rect::from_min_size(outer.min + vec2(8.0, 1.0), vec2(outer.width() - 16.0, 46.0));
-            if response.hovered() && chat.is_some() {
+            if response.hovered() {
                 ui.painter().rect_filled(rect, CornerRadius::same(12), p.hover);
             }
             let pic = Rect::from_min_size(pos2(rect.left() + 10.0, rect.center().y - 16.0), vec2(32.0, 32.0));
@@ -164,12 +160,16 @@ fn people_panel(ui: &mut Ui, ws: &mut Workspace, d: &Directory, full: Rect) {
             let mut c = ui.new_child(egui::UiBuilder::new().max_rect(pic));
             widgets::avatar(&mut c, &person.id, &person.name, 32.0, picture);
             ui.painter().text(pos2(pic.right() + 11.0, rect.center().y - 8.0), Align2::LEFT_CENTER, &person.name, ty::item(), p.text);
-            let hint = if chat.is_some() { "Open your chat" } else { "No chat with them yet" };
+            let hint = ws
+                .profiles
+                .get(&person.id)
+                .map(|(_, p)| p.title.clone())
+                .filter(|t| !t.is_empty())
+                .unwrap_or_else(|| if chat.is_some() { "You have a chat".into() } else { "No chat with them yet".into() });
             ui.painter().text(pos2(pic.right() + 11.0, rect.center().y + 9.0), Align2::LEFT_CENTER, hint, ty::meta(), p.faint);
-            if let Some(chat) = chat
-                && response.on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
-            {
-                ws.open(&chat);
+            // Their card, with a chat or a call with them.
+            if response.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                super::profile::open(ui.ctx(), ws, &person.id, &person.name, pos2(rect.right() - 40.0, rect.top()));
             }
         }
         ui.add_space(10.0);
