@@ -769,7 +769,8 @@ fn row(ui: &mut Ui, ws: &mut Workspace, d: &Directory, c: &Conversation) {
             b.add(egui::Label::new(job).truncate().selectable(false));
         }
         None => {
-            b.add(egui::Label::new(RichText::new(preview(ws, c)).font(ty::small()).color(preview_color)).truncate().selectable(false));
+            let text = preview(ws, c);
+            widgets::emoji_line(&mut b, &mut ws.pictures, &text, ty::small(), preview_color);
         }
     }
 }

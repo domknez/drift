@@ -8,6 +8,41 @@ use eframe::egui::{
     self, Align2, Color32, CornerRadius, Frame, Margin, Rect, Response, RichText, Sense, Stroke, TextureId, Ui, pos2, vec2,
 };
 
+/// One line of text, cut short with "…" where it doesn't fit, its emoji in colour
+/// (the service's pictures of them, over their glyphs) once loaded.
+pub fn emoji_line(ui: &mut Ui, pictures: &mut Pictures, text: &str, font: egui::FontId, color: Color32) -> Response {
+    let mut job = egui::text::LayoutJob { wrap: egui::text::TextWrapping::truncate_at_width(ui.available_width()), ..Default::default() };
+    // Runs of plain text, and each emoji with a picture on its own, unseen (the picture goes over it).
+    let mut run = String::new();
+    let mut pictured = false;
+    for ch in text.chars() {
+        let has = crate::model::emoji::key_of(ch).is_some_and(|key| pictures.get(&Picture::Emoji(key.to_string())).is_some());
+        if has != pictured && !run.is_empty() {
+            let c = if pictured { Color32::TRANSPARENT } else { color };
+            job.append(&std::mem::take(&mut run), 0.0, egui::TextFormat::simple(font.clone(), c));
+        }
+        pictured = has;
+        run.push(ch);
+    }
+    if !run.is_empty() {
+        job.append(&run, 0.0, egui::TextFormat::simple(font.clone(), if pictured { Color32::TRANSPARENT } else { color }));
+    }
+    let galley = ui.fonts_mut(|f| f.layout_job(job));
+    let (rect, response) = ui.allocate_exact_size(galley.size(), Sense::hover());
+    ui.painter().galley(rect.min, galley.clone(), color);
+    for row in &galley.rows {
+        for g in row.glyphs.iter().filter(|g| g.advance_width > 0.0) {
+            let Some(key) = crate::model::emoji::key_of(g.chr) else { continue };
+            let Some(texture) = pictures.get(&Picture::Emoji(key.to_string())) else { continue };
+            let glyph = g.logical_rect().translate(row.pos.to_vec2() + rect.min.to_vec2());
+            let side = glyph.height() * 0.9;
+            let uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
+            ui.painter().image(texture, Rect::from_center_size(glyph.center(), vec2(side, side)), uv, Color32::WHITE);
+        }
+    }
+    response
+}
+
 /// A round avatar: the picture once it's loaded, the initials until then.
 pub fn avatar(ui: &mut Ui, id: &str, name: &str, size: f32, picture: Option<TextureId>) -> Response {
     let (rect, response) = ui.allocate_exact_size(vec2(size, size), Sense::hover());
