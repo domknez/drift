@@ -489,7 +489,7 @@ fn pin_strip(ui: &mut Ui, ws: &mut Workspace, rect: Rect) {
     t.add(egui::Label::new(RichText::new(who).font(ty::meta()).color(p.accent)).truncate().selectable(false));
     t.add(egui::Label::new(RichText::new(said).font(ty::small()).color(p.text)).truncate().selectable(false));
     if response.clicked() && !ws.show_pinned(&m.id) {
-        ws.pins_open = true;
+        ws.show_further_back(ui.ctx(), &m.id, m.at);
     }
     if let Some((r, galley)) = all {
         let b = ui.interact(r, ui.scope_id().with("pins-all"), Sense::click()).on_hover_text("All pinned messages");
@@ -517,6 +517,8 @@ fn pins(ui: &mut Ui, ws: &mut Workspace, body: Rect) {
     let authors = ws.authors();
     let loaded: Vec<bool> = pinned.iter().map(|m| ws.messages.iter().flatten().any(|l| l.id == m.id)).collect();
     let mut show = None;
+    let mut back = None;
+    let fetching = ws.fetching_back();
     let mut close = false;
     let area = egui::Area::new(egui::Id::unique("pins")).order(egui::Order::Foreground).fixed_pos(at).show(ui.ctx(), |ui| {
         Frame::new()
@@ -548,11 +550,18 @@ fn pins(ui: &mut Ui, ws: &mut Workspace, body: Rect) {
                             });
                             widgets::blocks(ui, &mut ws.pictures, &m.body, &authors);
                             if !loaded[i] {
-                                ui.label(RichText::new("Further back than what's loaded here").font(ty::meta()).color(p.faint));
+                                let said = if fetching {
+                                    "Loading earlier messages…"
+                                } else if ws.not_back.as_deref() == Some(m.id.as_str()) {
+                                    "Not in the history drift can reach"
+                                } else {
+                                    "Further back · click to load and show it"
+                                };
+                                ui.label(RichText::new(said).font(ty::meta()).color(p.faint));
                             }
                         });
                         let r = item.response.rect;
-                        if loaded[i] {
+                        {
                             let b = ui
                                 .interact(r, ui.scope_id().with(("pin", &m.id)), Sense::click())
                                 .on_hover_cursor(egui::CursorIcon::PointingHand);
@@ -560,8 +569,10 @@ fn pins(ui: &mut Ui, ws: &mut Workspace, body: Rect) {
                             if b.hovered() {
                                 ui.painter().set(behind, egui::Shape::rect_filled(r, CornerRadius::same(8), p.hover));
                             }
-                            if b.clicked() {
+                            if b.clicked() && loaded[i] {
                                 show = Some(m.id.clone());
+                            } else if b.clicked() {
+                                back = Some((m.id.clone(), m.at));
                             }
                         }
                         if i + 1 < pinned.len() {
@@ -582,6 +593,9 @@ fn pins(ui: &mut Ui, ws: &mut Workspace, body: Rect) {
     }
     if let Some(id) = show {
         ws.show_pinned(&id);
+    }
+    if let Some((id, at)) = back {
+        ws.show_further_back(ui.ctx(), &id, at);
     }
 }
 

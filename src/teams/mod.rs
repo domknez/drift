@@ -31,6 +31,8 @@ const PRESENCE_CLIENT_VERSION: &str = "49/25113001312";
 const PAGE: usize = 200;
 /// At most this many pinned messages are fetched for a conversation.
 const PINS: usize = 10;
+/// How many pages of a conversation's history are fetched, at most, going back.
+const PAGES_BACK: usize = 25;
 /// The kinds of conversation the chat service lists.
 const TARGETS: &str = "targetType=Passport|Skype|Lync|Thread|PSTN|Agent";
 
@@ -879,6 +881,32 @@ impl Backend for Teams {
         let mut messages = parse::messages(&self.chat_service(&path)?, &self.my_id());
         self.name_events(&mut messages);
         Ok(messages)
+    }
+
+    fn messages_until(&self, conversation: &str, until: i64) -> Result<Vec<Message>> {
+        let me = self.my_id();
+        let mut path = format!(
+            "/v1/users/ME/conversations/{}/messages?view=msnp24Equivalent|supportsMessageProperties&pageSize={PAGE}&startTime=1",
+            http::encode(conversation)
+        );
+        let mut out: Vec<Message> = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for _ in 0..PAGES_BACK {
+            let page = self.chat_service(&path)?;
+            let messages = parse::messages(&page, &me);
+            let reached = messages.first().is_none_or(|m| m.at <= until);
+            out.extend(messages.into_iter().filter(|m| seen.insert(m.id.clone())));
+            // The page before this one, on the same service (its token goes nowhere else).
+            let base = self.session().skype()?.chat_service;
+            let before = page["_metadata"]["backwardLink"].as_str().and_then(|link| link.strip_prefix(base.as_str())).map(str::to_string);
+            match before {
+                Some(before) if !reached && before.starts_with('/') => path = before,
+                _ => break,
+            }
+        }
+        out.sort_by_key(|m| (m.at, m.id.parse::<i64>().unwrap_or(0)));
+        self.name_events(&mut out);
+        Ok(out)
     }
 
     fn pinned(&self, conversation: &str) -> Result<Vec<Message>> {

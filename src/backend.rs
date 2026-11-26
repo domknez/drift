@@ -68,6 +68,14 @@ pub trait Backend: Send + Sync {
     /// The newest messages of a conversation, oldest first.
     fn messages(&self, conversation: &str) -> Result<Vec<Message>>;
 
+    /// A conversation's messages back to `until` (ms) at least, as far back as there
+    /// are (and some way short of all, for a long one), oldest first. A service whose
+    /// one page is all there is gives that.
+    fn messages_until(&self, conversation: &str, until: i64) -> Result<Vec<Message>> {
+        let _ = until;
+        self.messages(conversation)
+    }
+
     /// The messages pinned in a conversation, the latest pinned first. A service
     /// without pins has none.
     fn pinned(&self, conversation: &str) -> Result<Vec<Message>> {

@@ -128,6 +128,14 @@ pub struct Workspace {
     pinned_at: Option<Instant>,
     /// Whether the list of the open conversation's pinned messages is showing.
     pub pins_open: bool,
+    /// The open conversation's messages from before its newest page, fetched to show
+    /// one further back (kept in its list as the newest are fetched again).
+    older: Vec<Message>,
+    /// Fetching back to a message (its id), to show it once it's in.
+    older_load: Load<(ConversationId, String, Vec<Message>), Error>,
+    /// A pinned message going back didn't find (from before the user joined, or
+    /// further back than is fetched).
+    pub not_back: Option<String>,
     /// Conversations' messages as last fetched, shown at once when one is opened
     /// (and fetched again behind); the newest few are fetched ahead.
     cache: HashMap<String, Vec<Message>>,
@@ -424,6 +432,9 @@ impl Workspace {
             pinned_load: Load::Idle,
             pinned_at: None,
             pins_open: false,
+            older: Vec::new(),
+            older_load: Load::Idle,
+            not_back: None,
             cache: HashMap::new(),
             prefetch: Vec::new(),
             prefetch_load: Load::Idle,
@@ -1122,14 +1133,51 @@ impl Workspace {
     /// Show a pinned message where it is in the conversation, marked (and its thread,
     /// if it's a reply); false if it's further back than what's loaded.
     pub fn show_pinned(&mut self, id: &str) -> bool {
-        let Some(m) = self.messages.iter().flatten().find(|m| m.id == id) else { return false };
+        let Some(messages) = &self.messages else { return false };
+        let Some(at) = messages.iter().position(|m| m.id == id) else { return false };
+        let m = &messages[at];
         if m.root.is_some() {
             self.thread = m.root.clone();
         }
+        // Laid out from it down, and a few before it.
+        self.newest = self.newest.max(messages.len() - at + NEWEST / 4);
         self.focus = Some(id.to_string());
         self.focus_scrolled = false;
         self.pins_open = false;
         true
+    }
+
+    /// Fetch the open conversation back to a message pinned further back than its
+    /// newest page, then show it.
+    pub fn show_further_back(&mut self, ctx: &egui::Context, id: &str, at: i64) {
+        let Some(conversation) = self.open.clone() else { return };
+        if self.older_load.is_running() {
+            return;
+        }
+        self.pins_open = true;
+        let (backend, target) = (self.backend.clone(), id.to_string());
+        self.older_load = Load::start(ctx, move || backend.messages_until(&conversation, at).map(|m| (conversation, target, m)));
+    }
+
+    /// Whether messages further back are being fetched.
+    pub fn fetching_back(&self) -> bool {
+        self.older_load.is_running()
+    }
+
+    /// The messages fetched further back go in before the newest: only those from
+    /// before them (one deleted since among the newest isn't brought back).
+    fn with_older(&self, messages: &mut Vec<Message>) {
+        if self.older.is_empty() {
+            return;
+        }
+        let have: std::collections::HashSet<&str> = messages.iter().map(|m| m.id.as_str()).collect();
+        let from = messages.first().map_or(i64::MAX, |m| m.at);
+        let older: Vec<Message> = self.older.iter().filter(|m| m.at < from && !have.contains(m.id.as_str())).cloned().collect();
+        if older.is_empty() {
+            return;
+        }
+        messages.extend(older);
+        messages.sort_by_key(|m| (m.at, m.id.parse::<i64>().unwrap_or(0)));
     }
 
     /// The open conversation's messages that match what's being found, newest first.
@@ -1624,6 +1672,7 @@ impl Workspace {
                     }
                     self.cache_messages(&id, &messages);
                     self.with_sent_here(&id, &mut messages);
+                    self.with_older(&mut messages);
                     self.messages = Some(messages);
                     self.mark_read(ctx);
                     // Finding while the messages came in: show the newest match.
@@ -1632,6 +1681,24 @@ impl Workspace {
                     }
                 }
                 Ok((id, messages)) => self.cache_messages(&id, &messages),
+                Err(Error::SignedOut) => return Some(Outcome::SignedOut),
+                Err(e) => self.failed(e),
+            }
+        }
+        if let Some(result) = self.older_load.take() {
+            match result {
+                Ok((id, target, older)) if Some(&id) == self.open.as_ref() => {
+                    self.older = older;
+                    if let Some(mut messages) = self.messages.take() {
+                        self.with_older(&mut messages);
+                        self.messages = Some(messages);
+                    }
+                    if !self.show_pinned(&target) {
+                        log_debug!("a pinned message wasn't found going back");
+                        self.not_back = Some(target);
+                    }
+                }
+                Ok(_) => {}
                 Err(Error::SignedOut) => return Some(Outcome::SignedOut),
                 Err(e) => self.failed(e),
             }
@@ -2001,6 +2068,9 @@ impl Workspace {
         self.pinned_load = Load::Idle;
         self.pinned_at = None;
         self.pins_open = false;
+        self.older.clear();
+        self.older_load = Load::Idle;
+        self.not_back = None;
         self.messages_load = Load::Idle;
         self.messages_at = None;
         self.thread = None;
@@ -2295,6 +2365,31 @@ mod tests {
 
     fn outbox(conversation: &str, text: &str) -> Outbox {
         Outbox { conversation: conversation.into(), reply: false, text: text.into(), attachments: Vec::new(), quoting: None, editing: None }
+    }
+
+    #[test]
+    fn messages_fetched_further_back_stay_before_the_newest() {
+        let mut ws = workspace("19:maya");
+        let newest = ws.messages.clone().unwrap();
+        let first = newest[0].clone();
+        let mut old = first.clone();
+        old.id = "1".into();
+        old.at = first.at - 86_400_000;
+        // One among the newest that's since been deleted: not brought back.
+        let mut deleted = first.clone();
+        deleted.id = "2".into();
+        deleted.at = first.at + 1;
+        ws.older = vec![old, deleted, first.clone()];
+        let mut messages = newest.clone();
+        ws.with_older(&mut messages);
+        assert_eq!(messages.len(), newest.len() + 1);
+        assert_eq!(messages[0].id, "1");
+        // Shown: focused, and laid out back to it.
+        let len = messages.len();
+        ws.messages = Some(messages);
+        assert!(ws.show_pinned("1"));
+        assert_eq!(ws.focus.as_deref(), Some("1"));
+        assert!(ws.newest >= len);
     }
 
     #[test]
