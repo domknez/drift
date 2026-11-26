@@ -1857,6 +1857,18 @@ pub fn composer(ui: &mut Ui, ws: &mut Workspace, rect: Rect, hint: &str, reply: 
                     });
             });
     }
+    // Why emoji suggestions show or don't, logged when that changes (counts and flags only).
+    {
+        thread_local! {
+            static SUGGESTING: std::cell::Cell<(usize, bool, bool)> = const { std::cell::Cell::new((0, false, false)) };
+        }
+        let now = (emoji_found.as_ref().map_or(0, Vec::len), response.has_focus(), ui.input(|i| i.viewport().focused.unwrap_or(true)));
+        if now.0 > 0 && SUGGESTING.with(|s| s.replace(now)) != now {
+            log_debug!("emoji suggestions: {} found, composer focused={}, window focused={}", now.0, now.1, now.2);
+        } else if now.0 == 0 {
+            SUGGESTING.with(|s| s.set(now));
+        }
+    }
     // Emoji to put in, above the box, while a :name is being typed.
     if let Some(found) = emoji_found.filter(|e| !e.is_empty())
         && response.has_focus()
