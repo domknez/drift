@@ -1803,6 +1803,14 @@ pub fn composer(ui: &mut Ui, ws: &mut Workspace, rect: Rect, hint: &str, reply: 
             ws.typed();
         }
     }
+    // The lists follow what was just typed, not what was there before the key: else
+    // they'd show only on the next frame, which nothing asks for until the next event.
+    let (people, emoji_found) = if response.changed() {
+        ui.ctx().request_repaint();
+        (mention_matches(ws, reply), emoji_matches(ws, reply))
+    } else {
+        (people, emoji_found)
+    };
     let text_height = response.rect.height().round();
     if text_height != ws.composer_text[usize::from(reply)] {
         ws.composer_text[usize::from(reply)] = text_height;
